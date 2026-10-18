@@ -1,0 +1,50 @@
+## IDF Component Manager Manifest File
+version: "0.0.1"
+description: "A small engine of 2D and 2.5D games on top of DGX: an indexed frame sent by its changes and scaled, pictures from a pack in flash, actors living by animation scripts, tiles, masks, a world that lives on, dialogs, a sound mixer"
+url: https://github.com/jef-sure/esp32-component-dgx-ge
+repository: https://github.com/jef-sure/esp32-component-dgx-ge.git
+documentation: https://github.com/jef-sure/esp32-component-dgx-ge/blob/main/README.md
+issues: https://github.com/jef-sure/esp32-component-dgx-ge/issues
+
+dependencies:
+  idf:
+    version: ">=5.3.0"
+  jef-sure/dgx:
+    version: "^0.6.5"  # 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
+    # to work on DGX together with the engine, take it from a checkout instead:
+    # override_path: "<the path of a DGX checkout>"
+
+tags:
+  - game
+  - game-engine
+  - 2d-graphics
+  - sprites
+  - animation
+  - tiles
+  - dgx-ge
+
+maintainers:
+  - "Anton Petrusevich <anton.petrusevich.mobile@gmail.com>"
+
+license: MIT
+
+files:
+  include:
+    - "idf_component.yml"
+    - "CMakeLists.txt"
+    - "dgx_ge.cmake"
+    - "src/**/*.c"
+    - "src/**/*.h"
+    - "include/**/*.h"
+    - "tools/**/*.py"
+    - "README.md"
+    - "CHANGES.md"
+    - "LICENSE"
+    # the documents that go out (the README points at them); the rest of docs/ is internal
+    - "docs/overview-ru.md"
+    - "docs/animation-ru.md"
+  exclude:
+    - "build/**"
+    - ".git/**"
+    - "test/host/build/**"
+    - "**/__pycache__/**"

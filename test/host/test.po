@@ -1,0 +1,20 @@
+# a translation for the test pack: one string of the dialog post; the same msgid elsewhere stays as it is
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgctxt "post"
+msgid "Thanks."
+msgstr "Спасибо."
+
+msgctxt "post"
+msgid "Not translated here."
+msgstr ""
+
+msgctxt "clock"
+msgid "{volume} minute left"
+msgid_plural "{volume} minutes left"
+msgstr[0] "Осталась {volume} минута"
+msgstr[1] "Осталось {volume} минуты"
+msgstr[2] "Осталось {volume} минут"

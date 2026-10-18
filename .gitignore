@@ -1,0 +1,7 @@
+# made by the build and the tests
+build/
+test/host/build/
+__pycache__/
+*.pyc
+# an editor's own settings
+.vscode/
