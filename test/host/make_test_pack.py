@@ -237,6 +237,12 @@ script lazy                           # and, or, ?: lazy: the dice cast only for
     set power game.near > 2 ? 7 : rnd(1000)
     hold
 
+script stick                          # the pad of the game's input: the sticks -1..1, a trigger 0..1
+    set action axis(lx) * 100
+    set hp axis(ly) * 100
+    set power axis(rt) * 100
+    hold
+
 group alive: stand, run, fall, hop, walkwall
 on hit: alive -> hurt now
 on stop: run -> stand branch

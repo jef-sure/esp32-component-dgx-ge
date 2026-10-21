@@ -10,6 +10,7 @@ uint32_t *dgx_ge_dice;
 const dgx_ge_its_t *dgx_ge_expr_its;
 dgx_ge_ask_fn       dgx_ge_expr_ask;
 void               *dgx_ge_expr_ask_ctx;
+const dgx_ge_input_t *dgx_ge_expr_input;
 
 /* Of the one found: a param, or what else ITS names; 0 when none. */
 static float its_value(unsigned k)
@@ -95,6 +96,11 @@ float dgx_ge_expr_eval(const uint8_t *p, const dgx_ge_expr_ctx_t *c)
         case E_GAME:
             PUSHES(1);
             stack[depth++] = dgx_ge_expr_ask ? dgx_ge_expr_ask(p[i], dgx_ge_expr_ask_ctx) : 0;
+            ++i;
+            break;
+        case E_AXIS:
+            PUSHES(1);
+            stack[depth++] = dgx_ge_expr_input && p[i] < DGX_GE_AXES ? dgx_ge_expr_input->axes[p[i]] * (1.0f / DGX_GE_AXIS_MAX) : 0;
             ++i;
             break;
         case E_ABS:

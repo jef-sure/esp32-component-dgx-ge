@@ -53,6 +53,8 @@ cases = {
     "a control before its condition": PAGE + '        "x" control SWITCH sound if volume > 1\n',
     "a face of no picture": 'dialog d\nroles kid KID "Kid" face NOPE\n    end\n',
     "a face before the name": 'dialog d\nroles kid KID face FACE "Kid"\n    end\n',
+    "pause with words after it": "dialog d\npause now\n    end\n",
+    "pause twice": "dialog d\npause\npause\n    end\n",
 }
 for name, text in cases.items():
     try:
@@ -60,6 +62,11 @@ for name, text in cases.items():
         failed.append(f"{name} was not refused")
     except DialogError:
         pass
+
+# pause: the flags byte after the roles (DGX_GE_DIALOG_PAUSE); none: 0, as before
+q = assemble_dialog('dialog q\npause\n    say game "x"\n    end\n', Strings(), KINDS, PARAMS)
+r = assemble_dialog('dialog r\n    say game "x"\n    end\n', Strings(), KINDS, PARAMS)
+check(q.blob[7] == 1 and r.blob[7] == 0 and q.blob[8:] == r.blob[8:], f"pause flags {q.blob[7]} {r.blob[7]}")
 
 # strings: one msgid in two contexts, one translated; equal strings once; a '#' in a string is no comment
 s = Strings({("first", "Thanks."): "Спасибо."})
@@ -150,5 +157,43 @@ os.unlink(po.name)
 check(t.get(("c", "{n} min")) == ["{n} минута", "{n} минуты", "{n} минут"] and ("c", "{n} s") not in t, f"read_po of forms {t}")
 check(Strings(t).forms() == (3, "n%10==1 ? 0 : n<5 ? 1 : 2"), f"forms {Strings(t).forms()}")
 check('msgctxt "first"\nmsgid "Thanks."\nmsgstr ""' in s.pot(), "the template of translations")
+# the game's constants in conditions: the bytes of the numbers; a name the game has not, refused
+named = assemble_dialog('dialog k\nroles kid KID\n    choose kid\n        "x" if hp & LOW and hp > ONE -> k_end\n        "y" -> k_end\nlabel k_end\n    end\n',
+                        Strings(), KINDS, PARAMS, constants={"LOW": 6, "ONE": 1})
+plain = assemble_dialog('dialog k\nroles kid KID\n    choose kid\n        "x" if hp & 6 and hp > 1 -> k_end\n        "y" -> k_end\nlabel k_end\n    end\n',
+                        Strings(), KINDS, PARAMS)
+check(named.blob == plain.blob, "constants in a condition: not the bytes of the numbers")
+try:
+    assemble_dialog('dialog k\nroles kid KID\n    choose kid\n        "x" if hp & HIGH -> k_end\nlabel k_end\n    end\n', Strings(), KINDS, PARAMS,
+                    constants={"LOW": 6})
+    failed.append("a constant the game has not was not refused")
+except DialogError:
+    pass
+# the letters a pack can print: its strings, a hole of a number as the digits and a minus, not its braces nor its name
+from dgx_ge_pack import Pack  # noqa: E402
+lp = Pack("L")
+lp.add_anim("KID", "event go\nparam hp 3\nscript stand\n    hold\n")
+lp.add_dialog('dialog t\nroles kid KID\n    say kid "{hp} life" "{hp} lives"\n    say kid "Да."\n    end\n')
+check(lp.letters() == "".join(sorted(set("0123456789- lifesvДа."))), f"the letters of a pack {lp.letters()!r}")
+# the game's fonts as requests of DGX's fonts: made at points (mono), DGX's as it is, the game's file as it is with its
+# letters; the pack's letters for those that print its strings; paths from the file's directory; the table by name
+with tempfile.TemporaryDirectory() as tmp:
+    lp.add_font("text", points=12, mono=True)
+    lp.add_font("hand", dgx="font0ss")
+    lp.add_font("time", file=os.path.join(tmp, "fonts", "cga.c"), letters="0123456789:", texts=False)
+    lp.add_font("text", points=12, mono=True)  # told again the same: one font
+    os.makedirs(os.path.join(tmp, "assets"))
+    lp.write_fonts(os.path.join(tmp, "assets", "l.fonts"), os.path.join(tmp, "assets", "l.letters"))
+    told = open(os.path.join(tmp, "assets", "l.fonts")).read().splitlines()[1:]
+    check(told == ["need text", "size 12pt", "mono 1", "text l.letters", "need hand", "dgx font0ss", "text l.letters", "need time",
+                   "file ../fonts/cga.c", "letters 0123456789:"], f"the requests of the fonts {told}")
+check("#define L_FONTS(X) X(TEXT, text) X(HAND, hand) X(TIME, time)" in lp.header("L"), "the fonts by name in the header")
+for what, args in (("a name not of C", ("the text", {"points": 12})), ("made and kept at once", ("odd", {"points": 12, "dgx": "font0ss"})),
+                   ("told twice differently", ("text", {"points": 14})), ("kept with a family", ("pen", {"dgx": "font0ss", "family": "X"}))):
+    try:
+        lp.add_font(args[0], **args[1])
+        failed.append(f"a font {what} was not refused")
+    except ValueError:
+        pass
 print("test_dialog_rules.py: ok" if not failed else "test_dialog_rules.py: " + "\n".join(failed))
 sys.exit(1 if failed else 0)

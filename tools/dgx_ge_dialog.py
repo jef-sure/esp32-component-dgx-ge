@@ -14,6 +14,8 @@ The language, a statement a line, '#' to the end of a line is a comment:
     game SETTINGS                   the kind of the game's actor (its params are the game's settings:
                                     what conditions and controls of its choices read and change)
     style talk                      how its lines look from here on (a style of the pack, by name)
+    pause                           the game stands while the dialog is open (a page of settings): its
+                                    world does not go on; the dialog's own lines, times and controls do
 
     label start                     a place to go to; the dialog begins at its first statement
         say guard "Halt! Who goes there?"     a line: a msgid, the language chosen at packing
@@ -27,7 +29,8 @@ The language, a statement a line, '#' to the end of a line is a comment:
         choose kid                  the answers of a role (the player's), one a line below,
             "A friend." -> friend   the msgid and where it leads;
             "Have a drink." if count(WINE) > 0 -> drink   shown only where the expression is not 0,
-                                    of the params and pockets of the one playing the role
+                                    of the params and pockets of the one playing the role and the
+                                    game's constants (Pack.add_constants: board & BOARD_PAD)
         choose game                 a page of settings: answers with controls
             "Sound" control SWITCH sound   a control (a kind: its first param is its value) of a
                                     param of the one choosing; activate, more, less go to it (the
@@ -50,6 +53,7 @@ from collections import namedtuple
 from dgx_ge_anim import AnimError, Expr
 
 MAGIC = 0x4C444744  # "DGDL"
+PAUSE = 1  # the flags of a dialog (DGX_GE_DIALOG_PAUSE): the game stands while it is open
 VERSION = 6
 OP = {"SAY": 1, "CHOOSE": 2, "TELL": 3, "GIVE": 4, "GOTO": 5, "END": 6, "STYLE": 7, "SAY_N": 8, "SAY_NS": 9}
 TALK_NUMBERS = 4  # so many numbers a line shows at most (dgx_ge_dialog.h)
@@ -85,7 +89,7 @@ def _ms(text, where):
     return ms
 
 
-def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=None, images=None, timers=None):
+def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=None, images=None, timers=None, constants=None):
     """
     The blob of a dialog: Dialog(blob, name, roles, labels).
     strings: a Strings of the pack (msgid in a context to a number).
@@ -94,7 +98,8 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
     events: the events of the pack, by name (a list given on: tell names one);
     styles: the styles of the pack, by name (a list given on: a new name is added);
     images: names of the pictures of the pack to their numbers, for portraits;
-    timers: the names of the pack's timers, for timer(NAME) in conditions (a list given on: a new name is added).
+    timers: the names of the pack's timers, for timer(NAME) in conditions (a list given on: a new name is added);
+    constants: the game's names of numbers (Pack.add_constants), for conditions: board & BOARD_PAD.
     """
     images = images or {}
     kinds = kinds or {}
@@ -104,6 +109,7 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
     name = None
     game_kind = None  # the name of the kind of the game's actor
     controls = False
+    flags = 0  # PAUSE
     roles, role_kinds, role_names, role_faces = [], [], [], []  # names, kinds, names shown (strings), portraits (pictures); 0xFFFF none
     code = bytearray()
     labels = {}  # name -> offset
@@ -158,7 +164,7 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
             expr = b"\0"
             if m.group(1):
                 try:
-                    expr = Expr(m.group(1), {}, params.get(kind_name, {}), False, where, kinds=kinds, timers=timers).code()
+                    expr = Expr(m.group(1), dict(constants or {}), params.get(kind_name, {}), False, where, kinds=kinds, timers=timers).code()
                 except AnimError as e:
                     raise DialogError(str(e))
             code[choosing[0]] += 1
@@ -205,6 +211,10 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
             if rest not in kinds or game_kind is not None:
                 raise DialogError(f"{where}: game <kind>, once: a kind of the pack")
             game_kind = rest
+        elif word == "pause":
+            if rest or flags & PAUSE:
+                raise DialogError(f"{where}: pause, once, alone on its line")
+            flags |= PAUSE
         elif word == "label":
             if not re.fullmatch(r"\w+", rest) or rest in labels:
                 raise DialogError(f"{where}: bad or repeated label '{rest}'")
@@ -310,7 +320,7 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
         if events.index(e) > 254:
             raise DialogError(f"dialog {name}: 255 events at most")
         ui[i] = events.index(e)
-    blob = struct.pack("<IHBBHH", MAGIC, VERSION, len(roles), 0, len(code), start) + bytes(ui)
+    blob = struct.pack("<IHBBHH", MAGIC, VERSION, len(roles), flags, len(code), start) + bytes(ui)
     blob += b"".join(struct.pack("<H", k) for k in role_kinds) + b"".join(struct.pack("<H", n) for n in role_names)
     blob += b"".join(struct.pack("<H", f) for f in role_faces) + bytes(code)
     return Dialog(blob, name, roles, labels)

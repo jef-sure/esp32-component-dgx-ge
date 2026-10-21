@@ -162,7 +162,7 @@ int main(int argc, char **argv)
     const uint8_t *blob = dgx_ge_pack_blob(&pack, TEST_BLOB_HERO, &n);
     dgx_ge_anim_t  anim;
     CHECK(blob && dgx_ge_anim_open(&anim, blob, n));
-    CHECK(anim.scripts == 25 && anim.events == 6 && anim.params == 3);
+    CHECK(anim.scripts == 26 && anim.events == 6 && anim.params == 3);
 
     /* a run: frames at their times, the moves between them */
     dgx_ge_actor_t a;
@@ -552,6 +552,19 @@ int main(int argc, char **argv)
     dgx_ge_actor_advance(&asker, 0, say, NULL);
     CHECK(asker.params[TEST_HERO_PARAM_ACTION] == 0);
     dgx_ge_dice = dice;
+
+    /* axis(): the pad of the input the game gave, -1..1 (half to the right, all the way up, a trigger pulled); none: 0 */
+    dgx_ge_input_t pad = {0};
+    pad.axes[DGX_GE_AXIS_LX] = 16384, pad.axes[DGX_GE_AXIS_LY] = -DGX_GE_AXIS_MAX, pad.axes[DGX_GE_AXIS_RT] = DGX_GE_AXIS_MAX;
+    dgx_ge_expr_input = &pad;
+    dgx_ge_actor_t stick;
+    dgx_ge_actor_start(&stick, &anim, TEST_HERO_SCRIPT_STICK, 0, 0, 0);
+    dgx_ge_actor_advance(&stick, 0, say, NULL);
+    CHECK(stick.params[TEST_HERO_PARAM_ACTION] == 50 && stick.params[TEST_HERO_PARAM_HP] == -100 && stick.params[TEST_HERO_PARAM_POWER] == 100);
+    dgx_ge_expr_input = NULL;
+    dgx_ge_actor_start(&stick, &anim, TEST_HERO_SCRIPT_STICK, 0, 0, 0);
+    dgx_ge_actor_advance(&stick, 0, say, NULL);
+    CHECK(stick.params[TEST_HERO_PARAM_ACTION] == 0 && stick.params[TEST_HERO_PARAM_HP] == 0 && stick.params[TEST_HERO_PARAM_POWER] == 0);
 
     /*
      * sense: four heroes of the registry, the looker at 0, 0 facing forward (right); one at 50 with 1 life (where says no),

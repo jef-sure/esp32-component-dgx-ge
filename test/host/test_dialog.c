@@ -90,6 +90,25 @@ int main(int argc, char **argv)
     dgx_ge_talk_start(&t, &other, NULL, 0, 0, NULL, NULL);
     dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10);
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Long news."));
+    /* a dialog that stops the game (the flags byte after the roles): its talk pauses while it goes on, not when over */
+    {
+        CHECK(!(other.flags & DGX_GE_DIALOG_PAUSE) && !dgx_ge_talk_pauses(&t));
+        static uint8_t copy[4096];
+        const uint8_t *o = dgx_ge_pack_blob(&pack, TEST_BLOB_OTHER, &n);
+        CHECK(n <= sizeof copy);
+        memcpy(copy, o, n), copy[7] = DGX_GE_DIALOG_PAUSE;
+        dgx_ge_dialog_t paused;
+        CHECK(dgx_ge_dialog_open(&paused, copy, n) && (paused.flags & DGX_GE_DIALOG_PAUSE));
+        dgx_ge_talk_t p;
+        dgx_ge_talk_start(&p, &paused, NULL, 0, 0, NULL, NULL);
+        CHECK(dgx_ge_talk_pauses(&p) && p.ahead_ms == 0);
+        dgx_ge_talk_play(&p, 0, true), dgx_ge_talk_play(&p, 2000, true); /* its own time goes on: the line goes by its time */
+        CHECK(dgx_ge_talk_pauses(&p) && !strcmp(dgx_ge_string(&strings, p.string), "Long news."));
+        p.state = DGX_GE_TALK_OVER;
+        CHECK(!dgx_ge_talk_pauses(&p));
+        dgx_ge_talk_t none = {0};
+        CHECK(!dgx_ge_talk_pauses(&none)); /* no dialog: nothing pauses */
+    }
     /* the post's lines have no time: they wait */
     dgx_ge_talk_start(&t, &post, NULL, 0, 0, NULL, NULL);
     dgx_ge_talk_play(&t, 100000, true);
@@ -129,9 +148,11 @@ int main(int argc, char **argv)
     dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30); /* no further */
     CHECK(t.pick == 1);
     said_events = 0;
+    t.ahead_ms  = 15; /* the talk 15 ms ahead of the world (a pause): what it does to the world lands at the world's moment */
     dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 40); /* the gift: two knives over, the hero told hit, thanks in the language */
     CHECK(dgx_ge_pockets_count(kid.pockets, TEST_BLOB_KNIFE) == 1 && dgx_ge_pockets_count(guard.pockets, TEST_BLOB_KNIFE) == 2);
-    CHECK(hero.script == TEST_HERO_SCRIPT_HURT && said_events > 0);
+    CHECK(hero.script == TEST_HERO_SCRIPT_HURT && said_events > 0 && hero.entered_ms == 25);
+    t.ahead_ms = 0;
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Спасибо."));
     dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 50); /* back to the start */
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Halt! Who goes there?"));

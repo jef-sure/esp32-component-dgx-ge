@@ -18,7 +18,8 @@ extern "C" {
  * stacks its children as a column or a row, else children sit where they ask, from an edge of their parent), shown
  * as overlays of a layer in pixels (dgx_ge_scene_layer_pixels), and told the pointer and the buttons: the deepest
  * widget under the pointer gets the point in its own coordinates and makes of it what it is (a slider moves there,
- * a list picks the row, a button is pressed on release inside, a switch flips); the buttons move the focus (next,
+ * or by the way the pointer goes when it is swiped, a list picks the row, a button is pressed on release inside, a
+ * switch flips); the buttons move the focus (next,
  * prev) and work the focused one (more, less, activate). The look of a control is its actor (an animation of the
  * pack, its param value following) or, without one, a plain drawing of the module.
  */
@@ -27,7 +28,7 @@ typedef enum {
     DGX_GE_WIDGET_FRAME,   /* a fill with a border, children inside the padding */
     DGX_GE_WIDGET_TEXT,    /* a text box, its picture */
     DGX_GE_WIDGET_PICTURE, /* a picture of the pack, at its own size */
-    DGX_GE_WIDGET_LIST,    /* rows of a text box, one picked: value; a bar under it */
+    DGX_GE_WIDGET_LIST,    /* rows of a text box, one picked: value (min.. from the box's top line); a bar under it; swiped up or down, it goes along */
     DGX_GE_WIDGET_SWITCH,  /* value 0 or 1 */
     DGX_GE_WIDGET_SLIDER,  /* value min..max by step */
     DGX_GE_WIDGET_BUTTON,  /* a text (or picture) pressed: activated */
@@ -39,9 +40,15 @@ enum {
     DGX_GE_WIDGET_STRETCH = 1u << 2, /* across the stacking: as wide (a column) or tall (a row) as the box */
     DGX_GE_WIDGET_HIDDEN  = 1u << 3, /* not shown, not hit, not focused */
     DGX_GE_WIDGET_FOCUSED = 1u << 4, /* set by the tree */
+    DGX_GE_WIDGET_SWIPE   = 1u << 5, /* a slider moved by the pointer's travel from where it went down (its width the whole
+                                        range), not put where it is: a wide strip, easy to find, beside a small slider; a
+                                        tap on it (no way gone) tells it activated, its value as it was */
 };
 
 enum { DGX_GE_WIDGET_CHANGED, DGX_GE_WIDGET_ACTIVATED, DGX_GE_WIDGET_FOCUS }; /* what a callback is told */
+
+/* Of a row's height (a list's), its top and its bottom 1/n belong to no row: a finger between two rows takes neither. */
+enum { DGX_GE_WIDGET_ROW_GAP = 12 };
 
 typedef struct dgx_ge_widget {
     uint8_t  kind, flags;
@@ -70,6 +77,10 @@ typedef struct {
     int8_t           pressed; /* the widget the pointer went down on, -1 none */
     uint8_t          unit;    /* pixels of the display a point of the style (the frame's scale) */
     uint8_t          value_param; /* the param of a control's actor that follows its value */
+    int16_t          press_x, press_y;     /* where the pointer went down */
+    int16_t          press_value;          /* the value of the one pressed then */
+    bool             dragged;              /* swiped since (a list up or down half a row, a slider a step): no tap when let go */
+    bool             between;              /* a list pressed between its rows: no row taken */
 } dgx_ge_widgets_t;
 
 /* A tree in the game's array of so many widgets; a point of its measures is unit pixels. */

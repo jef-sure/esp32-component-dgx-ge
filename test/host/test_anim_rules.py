@@ -106,6 +106,10 @@ cases = {
     "game of no name": "game 3\n" + BASE,
     "game in a path": "game far\n" + BASE + "script c\n    path x: game.far * t, y: 0\n    hold\n",
     "param named game": "param game 1\n" + BASE,
+    "axis in a path": BASE + "script c\n    path x: axis(lx) * t, y: 0\n    hold\n",
+    "axis of no such name": BASE + "script c\n    dx axis(z)\n    hold\n",
+    "axis of a number": BASE + "script c\n    dx axis(0)\n    hold\n",
+    "axis in a param's start": "param p axis(lx)\n" + BASE,
 }
 failed = 0
 for name, text in cases.items():
@@ -164,6 +168,21 @@ done = assemble("param k 0\ngame far\ngame sees near\n" + BASE + "script c\n    
 want = bytes([OP["SET_X"], 0]) + bytes([2 + 5 + 1 + 2 + 1, EXPR["game"], 2]) + struct.pack("<Bf", EXPR["num"], 2) + bytes([EXPR["*"], EXPR["game"], 0, EXPR["+"]])
 if done.games != ["far", "sees", "near"] or want not in done.blob or EXPR["game"] != 46:
     print(f"test_anim_rules.py: game {done.games} {done.blob.hex()} has no {want.hex()}")
+    failed += 1
+# axis() only in a script of an animation: not in a piece of a tile, not in a dialog's condition (stale there)
+for name, make in [("a tile", lambda: Expr("axis(lx)", {}, {}, False, "t", actor=False)),
+                   ("a dialog", lambda: Expr("axis(lx) > 0", {}, {"hp": (0, 0)}, False, "t", kinds={}, timers=[]))]:
+    try:
+        make().code()
+        print(f"test_anim_rules.py: axis in {name} was not refused")
+        failed += 1
+    except AnimError:
+        pass
+# axis(NAME): the step and the number of the axis, in the order of DGX_GE_AXIS_*; the step comes after all the others
+done = assemble("param k 0\n" + BASE + "script c\n    set k axis(rt) + axis(lx)\n    hold\n")
+want = bytes([OP["SET_X"], 0]) + bytes([2 + 2 + 1, EXPR["axis"], 5, EXPR["axis"], 0, EXPR["+"]])
+if want not in done.blob or EXPR["axis"] != 52:
+    print(f"test_anim_rules.py: axis {done.blob.hex()} has no {want.hex()}")
     failed += 1
 # steer: the way, the param of the angle, how many, the expressions in order
 done = assemble("param a 0\nparam d 0\n" + BASE + "script c\n    steer evade 50, 20 from d, 7, 0, 25\n    steer wander 10, 1000, 15 angle a\n    hold\n")
@@ -347,5 +366,22 @@ if d1.blob[i1 + 1] != 4 or d1.blob[i1 + 4:i1 + 6] != b"\0\0" or d2.blob[i2 + 1] 
     failed += 1
 # the same answer twice is no conflict
 assemble(BASE + "group g: a, b\non hit: g -> a now\non hit: b -> a now\n")
+# the pack's masks by name where a mask goes, the game's constants wherever a number goes: the same bytes as the numbers
+MASKS, GAME = {"BODY": 1, "TIP": 3, "FEET": 10}, {"CUT_MS": 100, "SAY": 2}
+named = assemble("event hit\nevent landed\nscript a\n    masks BODY TIP\n    hit TIP on BODY FEET damage 1\n    contact FEET below on landed\n"
+                 "    frame 1 CUT_MS ms\n    signal SAY\n    hold\n", constants=GAME, masks=MASKS)
+plain = assemble("event hit\nevent landed\nscript a\n    masks 1 3\n    hit 3 on 1 10 damage 1\n    contact 10 below on landed\n"
+                 "    frame 1 100ms\n    signal 2\n    hold\n")
+if named.blob != plain.blob:
+    print("constants: not the bytes of the numbers")
+    failed += 1
+for what, text in (("a constant defined again", "define CUT_MS 50\n" + BASE), ("a mask the pack has not", BASE + "script c\n    masks HEAD\n    hold\n"),
+                   ("a mask's name as a number", BASE + "script c\n    frame 1 BODY ms\n    hold\n")):
+    try:
+        assemble(text, constants=GAME, masks=MASKS)
+        print(f"{what} was not refused")
+        failed += 1
+    except AnimError:
+        pass
 print("test_anim_rules.py: ok" if not failed else f"test_anim_rules.py: {failed} failed")
 sys.exit(1 if failed else 0)

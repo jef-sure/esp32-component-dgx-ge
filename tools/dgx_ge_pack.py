@@ -168,8 +168,13 @@ class Pack:
         self.styles = []   # the styles dialogs name, by name: their numbers
         self.style_data = {}  # name -> its fields (add_style); a style named and not made is the engine's default
         self.fonts = []    # the game's fonts styles name, by name: their numbers (the game gives them in this order)
+        self.font_requests = {}  # name -> how DGX makes or takes it (add_font), written as DGX's font requests (write_fonts)
         self.language = None  # the language of the strings: po/<language>.po next to the editor's file (add_sprites)
         self.dialogs = []  # (name, roles) of blobs of dialogs, for the header
+        self.layouts = []  # (scene, {kind: [names]}) of blobs of scenes as the editor laid them, for the header
+        self.zone_kinds = []  # the words of zones' kinds (exit, trap), by first use: their numbers
+        self.screen = None  # (width, height) of the device's screen, as the editor's file says
+        self.constants = {}  # the game's names of numbers its scripts write (add_constants), by their values
         self.warnings = []
 
     def add_set(self, name, colors):
@@ -280,7 +285,8 @@ class Pack:
         gives it: DAGGER) with its origin and masks: those
         drawn, or else the default mask of the set made of the points of the
         picture. The names of the masks go into the header; "meets", text, is
-        which of them meet (add_meets). A set with a file
+        which of them meet (add_meets); "constants", the game's names of numbers its scripts write
+        (add_constants). A set with a file
         <set>.anim next to the JSON gets its animation too (all of them made together, add_anims: they sense and
         bear one another whatever the order of the sets); its sets of tiles
         become blobs of tiles (add_tileset). images: where the
@@ -303,6 +309,7 @@ class Pack:
             known.add(m["index"])
         if doc.get("meets") is not None:
             self.add_meets(doc["meets"])
+        self.add_constants(**doc.get("constants", {}))
         made = {}
         pack_names = {}  # (set, file) -> the name of the picture in the pack: <SET>_<FILE>, or the frame's packName
 
@@ -354,7 +361,8 @@ class Pack:
                     w, h = im.size
                     self.add_mask(image, st["defaultMask"], -ox, -oy, w, h, [1 if v else 0 for v in im.getdata()])
             anim = os.path.join(here, f"{st['name']}.anim")
-            if os.path.exists(anim):
+            rules = {m.get("rules") for m in doc.get("maps", [])} - {None, ""}
+            if os.path.exists(anim) and st["name"] not in rules:  # the rules of a map are the graph's (add_graph), not a kind
                 with open(anim, encoding="utf-8") as f:
                     anims.append((name_of(st["name"]), f.read()))
         # the animations of the sets together, in their order: each knows the others (sense, appear) and every picture
@@ -448,7 +456,340 @@ class Pack:
             if name.endswith(".dlg"):
                 with open(os.path.join(folder, name), encoding="utf-8") as f:
                     self.add_dialog(f.read())
+        # the game as a whole (its constants, timers, sounds, crops, shows, chases), its scenes, its graph of scenes
+        self._add_game_of(doc, path, pack_names)
+        if doc.get("screen"):
+            self.screen = (int(doc["screen"]["width"]), int(doc["screen"]["height"]))
+        # the links of the maps first: the scenes keep the numbers of their cells and the first links of their sources
+        links = self._links_of(doc, path)
+        for sc in doc.get("scenes", []):
+            self._add_layout(sc, path, pack_names, links)
+        for name, rows in links.blobs:
+            self.add_links(name, rows)
+        if doc.get("graph"):
+            self._add_graph_of(doc, path, here, links)
         return made
+
+    def _links_of(self, doc, path):
+        """
+        The links of the editor's scenes (sprite-format-ru.md, "Сцены": links, and entries' fires) as the engine takes
+        them (dgx_ge_links.h, dgx_ge_layout.h). The cells of a map are numbered through it: its scenes in the order of
+        the file, a scene's grids in order, a grid row by row (firsts: by scene, the number of the first cell of each of
+        its grids; a scene outside the maps is numbered on its own). The links of a map are one list, a blob
+        <GRAPH>_<MAP>_LINKS (blobs: its name and rows of (cell, event, last, value)): by scene, in a scene by source in
+        the order a source first comes in its links, each source's links together, the last of them marked. A source is
+        a cell, an actor or a zone; its first link is kept by its scene (sources: by scene, rows of (kind, which,
+        first)) and found for entries' fires (key: the source of a reference in a scene; fired: by (scene, source)). A
+        link's target is a cell: the engine tells events of links to the lives of cells only.
+        """
+        from types import SimpleNamespace
+
+        out = SimpleNamespace(firsts={}, sources={}, blobs=[], fired={}, key=None)
+        scenes = doc.get("scenes", [])
+        graph = (doc.get("graph") or {}).get("name")
+        maps = [m["name"] for m in doc.get("maps", [])] if graph else []
+        by_name = {sc["name"]: sc for sc in scenes}
+        kinds = {"cell": 0, "actor": 1, "zone": 2}  # DGX_GE_LAYOUT_CELL, _ACTOR, _ZONE
+
+        def objects(sc, kind):
+            return [ob.get("name") or "" for layer in sc.get("layers", []) for ob in layer.get("objects", []) if ob.get("type") == kind]
+
+        def number(group):
+            n = 0
+            for sc in group:
+                out.firsts[sc["name"]] = []
+                for gr in sc.get("grids", []):
+                    out.firsts[sc["name"]].append(n)
+                    n += int(gr["cols"]) * int(gr["rows"])
+                if n > 0xFFFF:
+                    raise ValueError(f"{path}: scene {sc['name']}: over 65535 cells in its map (links name cells by 16 bits)")
+
+        def cell(sc, ref, where):
+            grids = sc.get("grids", [])
+            names = [gr.get("name") for gr in grids]
+            if ref.get("grid") not in names:
+                raise ValueError(f"{where}: no grid {ref.get('grid')} in the scene")
+            gi = names.index(ref["grid"])
+            col, row, cols, rows = int(ref.get("col", -1)), int(ref.get("row", -1)), int(grids[gi]["cols"]), int(grids[gi]["rows"])
+            if not (0 <= col < cols and 0 <= row < rows):
+                raise ValueError(f"{where}: cell {col},{row} is not in grid {ref['grid']} ({cols} x {rows})")
+            return out.firsts[sc["name"]][gi] + row * cols + col
+
+        def key(scene, ref, where):
+            """The source a reference names in a scene: ("cell", its number in the map), ("actor" or "zone", its number in the scene)."""
+            sc = by_name.get(scene)
+            if sc is None:
+                raise ValueError(f"{where}: no scene {scene}")
+            if ref.get("object") is not None:
+                name = ref["object"]
+                for kind in ("actor", "zone"):
+                    if name in objects(sc, kind):
+                        return (kind, objects(sc, kind).index(name))
+                for kind in ("picture", "entry"):
+                    if name in objects(sc, kind):
+                        raise ValueError(f"{where}: the {kind} {name} fires nothing: a source of links is a cell, an actor or a zone")
+                raise ValueError(f"{where}: no object {name} in scene {scene}")
+            if ref.get("grid") is not None:
+                return ("cell", cell(sc, ref, where))
+            raise ValueError(f"{where}: neither a cell (grid, col, row) nor an object")
+
+        out.key = key
+        for m in maps:
+            number([sc for sc in scenes if sc.get("map") == m])
+        for sc in scenes:
+            if sc.get("map") not in maps:
+                number([sc])
+                if sc.get("links"):
+                    raise ValueError(f"{path}: scene {sc['name']}: links outside a map of the graph (the links are a map's)")
+        for m in maps:
+            rows = []
+            for sc in [sc for sc in scenes if sc.get("map") == m]:
+                grouped = {}  # the source -> its links, in the order the sources first come
+                for i, ln in enumerate(sc.get("links", [])):
+                    where = f"{path}: scene {sc['name']}: link {i}"
+                    to = ln.get("to") or {}
+                    if to.get("object") is not None:
+                        raise ValueError(f"{where}: its target {to['object']} is an object: a link's target is a cell (the engine tells events of "
+                                         "links to the lives of cells; an object, an actor of a scene not shown, has none then)")
+                    target = cell(sc, to, where)
+                    value = ln.get("value")
+                    if value is not None and not -32767 <= int(value) <= 32767:
+                        raise ValueError(f"{where}: its value {value} is not -32767 .. 32767")
+                    grouped.setdefault(key(sc["name"], ln.get("from") or {}, where), []).append((target, ln.get("event") or None, value))
+                out.sources[sc["name"]] = []
+                for source, links in grouped.items():
+                    out.sources[sc["name"]].append((kinds[source[0]], source[1], len(rows)))
+                    out.fired[(sc["name"], source)] = len(rows)
+                    rows += [(target, event, j == len(links) - 1, value) for j, (target, event, value) in enumerate(links)]
+            if rows:
+                out.blobs.append((name_of(f"{graph}_{m}_LINKS"), rows))
+        return out
+
+    def _add_game_of(self, doc, path, pack_names):
+        """The editor's "Игра целиком" (sprite-format-ru.md): the same calls a game's script of building makes."""
+        for c in doc.get("game", []):
+            self.add_game(**{c["name"]: c["value"]})
+        for t in doc.get("timers", []):
+            self.add_timer(t["name"], once=t.get("once") or None, every=t.get("every") or None, until=t.get("until") or None,
+                           reset=t.get("reset", "never"), event=t.get("event") or None, start=t.get("start") or None)
+        for name in doc.get("sounds", []):
+            self.add_sound(name)
+        for c in doc.get("crops", []):
+            picture = pack_names.get((c["set"], c["image"])) or name_of(f"{c['set']}_{os.path.splitext(c['image'])[0]}")
+            self.add_crop(c["name"], picture, c["x"], c["y"], c["width"], c["height"], (c.get("originX", 0), c.get("originY", 0)))
+        for sh in doc.get("shows", []):
+            self.add_show(sh["name"], sh.get("pictures", []), sh.get("actors", []), [(q["at"], q["role"], q.get("event") or None) for q in sh.get("cues", [])])
+        for ch in doc.get("chases", []):
+            self.add_chase(ch["kind"], sense=ch.get("sense", "always"), sides=ch.get("sides", ()), hearing=ch.get("hearing", 0),
+                           near=ch.get("near") or None, steps=ch.get("steps", 0), calm=ch.get("calm") or 0)
+
+    def _add_layout(self, sc, path, pack_names, links):
+        """
+        A scene as the editor laid it (sprite-format-ru.md, "Сцены") as a blob SCENE_<NAME>, "DGSC" (include/dgx_ge_layout.h):
+        its layers, pictures, zones, entries, sources of links, actors and grids (each with the number of its first cell
+        in its map, links: _links_of); the names of its objects into the header.
+        """
+        where = f"{path}: scene {sc.get('name')}"
+        layers = sc.get("layers", [])
+        if not 1 <= len(layers) <= 8:
+            raise ValueError(f"{where}: 1 .. 8 layers")
+        images = {im[0]: i for i, im in enumerate(self.images)}
+        blobs = {n: i for i, (n, _) in enumerate(self.blobs)}
+        anims = {a[0]: a for a in self.anims}
+        layer_of = {l["name"]: i for i, l in enumerate(layers)}
+        names = {"LAYER": [l["name"] for l in layers], "PICTURE": [], "ACTOR": [], "ZONE": [], "ENTRY": [], "GRID": []}
+
+        def i16(v, what):
+            if not -32768 <= int(v) <= 32767:
+                raise ValueError(f"{where}: {what} {v} is not 16-bit")
+            return int(v)
+
+        def picture_of(ob):
+            picture = pack_names.get((ob["set"], ob["image"])) or name_of(f"{ob['set']}_{os.path.splitext(ob['image'])[0]}")
+            if picture not in images:
+                raise ValueError(f"{where}: no picture {ob['set']}/{ob['image']}")
+            return images[picture]
+
+        out_layers, pictures, zones, entries, actors = bytearray(), bytearray(), bytearray(), bytearray(), []
+        for li, layer in enumerate(layers):
+            out_layers += struct.pack("<hBB", i16(layer.get("factor", 256), "factor"), 1 if layer.get("order") == "key" else 0, 0)
+            for ob in layer.get("objects", []):
+                kind = ob.get("type")
+                if kind == "picture":
+                    clip = ob.get("clip") or {}
+                    pictures += struct.pack("<HhhhBBhhhh", picture_of(ob), i16(ob.get("x", 0), "x"), i16(ob.get("y", 0), "y"), i16(ob.get("key", 0), "key"),
+                                            li, 1 if ob.get("flip") else 0, i16(clip.get("x", 0), "clip"), i16(clip.get("y", 0), "clip"),
+                                            i16(clip.get("width", 0), "clip"), i16(clip.get("height", 0), "clip"))
+                    names["PICTURE"].append(ob.get("name") or "")
+                elif kind == "actor":
+                    anim = name_of(ob["set"])
+                    if anim not in anims or anim not in blobs:
+                        raise ValueError(f"{where}: actor {ob.get('name')}: the set {ob['set']} has no animation")
+                    _, scripts, _, params = anims[anim]
+                    script = ob.get("script") or (scripts[0] if scripts else "")
+                    if script not in scripts:
+                        raise ValueError(f"{where}: actor {ob.get('name')}: no script {script} in {ob['set']}")
+                    given = []
+                    for pname, value in (ob.get("params") or {}).items():
+                        if pname not in params:
+                            raise ValueError(f"{where}: actor {ob.get('name')}: no param {pname} in {ob['set']}")
+                        given.append(struct.pack("<BBh", params.index(pname), 0, i16(value, pname)))
+                    actors.append(struct.pack("<HBBhhBB", blobs[anim], scripts.index(script), li, i16(ob.get("x", 0), "x"), i16(ob.get("y", 0), "y"),
+                                              1 if ob.get("flip") else 0, len(given)) + b"".join(given))
+                    names["ACTOR"].append(ob.get("name") or "")
+                elif kind == "zone":
+                    word = ob.get("kind") or ""
+                    if word not in self.zone_kinds:
+                        self.zone_kinds.append(word)
+                    zones += struct.pack("<Hhhhh", self.zone_kinds.index(word), i16(ob.get("x", 0), "x"), i16(ob.get("y", 0), "y"),
+                                         i16(ob.get("width", 0), "width"), i16(ob.get("height", 0), "height"))
+                    names["ZONE"].append(ob.get("name") or "")
+                elif kind == "entry":
+                    entries += struct.pack("<hhBB", i16(ob.get("x", 0), "x"), i16(ob.get("y", 0), "y"), 1 if ob.get("flip") else 0, 0)
+                    names["ENTRY"].append(ob.get("name") or "")
+                else:
+                    raise ValueError(f"{where}: an object of no known type {kind}")
+        grids = []
+        for gi, gr in enumerate(sc.get("grids", [])):
+            ts = name_of(gr["tileset"])
+            found = [t for t in self.tilesets if t[0] == ts]
+            if not found or ts not in blobs:
+                raise ValueError(f"{where}: grid {gr.get('name')}: no set of tiles {gr['tileset']}")
+            _, tile_names, slots = found[0]
+            cols, rows = int(gr["cols"]), int(gr["rows"])
+            cells = gr.get("cells") or []
+            if len(cells) != rows or any(len(r) != cols for r in cells):
+                raise ValueError(f"{where}: grid {gr.get('name')}: its cells are not {rows} rows of {cols}")
+            if any(not 0 <= c <= len(tile_names) for r in cells for c in r):
+                raise ValueError(f"{where}: grid {gr.get('name')}: a cell of no tile of {gr['tileset']}")
+
+            def by_cell(table, bits):
+                values = [0] * (cols * rows)
+                for key, v in (table or {}).items():
+                    c, r = (int(x) for x in key.split(","))
+                    if not (0 <= c < cols and 0 <= r < rows and 0 <= int(v) < 2 ** bits):
+                        raise ValueError(f"{where}: grid {gr.get('name')}: {key}: {v} is not a cell's {bits}-bit value")
+                    values[r * cols + c] = int(v)
+                return values
+
+            mods, variants = by_cell(gr.get("mods"), 8), by_cell(gr.get("variants"), 32)
+            flags = (1 if any(mods) else 0) | (2 if any(variants) else 0)
+            head = struct.pack("<HhhHHHBB", blobs[ts], i16(gr.get("x", 0), "x"), i16(gr.get("y", 0), "y"), cols, rows, links.firsts[sc["name"]][gi], flags,
+                               len(slots))
+            head += bytes(layer_of.get(sl, 0xFF) for sl in slots)
+            grids.append((head, [c for r in cells for c in r], mods if flags & 1 else None, variants if flags & 2 else None))
+            names["GRID"].append(gr.get("name") or "")
+        for kind in ("ACTOR", "ZONE", "ENTRY", "GRID", "PICTURE", "LAYER"):
+            seen = [name_of(n) for n in names[kind] if n]
+            if len(seen) != len(set(seen)):
+                raise ValueError(f"{where}: two {kind.lower()}s of one name (the header names them alike)")
+        # laid out: the counts, the fixed records, the actors by offsets, the grids aligned
+        n_pic, n_act, n_zone, n_entry = len(pictures) // 18, len(actors), len(zones) // 10, len(entries) // 6
+        sources = b"".join(struct.pack("<BBHH", kind, 0, which, first) for kind, which, first in links.sources.get(sc["name"], []))
+        head = struct.pack("<IHBBhhHHHHHHI", 0x43534744, 2, len(layers), len(grids), i16(sc.get("width", 0), "width"), i16(sc.get("height", 0), "height"),
+                           n_pic, n_act, n_zone, n_entry, len(sources) // 6, 0, 0)
+        blob = bytearray(head) + out_layers + pictures + zones + entries + sources
+        at = len(blob) + 2 * n_act
+        offsets = bytearray()
+        for a in actors:
+            offsets += struct.pack("<H", at)
+            at += len(a)
+        if at > 0xFFFF:
+            raise ValueError(f"{where}: its layers, pictures, zones, entries and actors over 64 KB")
+        blob += offsets + b"".join(actors)
+        blob += b"\0" * (-len(blob) % 4)
+        struct.pack_into("<I", blob, 24, len(blob))  # where the grids begin
+        for head, cells, mods, variants in grids:
+            blob += head
+            if len(blob) % 2:
+                blob += b"\0"
+            blob += struct.pack(f"<{len(cells)}H", *cells)
+            if mods is not None:
+                blob += bytes(mods)
+            if variants is not None:
+                blob += b"\0" * (-len(blob) % 4) + struct.pack(f"<{len(variants)}I", *variants)
+            blob += b"\0" * (-len(blob) % 4)
+        self.layouts.append((sc["name"], names))
+        return self.add_blob(name_of(f"SCENE_{sc['name']}"), bytes(blob))
+
+    def _add_graph_of(self, doc, path, here, links):
+        """
+        The editor's graph of scenes and maps (sprite-format-ru.md, "Граф сцен") as a Graph, in the order of names it
+        gives; an entry's fires, the first link of the source it names in its map (links: _links_of).
+        """
+        from dgx_ge_graph import Graph
+
+        gd = doc["graph"]
+        g = Graph(gd["name"])
+        where = f"{path}: graph {gd['name']}"
+
+        def rules_of(name):
+            if not name:
+                return None
+            anim = os.path.join(here, f"{name}.anim")
+            if not os.path.exists(anim):
+                raise ValueError(f"{where}: the rules {name}: no {name}.anim next to the file")
+            with open(anim, encoding="utf-8") as f:
+                return f.read()
+
+        for m in doc.get("maps", []):
+            g.map(m["name"], data=m.get("data") or None, rules=rules_of(m.get("rules")), number=m.get("number", 0))
+        scenes = [sc for sc in doc.get("scenes", []) if sc.get("map")]
+        index = {}
+        for m in doc.get("maps", []):
+            for sc in scenes:
+                if sc["map"] == m["name"]:
+                    index[sc["name"]] = g.scene(m["name"], sc.get("index", 0), sc.get("kind", "room"), sc.get("onEnter") or None)
+        for sc in scenes:
+            if sc["map"] not in [m["name"] for m in doc.get("maps", [])]:
+                raise ValueError(f"{where}: scene {sc['name']}: no map {sc['map']}")
+
+        def scene_of(name, what):
+            if name not in index:
+                raise ValueError(f"{where}: {what}: no scene {name} in a map")
+            return index[name]
+
+        def fires_of(sc, entry):
+            """The first link of the source an entry fires as one comes: a source of a scene of its map; None: none."""
+            ref = entry.get("fires")
+            if not ref:
+                return None
+            what = f"{where}: entry {entry['name']} of {sc['name']} fires"
+            other = [s for s in scenes if s["name"] == ref.get("scene")]
+            if not other or other[0]["map"] != sc["map"]:
+                raise ValueError(f"{what}: scene {ref.get('scene')} is not of its map {sc['map']}")
+            first = links.fired.get((ref["scene"], links.key(ref["scene"], ref, what)))
+            if first is None:
+                raise ValueError(f"{what}: a source with no links")
+            return first
+
+        # the names in the order the editor shows them: by map; in a map its scenes, each its entries then its named exits;
+        # then the map's exits
+        for m in doc.get("maps", []):
+            for sc in scenes:
+                if sc["map"] != m["name"]:
+                    continue
+                a = index[sc["name"]]
+                for layer in sc.get("layers", []):
+                    for ob in layer.get("objects", []):
+                        if ob.get("type") == "entry":
+                            g.entry(a, ob["name"], ob.get("x", 0), ob.get("y", 0), left=bool(ob.get("flip")), arrive=ob.get("arrive") or None,
+                                    fires=fires_of(sc, ob))
+                for ex in sc.get("exits", []):
+                    if ex.get("edge"):
+                        if ex.get("scene"):
+                            g.side(a, ex["edge"], scene_of(ex["scene"], f"exit {ex['edge']} of {sc['name']}"))
+                    else:
+                        g.exit(a, ex["name"], scene_of(ex["scene"], f"exit {ex.get('name')} of {sc['name']}"), ex["entry"], ex.get("transition", "cut"))
+                for side, event in (sc.get("leave") or {}).items():
+                    if event:
+                        g.leave(a, side, event)
+            for ex in m.get("exits", []):
+                g.exit(m["name"], ex["name"], scene_of(ex["scene"], f"exit {ex['name']} of map {m['name']}"), ex["entry"], ex.get("transition", "cut"))
+        start = gd.get("start") or {}
+        if start.get("scene"):
+            g.start(scene_of(start["scene"], "the start"), start["entry"])
+        return self.add_graph(g)
 
     def add_tileset(self, name, cell_width, cell_height, tiles, slots, fields=None):
         """
@@ -1011,6 +1352,22 @@ class Pack:
         self.blobs.append((name, bytes(data)))
         return len(self.blobs) - 1
 
+    def add_constants(self, **constants):
+        """
+        Names of numbers of the game its scripts and the conditions of its dialogs write instead of the numbers (the
+        ticks of a second, the frame of a cut scene, the numbers of its tiles, its signals, the bits of what a board
+        can): in the text as people read it, numbers in the pack, the packer makes one of the other. Given before the
+        animations and dialogs that write them; the same name again: its value replaced.
+        """
+        for name, value in constants.items():
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or not -2 ** 31 <= int(value) < 2 ** 31:
+                raise ValueError(f"constant {name}: a name and a 32-bit number, not {value}")
+            self.constants[name] = int(value)
+
+    def script_masks(self):
+        """The masks an animation's text may name where a mask goes: by their names, as in meets."""
+        return {n: i for i, n in self.mask_names.items()}
+
     def add_anim(self, name, text):
         """
         Scripts of animation (see dgx_ge_anim.py) as a blob; the pictures they
@@ -1030,7 +1387,7 @@ class Pack:
         kinds = {n: i for i, (n, _) in enumerate(self.blobs)}
         # the params of the kinds added before (its. of a sense of them), and this one as a kind of its own
         kind_params = {n: list(ps) for n, _, _, ps in self.anims}
-        done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, len(self.blobs)))
+        done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, len(self.blobs)), self.constants, self.script_masks())
         self.anims.append((name, done.scripts, done.events, done.params))
         self.games[name] = done.games
         return self.add_blob(name, done.blob)
@@ -1057,7 +1414,7 @@ class Pack:
         for name, text in anims:  # the params each declares, in order: param <name> <value>
             kind_params[name] = [m.group(1) for m in (re.match(r"\s*param\s+(\w+)\b", line.split("#")[0]) for line in text.splitlines()) if m]
         for i, (name, text) in enumerate(anims):
-            done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, first + i))
+            done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, first + i), self.constants, self.script_masks())
             self.anims.append((name, done.scripts, done.events, done.params))
             self.games[name] = done.games
             self.blobs[first + i] = (name, done.blob)
@@ -1079,15 +1436,66 @@ class Pack:
         kinds = {n: i for i, (n, _) in enumerate(self.blobs)}
         params = {name: {p: (i, 0) for i, p in enumerate(ps)} for name, _, _, ps in self.anims}
         done = assemble_dialog(text, self.strings, kinds, params, self.events, self.styles, {im[0]: i for i, im in enumerate(self.images)},
-                               self.timers)
+                               self.timers, self.constants)
         self.dialogs.append((done.name, done.roles))
         return self.add_blob(name_of(done.name), done.blob)
 
-    def add_font(self, name):
-        """A font of the game by name, in the table in this order (<PREFIX>_FONT_<NAME>); styles name it; the game gives it."""
+    def add_font(self, name, points=None, mono=False, family=None, postscript=None, source=None, dgx=None, file=None, letters=None,
+                 texts=True):
+        """
+        A font of the game by name, in the table in this order (<PREFIX>_FONT_<NAME>); styles name it. Given how, it is
+        a request of DGX's fonts (write_fonts: DGX makes it for the board, or takes it as it is): made, at points of the
+        frame (times the board's scale), mono, of a family (a pattern of the rules) or a face by its PostScript name, or
+        of a font file (source); as it is, one of DGX's own (dgx) or a font of the game (file, a .c it compiles). letters:
+        characters it must have besides; texts: whether it must have the letters the pack prints (its dialogs). A name
+        only: the font named, its request given before or after, or by the game itself.
+        """
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError(f"font {name}: a C identifier (DGX names the font dgx_font_{name}())")
         if name not in self.fonts:
             self.fonts.append(name)
+        how = {k: v for k, v in (("points", points), ("mono", mono), ("family", family), ("postscript", postscript), ("source", source),
+                                 ("dgx", dgx), ("file", file), ("letters", letters)) if v}
+        if how:
+            made, kept = bool(points or source), bool(dgx or file)
+            if made == kept or (dgx and file) or (kept and (mono or family or postscript)) or (family and postscript):
+                raise ValueError(f"font {name}: made (points, with mono, family or postscript; or a source) or kept as it is (dgx or file)")
+            how["texts"] = texts
+            if self.font_requests.get(name, how) != how:
+                raise ValueError(f"font {name}: told twice, differently")
+            self.font_requests[name] = how
         return self.fonts.index(name)
+
+    def write_fonts(self, path, letters_path=None):
+        """
+        The requests of the game's fonts (add_font) as DGX's file of requests (DGX's font2c/dgx_fonts.py; the words a
+        contract with DGX): a need a font in the order of the table, paths from the file's directory; a font that must
+        have what the pack prints takes letters_path as its text (write_letters). Read by the game's build through the
+        engine (dgx_ge_fonts in its project_include.cmake) and by a host's (dgx_fonts.py build).
+        """
+        here = os.path.dirname(os.path.abspath(path))
+        lines = ["# The fonts of the game, as requests of DGX's fonts: made by dgx_ge_pack.py (Pack.add_font), not to be edited."]
+        for name in self.fonts:
+            how = self.font_requests.get(name)
+            if not how:
+                continue
+            lines.append(f"need {name}")
+            if how.get("points"):
+                lines.append(f"size {how['points']}pt")
+            if how.get("mono"):
+                lines.append("mono 1")
+            for key in ("family", "postscript", "dgx"):
+                if how.get(key):
+                    lines.append(f"{key} {how[key]}")
+            for key in ("source", "file"):
+                if how.get(key):
+                    lines.append(f"{key} {os.path.relpath(os.path.abspath(how[key]), here)}")
+            if how["texts"] and letters_path:
+                lines.append(f"text {os.path.relpath(os.path.abspath(letters_path), here)}")
+            if how.get("letters"):
+                lines.append(f"letters {how['letters']}")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
 
     def add_style(self, name, **f):
         """
@@ -1171,6 +1579,27 @@ class Pack:
         """Every msgid of the dialogs in its context: the template a translation is made from."""
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.strings.pot())
+
+    def letters(self):
+        """
+        The letters the pack can print: those of its strings in its language (the lines of its dialogs and their forms,
+        the names of roles, the answers), a hole of a number in them ({minutes}) as the digits and the minus it may
+        print. Control characters (a line's end) are no letters; a space is one. What a font made for the game must
+        have, and no more: DGX's font requests take it as a text (TEXTS <pack>.letters).
+        """
+        shown = set()
+        for text in self.strings.texts:
+            for part in re.split(r"(\{\w*\})", text):
+                if re.fullmatch(r"\{\w*\}", part):
+                    shown.update("0123456789-")
+                else:
+                    shown.update(c for c in part if c.isprintable())
+        return "".join(sorted(shown))
+
+    def write_letters(self, path):
+        """The letters the pack can print (letters()) as a text, a line of them."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.letters() + "\n")
 
     def build(self):
         tables = len(self.sets) * 8 + len(self.images) * 16 + len(self.blobs) * 8 + len(self.masks) * 16 + len(self.points) * 8
@@ -1261,11 +1690,24 @@ class Pack:
             lines.append(f"#define {self.prefix}_STYLE_{name_of(s)} {i}")
         for i, s in enumerate(self.fonts):
             lines.append(f"#define {self.prefix}_FONT_{name_of(s)} {i}")
+        if self.fonts:  # the fonts by name in the order of the table: X(NAME, name) each, for a table of dgx_font_<name>() by name
+            lines.append(f"#define {self.prefix}_FONTS(X) " + " ".join(f"X({name_of(s)}, {s})" for s in self.fonts))
         if self.fonts:
             lines.append(f"#define {self.prefix}_FONT_COUNT {len(self.fonts)}")  # the game's fonts by these numbers: so many
         for name, roles in self.dialogs:
             for i, r in enumerate(roles):
                 lines.append(f"#define {self.prefix}_{name_of(name)}_ROLE_{name_of(r)} {i}")
+        if self.screen:
+            lines += ["", f"#define {self.prefix}_SCREEN_WIDTH {self.screen[0]}", f"#define {self.prefix}_SCREEN_HEIGHT {self.screen[1]}"]
+        for i, w in enumerate(self.zone_kinds):
+            if w:
+                lines.append(f"#define {self.prefix}_ZONE_{name_of(w)} {i}")
+        for scene, names in self.layouts:
+            lines.append("")
+            for kind, items in names.items():
+                for i, n in enumerate(items):
+                    if n:
+                        lines.append(f"#define {self.prefix}_SCENE_{name_of(scene)}_{kind}_{name_of(n)} {i}")
         return "\n".join(lines)
 
     def write(self, pack_path, header_path=None, sounds_path=None):

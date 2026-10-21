@@ -4,13 +4,13 @@ extern "C" {
 #endif
 
 /*
- * Sounds, for now only their names: a sound is a number of the pack
- * (<PREFIX>_SOUND_<name>, Pack.add_sound), played or stopped by the output
- * the platform gives (a DAC, I2S, a pin of PWM: a board's own, as its
- * display is); with none, nothing. The steps "sound N" of scripts reach the
- * game (DGX_GE_ANIM_SOUND), which hands them on here. The sounds themselves,
- * their data in the pack and a mixer of the engine, come later; the output
- * will take samples then.
+ * The output of sounds: a sound is a number of the pack (<PREFIX>_SOUND_<name>,
+ * Pack.add_sound), played or stopped by the output the game gives; with none,
+ * nothing. The steps "sound N" of scripts reach the game (DGX_GE_ANIM_SOUND),
+ * which hands them on here. Mostly the output is the engine's mixer
+ * (dgx_ge_mixer_output), whose samples a board sends by I2S (boards/); a game
+ * with hardware of its own for sound (a buzzer, a DAC) gives its own play and
+ * stop.
  */
 typedef struct {
     void (*play)(void *ctx, int sound); /* from its start (playing already: again) */

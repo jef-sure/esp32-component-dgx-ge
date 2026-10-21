@@ -112,7 +112,7 @@ static dgx_ge_rect_t item_box(const dgx_ge_scene_t *scene, const dgx_ge_item_t *
     const int     factor = scene->layers[item->layer].factor;
     const int     dx = -(scene->window_x * factor >> 8), dy = -(scene->window_y * factor >> 8);
     dgx_ge_rect_t box = over_clip ? dgx_ge_rect(item->clip.x + dx, item->clip.y + dy, item->clip.w, item->clip.h)
-                             : dgx_ge_image_box(item->image, item->x + dx, item->y + dy, item->flags & DGX_GE_BLIT_FLIP_X);
+                             : dgx_ge_image_box_scaled(item->image, item->x + dx, item->y + dy, item->flags & DGX_GE_BLIT_FLIP_X, item->scale);
     dgx_ge_rect_t own = scene->frame->canvas.clip;
     if (!dgx_ge_rect_empty(item->clip)) own = dgx_ge_rect_intersect(own, dgx_ge_rect(item->clip.x + dx, item->clip.y + dy, item->clip.w, item->clip.h));
     if (clip) *clip = own;
@@ -182,7 +182,7 @@ static void seen_in_space(const dgx_ge_scene_t *scene, dgx_ge_item_t *item)
     item->flags &= (uint8_t)~(DGX_GE_ITEM_OPEN_SPACE | DGX_GE_ITEM_INSIDE);
     const dgx_ge_layer_t *layer = item->layer < scene->layer_count ? &scene->layers[item->layer] : NULL;
     const dgx_ge_rect_t   body  = !dgx_ge_rect_empty(item->clip) ? item->clip
-                                  : item->image                 ? dgx_ge_image_box(item->image, item->x, item->y, item->flags & DGX_GE_BLIT_FLIP_X)
+                                  : item->image                 ? dgx_ge_image_box_scaled(item->image, item->x, item->y, item->flags & DGX_GE_BLIT_FLIP_X, item->scale)
                                                                 : dgx_ge_rect(0, 0, 0, 0);
     item->clip = layer && layer->space_fn && !dgx_ge_rect_empty(body) ? layer->space_fn(layer->space, body, body.x + body.w / 2 + item->feet_dx, body.y + body.h - 1, inside)
                                                                       : dgx_ge_rect(0, 0, 0, 0);

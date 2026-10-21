@@ -212,9 +212,64 @@ static void point_to_value(const dgx_ge_widgets_t *t, dgx_ge_widget_t *w, int lx
         v = w->min + (v - w->min + step / 2) / step * step;
         set_value(t, w, v);
     } else if (w->kind == DGX_GE_WIDGET_LIST) {
+        /* the row under the point, counted from the line of its text on top */
         const int rows = rows_of(w), rh = rows > 0 ? w->h / rows : w->h;
-        if (rh > 0) set_value(t, w, w->min + ly / rh);
+        if (rh > 0) set_value(t, w, w->min + (w->text ? w->text->top : 0) + ly / rh);
     }
+}
+
+/* a swiped slider: its value when the pointer went down and the way it has gone since, its width the whole range */
+static void swipe_to_value(const dgx_ge_widgets_t *t, dgx_ge_widget_t *w, int dx)
+{
+    if (w->w <= 0) return;
+    const int32_t num  = (int32_t)dx * (w->max - w->min);
+    const int     by   = (int)(num >= 0 ? (num + w->w / 2) / w->w : -((-num + w->w / 2) / w->w));
+    const int     step = w->step > 0 ? w->step : 1;
+    const int     v    = t->press_value + by;
+    set_value(t, w, w->min + (v - w->min + (v >= w->min ? step / 2 : -(step / 2))) / step * step);
+}
+
+static bool swiped(const dgx_ge_widget_t *w)
+{
+    return w->kind == DGX_GE_WIDGET_SLIDER && (w->flags & DGX_GE_WIDGET_SWIPE);
+}
+
+/* a list under a point (the deepest), -1 none */
+static int list_at(const dgx_ge_widgets_t *t, int x, int y)
+{
+    int best = -1, depth = -1;
+    for (int i = 0; i < t->count; ++i) {
+        const dgx_ge_widget_t *w = &t->widgets[i];
+        if (w->kind != DGX_GE_WIDGET_LIST || hidden(t, i) || x < w->x || y < w->y || x >= w->x + w->w || y >= w->y + w->h) continue;
+        int d = 0;
+        for (int p = w->parent; p >= 0; p = t->widgets[p].parent) ++d;
+        if (d > depth) best = i, depth = d;
+    }
+    return best;
+}
+
+/* the row height of a list */
+static int row_height(const dgx_ge_widget_t *w)
+{
+    const int rows = rows_of(w);
+    return rows > 0 ? w->h / rows : w->h;
+}
+
+/* a point of a list (its own y) between two of its rows: the top or bottom 1/DGX_GE_WIDGET_ROW_GAP of a row */
+static bool between_rows(const dgx_ge_widget_t *w, int ly)
+{
+    const int rh = row_height(w), m = rh / DGX_GE_WIDGET_ROW_GAP, in = rh > 0 && ly >= 0 ? ly % rh : 0;
+    return w->kind == DGX_GE_WIDGET_LIST && rh > 0 && (in < m || in >= rh - m);
+}
+
+/* pressed: the one under it, where, its value then; a slider or a list takes the point (a swiped slider not yet, a list not between rows) */
+static void press(dgx_ge_widgets_t *t, int i, int x, int y)
+{
+    dgx_ge_widget_t *w = &t->widgets[i];
+    t->pressed = (int8_t)i, t->press_x = (int16_t)x, t->press_y = (int16_t)y, t->dragged = false;
+    t->between = between_rows(w, y - w->y);
+    if (!swiped(w) && !t->between) point_to_value(t, w, x - w->x, y - w->y);
+    t->press_value = w->value;
 }
 
 bool dgx_ge_widgets_pointer(dgx_ge_widgets_t *t, const dgx_ge_pointer_t *p)
@@ -224,19 +279,44 @@ bool dgx_ge_widgets_pointer(dgx_ge_widgets_t *t, const dgx_ge_pointer_t *p)
         t->pressed = (int8_t)i;
         if (i < 0) return false;
         dgx_ge_widgets_focus(t, i);
-        point_to_value(t, &t->widgets[i], p->x - t->widgets[i].x, p->y - t->widgets[i].y);
+        press(t, i, p->x, p->y);
         return true;
     }
     if (t->pressed < 0) return false;
     dgx_ge_widget_t *w = &t->widgets[t->pressed];
     if (p->down) {
-        if (w->kind == DGX_GE_WIDGET_SLIDER) point_to_value(t, w, p->x - w->x, p->y - w->y); /* the pointer dragged: the knob follows */
+        const int dx = p->x - t->press_x, dy = p->y - t->press_y, ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+        if (swiped(w) && !t->dragged && 2 * ay >= w->h && ay > ax) {
+            /* up or down first, half its height: the list under it is swiped instead, from where the pointer went down */
+            const int l = list_at(t, t->press_x, t->press_y);
+            if (l >= 0) {
+                if (w->value != t->press_value) set_value(t, w, t->press_value); /* what the way across did meanwhile, undone */
+                press(t, l, t->press_x, t->press_y);
+                w = &t->widgets[l];
+            }
+        }
+        if (swiped(w)) {
+            swipe_to_value(t, w, dx); /* the way across from where it went down */
+            if (w->value != t->press_value) t->dragged = true; /* moved once: no tap when let go, even back where it was */
+        } else if (w->kind == DGX_GE_WIDGET_SLIDER) {
+            point_to_value(t, w, p->x - w->x, p->y - w->y); /* the pointer dragged: the knob follows */
+        } else if (w->kind == DGX_GE_WIDGET_LIST) {
+            /* swiped up or down: a row along for each row's height the pointer went (up: on down the list) */
+            const int rh = row_height(w);
+            if (rh > 0 && 2 * ay >= rh) t->dragged = true;
+            if (rh > 0 && t->dragged) set_value(t, w, t->press_value + (dy <= 0 ? (-dy + rh / 2) / rh : -((dy + rh / 2) / rh)));
+        }
         return true;
     }
     if (p->released) {
         const bool inside = p->x >= w->x && p->y >= w->y && p->x < w->x + w->w && p->y < w->y + w->h;
+        const bool tapped = !t->dragged;
         t->pressed = -1;
-        if (!inside) return true;
+        if (!inside || !tapped || t->between) return true;
+        if (swiped(w)) {
+            tell(w, DGX_GE_WIDGET_ACTIVATED); /* a tap: its row, nothing moved */
+            return true;
+        }
         if (w->kind == DGX_GE_WIDGET_SWITCH) set_value(t, w, w->value ? 0 : 1);
         if (w->kind == DGX_GE_WIDGET_BUTTON || w->kind == DGX_GE_WIDGET_LIST) tell(w, DGX_GE_WIDGET_ACTIVATED);
         return true;

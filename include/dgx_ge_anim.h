@@ -7,6 +7,8 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
+#include "dgx_ge_input.h"
+
 /*
  * Animation: scripts and the rules of passing from one to another.
  *
@@ -403,6 +405,12 @@ extern uint32_t *dgx_ge_dice;
 typedef float (*dgx_ge_ask_fn)(int what, void *ctx);
 extern dgx_ge_ask_fn dgx_ge_expr_ask;
 extern void         *dgx_ge_expr_ask_ctx;
+
+/*
+ * axis(lx) of an expression: an axis of the pad of this input (dgx_ge_input.h), -1..1, a trigger 0..1, as it is at
+ * the moment of the step; the game gives the input of its player once (NULL: every axis 0).
+ */
+extern const dgx_ge_input_t *dgx_ge_expr_input;
 
 /* Put an actor at x, y (pixels) into a script, from now on, its params as they start. */
 void dgx_ge_actor_start(dgx_ge_actor_t *actor, const dgx_ge_anim_t *anim, int script, int x, int y, uint32_t now_ms);

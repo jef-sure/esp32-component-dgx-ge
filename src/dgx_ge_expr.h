@@ -26,6 +26,8 @@
  * ITS_VX and on: its velocity, picture, script, turn, a cell's tile,
  * modifier, number; 0 when nothing is found or it has none. GAME u8: the
  * game's answer to its question of that number (dgx_ge_expr_ask; none: 0).
+ * AXIS u8: an axis of the pad of the input the game gave (dgx_ge_expr_input:
+ * DGX_GE_AXIS_*), -1..1 (a trigger 0..1); no input, no such axis: 0.
  *
  * and, or and c ? a : b are lazy, as in C: the part not needed is jumped
  * over, never worked out (it matters to rnd, the one that changes
@@ -44,7 +46,7 @@ enum { E_NUM = 1, E_PARAM, E_T, E_ADD, E_SUB, E_MUL, E_DIV, E_NEG, E_MIN, E_MAX,
        E_LT, E_LE, E_GT, E_GE, E_EQ, E_NE, E_AND, E_OR, E_NOT, E_NOW, E_COUNT, E_AMOUNT,
        E_MOD, E_BAND, E_BOR, E_RND, E_TIMER, E_COND, E_X, E_Y, E_SMOOTH,
        E_XOR, E_BITS, E_BIT, E_BITFIELD, E_TABLE, E_ITS, E_GAME,
-       E_AND_THEN, E_OR_ELSE, E_TRUTH, E_IF_NOT, E_JUMP };
+       E_AND_THEN, E_OR_ELSE, E_TRUTH, E_IF_NOT, E_JUMP, E_AXIS };
 
 /* What ITS reads beyond the params of the one found. */
 enum { ITS_VX = 0xF0, ITS_VY, ITS_IMAGE, ITS_SCRIPT, ITS_FLIP, ITS_TILE, ITS_MOD, ITS_CELL };

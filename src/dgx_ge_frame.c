@@ -6,6 +6,14 @@
 #include "dgx_lut.h"
 #include "drivers/vscreen.h"
 
+/* the overlay layer of DGX 0.6.6 (dgx_overlay.h); before it, nothing to ask */
+#if defined(__has_include)
+#if __has_include("dgx_overlay.h")
+#include "dgx_overlay.h"
+#define DGX_GE_HAS_OVERLAY 1
+#endif
+#endif
+
 dgx_ge_frame_t *dgx_ge_frame_create(dgx_screen_t *display, int x, int y, int width, int height)
 {
     dgx_ge_frame_t *frame = calloc(1, sizeof(*frame));
@@ -35,7 +43,6 @@ void dgx_ge_frame_destroy(dgx_ge_frame_t **frame)
     free((*frame)->overlays);
     free((*frame)->shown_overlays);
     free((*frame)->shown_boxes);
-    free((*frame)->between);
     free(*frame);
     *frame = NULL;
 }
@@ -73,87 +80,23 @@ bool dgx_ge_frame_scale(dgx_ge_frame_t *frame, int scale)
     if (frame->scaled) dgx_screen_destroy(&frame->scaled);
     frame->scaled = scaled;
     frame->scale  = (uint8_t)scale;
-    free(frame->between);
-    frame->between = NULL;
-    if (frame->smooth && !dgx_ge_frame_smooth(frame, true)) frame->smooth = false;
     dgx_ge_frame_invalidate_all(frame);
     return true;
 }
 
-bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, bool smooth)
+bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, int how)
 {
-    free(frame->between);
-    frame->between = NULL;
-    frame->smooth  = smooth;
-    if (smooth && frame->scale == 4) {
-        frame->between = malloc((size_t)6 * 2 * (dgx_ge_frame_width(frame) + 2));
-        if (!frame->between) return frame->smooth = false;
-    }
+    if (how < DGX_GE_SMOOTH_NONE || how > DGX_GE_SMOOTH_SFX) return false;
+    frame->smooth = (uint8_t)how;
     dgx_ge_frame_invalidate_all(frame);
     return true;
 }
 
-/*
- * Scale2x of one row: every point P with its neighbours above A, left C, right B and below D becomes four; a corner
- * where two equal neighbours meet and the other two differ takes their color (a step of a slanted edge filled in).
- * The row and those above and below it are given whole (width points; beyond its ends a row goes on at its edge);
- * the points x0 .. x0 + w - 1 of it are scaled into the two rows out, 2 * w wide. A loop over plain rows, not a call
- * a point: a whole display of 1280x800 is made by it a frame (at x4, twice).
- */
-static inline void scale2x_point(uint8_t P, uint8_t A, uint8_t B, uint8_t C, uint8_t D, uint8_t *top, uint8_t *bottom)
+/* How DGX scales the points of the frame: smoothed at 2, 3 and 4 as the frame says, else as blocks. */
+static uint32_t scaling(const dgx_ge_frame_t *f)
 {
-    top[0]    = C == A && C != D && A != B ? A : P;
-    top[1]    = A == B && A != C && B != D ? B : P;
-    bottom[0] = D == C && D != B && C != A ? C : P;
-    bottom[1] = B == D && B != A && D != C ? D : P;
-}
-
-static void scale2x_row(const uint8_t *up, const uint8_t *row, const uint8_t *down, int width, int x0, int w, uint8_t *top, uint8_t *bottom)
-{
-    const int last = width - 1;
-    /* the points whose neighbours are all inside the row go without a care for its ends; those at the ends, with it */
-    const int from = 1 - x0 > 0 ? (1 - x0 < w ? 1 - x0 : w) : 0, to = last - x0 < w ? (last - x0 > from ? last - x0 : from) : w;
-    for (int i = 0; i < w; ++i) {
-        if (i == from) i = to; /* the middle below */
-        if (i >= w) break;
-        const int x = x0 + i, at = x < 0 ? 0 : x > last ? last : x;
-        const int l = x - 1 < 0 ? 0 : x - 1 > last ? last : x - 1, r = x + 1 < 0 ? 0 : x + 1 > last ? last : x + 1;
-        scale2x_point(row[at], up[at], row[r], row[l], down[at], top + 2 * i, bottom + 2 * i);
-    }
-    for (int i = from; i < to; ++i) {
-        const int x = x0 + i;
-        scale2x_point(row[x], up[x], row[x + 1], row[x - 1], down[x], top + 2 * i, bottom + 2 * i);
-    }
-}
-
-/* A row of the frame by its number; above the first the first, below the last the last (the edges go on). */
-static const uint8_t *frame_row(const dgx_ge_frame_t *f, int y)
-{
-    const int h = dgx_ge_frame_height(f);
-    y = y < 0 ? 0 : y >= h ? h - 1 : y;
-    return f->canvas.pixels + (size_t)y * f->canvas.stride;
-}
-
-/*
- * The strip of a row of the frame (sx.., y, w points) scaled smooth into rows: 2 or 4 rows of w * n points. next: the
- * row below the one before, of the same part (its rows scaled by 2 are there already: moved up, one row more made).
- */
-static void smooth_row(dgx_ge_frame_t *f, int sx, int y, int w, bool next, uint8_t *rows, size_t stride)
-{
-    const int fw = dgx_ge_frame_width(f);
-    if (f->scale == 2) {
-        scale2x_row(frame_row(f, y - 1), frame_row(f, y), frame_row(f, y + 1), fw, sx, w, rows, rows + stride);
-        return;
-    }
-    /* 4: the three rows about y scaled by 2 (six rows, a point wider each side for their neighbours), the middle two scaled again */
-    const int bw = 2 * (w + 2); /* the part and a point each side, scaled */
-    uint8_t  *b  = f->between;
-    if (next) memmove(b, b + (size_t)2 * bw, (size_t)4 * bw);
-    for (int r = next ? 2 : 0; r < 3; ++r)
-        scale2x_row(frame_row(f, y - 2 + r), frame_row(f, y - 1 + r), frame_row(f, y + r), fw, sx - 1, w + 2, b + (size_t)(2 * r) * bw,
-                    b + (size_t)(2 * r + 1) * bw);
-    scale2x_row(b + (size_t)1 * bw, b + (size_t)2 * bw, b + (size_t)3 * bw, bw, 2, 2 * w, rows, rows + stride);
-    scale2x_row(b + (size_t)2 * bw, b + (size_t)3 * bw, b + (size_t)4 * bw, bw, 2, 2 * w, rows + 2 * stride, rows + 3 * stride);
+    const uint32_t smooth = f->scale < 2 || f->scale > 4 ? 0 : f->smooth == DGX_GE_SMOOTH_SFX ? DGX_VSCREEN_SMOOTH_SFX : f->smooth ? DGX_VSCREEN_SMOOTH : 0;
+    return f->scale > 1 ? DGX_VSCREEN_SCALE(f->scale) | smooth : 0;
 }
 
 /* The box of an overlay on the display: its clip for a fill or a repeated picture, else its picture inside its clip. */
@@ -161,7 +104,7 @@ static dgx_ge_rect_t overlay_box(const dgx_ge_item_t *item)
 {
     const bool    fill = item->flags & DGX_GE_ITEM_FILL, over_clip = fill || (item->flags & DGX_GE_ITEM_REPEAT);
     if (!item->image && !fill) return dgx_ge_rect(0, 0, 0, 0);
-    dgx_ge_rect_t box = over_clip ? item->clip : dgx_ge_image_box(item->image, item->x, item->y, item->flags & DGX_GE_BLIT_FLIP_X);
+    dgx_ge_rect_t box = over_clip ? item->clip : dgx_ge_image_box_scaled(item->image, item->x, item->y, item->flags & DGX_GE_BLIT_FLIP_X, item->scale);
     return dgx_ge_rect_empty(item->clip) ? box : dgx_ge_rect_intersect(box, item->clip);
 }
 
@@ -287,10 +230,10 @@ static bool overlaid(const dgx_ge_frame_t *f, dgx_ge_rect_t part)
 
 /*
  * A part of the frame to the display at a pixel of it, through the palette; at a scale, every point a square of
- * pixels. Blocks with nothing over them: the display repeats the points itself (DGX_LUT_SCALE: through the palette,
- * in its own order of pixels). Else a band of rows at a time: each row of points n times over, n times down (or
- * smoothed), the overlays drawn into the band where they lie, the band sent at once. Without a scale and overlays,
- * straight from the frame.
+ * pixels or smoothed (scaling). Blocks with nothing over them: the display scales the points itself (DGX: through the
+ * palette, in its own order of pixels). Else a band of rows at a time: DGX scales them into the band as it would to
+ * the display (a part as the whole: its neighbours from the whole frame), the overlays are drawn into the band where
+ * they lie, the band is sent at once. Without a scale and overlays, straight from the frame.
  */
 static void send(dgx_ge_frame_t *f, int sx, int sy, int w, int h, int dx, int dy)
 {
@@ -299,30 +242,15 @@ static void send(dgx_ge_frame_t *f, int sx, int sy, int w, int h, int dx, int dy
         dgx_vscreen8_region_to_screen16(f->display, dx, dy, f->buffer, sx, sy, w, h, f->lut, DGX_LUT_EXACT);
         return;
     }
-    /* nothing over the part: DGX repeats the points itself, smoothed or not (the same Scale2x, on the whole frame's indices) */
+    /* nothing over the part: DGX scales the points itself, as blocks or smoothed on the whole frame's indices */
     if (n > 1 && !overlaid(f, dgx_ge_rect(dx, dy, w * n, h * n))) {
-        dgx_vscreen8_region_to_screen16(f->display, dx, dy, f->buffer, sx, sy, w, h, f->lut,
-                                        DGX_LUT_EXACT | DGX_LUT_SCALE(n) | (f->smooth ? DGX_LUT_SMOOTH : 0));
+        dgx_vscreen8_region_to_screen16(f->display, dx, dy, f->buffer, sx, sy, w, h, f->lut, DGX_LUT_EXACT | scaling(f));
         return;
     }
-    uint8_t     *rows   = ((dgx_vscreen_t *)f->scaled)->v_array;
-    const size_t stride = (size_t)f->scaled->width;
-    const int    band   = f->scaled->height / n; /* rows of the frame a band */
+    const int band = f->scaled->height / n; /* rows of the frame a band */
     for (int y0 = 0; y0 < h; y0 += band) {
         const int k = h - y0 < band ? h - y0 : band;
-        for (int y = y0; y < y0 + k; ++y) {
-            const uint8_t *from  = f->canvas.pixels + (size_t)(sy + y) * f->canvas.stride + sx;
-            uint8_t       *strip = rows + (size_t)(y - y0) * n * stride, *to = strip;
-            if (f->smooth && (n == 2 || n == 4)) {
-                smooth_row(f, sx, sy + y, w, y > 0, strip, stride);
-            } else {
-                if (n == 1) memcpy(to, from, (size_t)w);
-                else
-                    for (int x = 0; x < w; ++x)
-                        for (int j = 0; j < n; ++j) *to++ = from[x];
-                for (int j = 1; j < n; ++j) memcpy(strip + j * stride, strip, (size_t)w * n);
-            }
-        }
+        dgx_vscreen_region_to_screen(f->scaled, 0, 0, f->buffer, sx, sy + y0, w, k, scaling(f));
         if (f->overlay_count) overlay_strip(f, dx, dy + y0 * n, w * n, k * n);
         dgx_vscreen8_region_to_screen16(f->display, dx, dy + y0 * n, f->scaled, 0, 0, w * n, k * n, f->lut, DGX_LUT_EXACT);
     }
@@ -457,6 +385,15 @@ void dgx_ge_frame_wipe(dgx_ge_frame_t *frame, int x)
 
 void dgx_ge_frame_present(dgx_ge_frame_t *frame)
 {
+#if DGX_GE_HAS_OVERLAY
+    /*
+     * The display's overlay layer (DGX: buttons over the picture, someone else's virtual screen) changed: what lies
+     * under its change goes again, and DGX mixes the layer in on the way. Asked before anything else, a still game
+     * included, so that a button pressed is seen though nothing of the game moved.
+     */
+    int ox, oy, ow, oh;
+    if (dgx_overlay_take_dirty(frame->display, &ox, &oy, &ow, &oh)) dgx_ge_frame_invalidate_pixels(frame, dgx_ge_rect(ox, oy, ow, oh));
+#endif
     if (!frame->dirty_count) return;
     dgx_screen_progress_up(frame->display);
     const int h = dgx_ge_frame_height(frame);

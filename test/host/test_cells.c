@@ -86,7 +86,7 @@ int main(int argc, char **argv)
     dgx_ge_kinds_t kinds;
     CHECK(dgx_ge_kinds_init(&kinds, &pack, 16));
     dgx_ge_cells_t cells;
-    CHECK(dgx_ge_cells_init(&cells, &kinds, 2, &(dgx_ge_cells_io_t){get, set, signal_heard, NULL, 0}));
+    CHECK(dgx_ge_cells_init(&cells, &kinds, 2, &(dgx_ge_cells_io_t){get, set, signal_heard, NULL, 0, NULL}));
 
     /* told to open: a life at rest, into opening; a step of 4 every 100 ms, the top signalled when it is reached */
     CHECK(!dgx_ge_cells_living(&cells, 1));
@@ -151,7 +151,7 @@ int main(int argc, char **argv)
     /* links: a source fires from its first to its last, each target's life told its own event or the one fired, a value first */
     dgx_ge_cells_clear(&cells);
     dgx_ge_cells_free(&cells);
-    CHECK(dgx_ge_cells_init(&cells, &kinds, 4, &(dgx_ge_cells_io_t){get, set, signal_heard, NULL, 0}));
+    CHECK(dgx_ge_cells_init(&cells, &kinds, 4, &(dgx_ge_cells_io_t){get, set, signal_heard, NULL, 0, NULL}));
     size_t         n;
     const uint8_t *blob = dgx_ge_pack_blob(&pack, TEST_BLOB_LINKS, &n);
     dgx_ge_links_t links;

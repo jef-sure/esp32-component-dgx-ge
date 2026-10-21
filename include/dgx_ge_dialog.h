@@ -38,6 +38,12 @@ extern "C" {
  * the dialog's name, translated or as it is) and put its strings into the
  * blob "DGSS" (dgx_ge_strings_*).
  *
+ * Pause: a dialog may stop the game while it is open (a page of settings): the
+ * game does not play its world meanwhile (dgx_ge_talk_pauses tells it). The
+ * talk's own time goes on (its lines with a time, letters, controls), what it
+ * does to the world (tell, give, conditions) lands at the moment the world
+ * stands at: the game says how far ahead of it the talk is (ahead_ms).
+ *
  * A talk is where one is in a dialog: a few bytes. It is moved on by events
  * of the interface, which the game makes of its buttons (input is apart):
  * next, prev move the choice; activate goes on from a line, or takes the
@@ -46,7 +52,8 @@ extern "C" {
  * a choice with a time goes, unanswered, where its silence leads. Showing it
  * is a style's (the game's, the editor's).
  *
- * The blob, little-endian: "DGDL", version u16, roles u8, 0, size of code
+ * The blob, little-endian: "DGDL", version u16, roles u8, flags u8
+ * (DGX_GE_DIALOG_PAUSE; 0 in packs before it: none), size of code
  * u16, start u16, the events activate, more, less of the pack (u8 each,
  * 0xFF none), 0xFF; the kinds of the roles (u16 each: blobs of the pack); the
  * names they are shown by (u16 each: strings, 0xFFFF none); their portraits
@@ -71,11 +78,13 @@ extern "C" {
 #define DGX_GE_DIALOG_VERSION 6u
 #define DGX_GE_DIALOG_ROLES   8
 #define DGX_GE_ROLE_GAME      0xFF
+#define DGX_GE_DIALOG_PAUSE   1u /* flags: the game stands while it is open */
 
 typedef struct {
     const uint8_t *code;
     uint16_t       size, start;
     uint8_t        roles;
+    uint8_t        flags; /* DGX_GE_DIALOG_* */
     const uint8_t *kinds; /* u16 a role */
     const uint8_t *names; /* u16 a role: the string it is shown by, 0xFFFF none */
     const uint8_t *faces; /* u16 a role: its portrait, a picture of the pack, 0xFFFF none */
@@ -171,7 +180,9 @@ typedef struct {
     bool                   seen;   /* the line is seen whole: its time runs from seen_ms */
     uint16_t               wait_ms; /* the time of the line or the choice shown, 0 none */
     uint32_t               since_ms, seen_ms;
-    uint32_t               now_ms; /* the moment of the last event: tell sends at it */
+    uint32_t               now_ms; /* the moment of the last event, the talk's own time */
+    uint32_t               ahead_ms; /* how far that is ahead of the world's (a dialog that pauses: the world stands, the talk
+                                        goes on); tell, give and conditions land at now_ms - ahead_ms. The game's; 0 at start */
     uint8_t                changes; /* counted up whenever a control changed a value: for the one showing it */
     dgx_ge_anim_say_fn     say;    /* what the actors told say, as the game hears them; NULL nothing */
     void                  *ctx;
@@ -195,6 +206,9 @@ void dgx_ge_talk_event(dgx_ge_talk_t *talk, dgx_ge_ui_t event, uint32_t now_ms);
  * where its silence leads.
  */
 void dgx_ge_talk_play(dgx_ge_talk_t *talk, uint32_t now_ms, bool seen);
+
+/* A talk going on whose dialog stops the game while it is open (DGX_GE_DIALOG_PAUSE): the game plays no world meanwhile. */
+bool dgx_ge_talk_pauses(const dgx_ge_talk_t *talk);
 
 /* An answer shown, by its place among those shown: its string; false past the last. */
 bool dgx_ge_talk_answer(const dgx_ge_talk_t *talk, int shown, uint16_t *string);

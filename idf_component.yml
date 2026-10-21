@@ -1,5 +1,5 @@
 ## IDF Component Manager Manifest File
-version: "0.0.1"
+version: "0.1.0"
 description: "A small engine of 2D and 2.5D games on top of DGX: an indexed frame sent by its changes and scaled, pictures from a pack in flash, actors living by animation scripts, tiles, masks, a world that lives on, dialogs, a sound mixer"
 url: https://github.com/jef-sure/esp32-component-dgx-ge
 repository: https://github.com/jef-sure/esp32-component-dgx-ge.git
@@ -10,7 +10,7 @@ dependencies:
   idf:
     version: ">=5.3.0"
   jef-sure/dgx:
-    version: "^0.6.5"  # 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
+    version: "^0.7.2"  # 0.7.2: fonts made at build time from requests (dgx_ge_fonts); 0.7.0: one set of flags for every transfer, Scale3x and the SFX smoothing; 0.6.6: the overlay layer of a screen; 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
     # to work on DGX together with the engine, take it from a checkout instead:
     # override_path: "<the path of a DGX checkout>"
 
@@ -32,10 +32,15 @@ files:
   include:
     - "idf_component.yml"
     - "CMakeLists.txt"
+    - "project_include.cmake"
     - "dgx_ge.cmake"
     - "src/**/*.c"
     - "src/**/*.h"
     - "include/**/*.h"
+    # the boards games have run on: taken by a game into its own build, not built by the library
+    - "boards/*.c"
+    - "boards/*.h"
+    - "boards/*.cmake"
     - "tools/**/*.py"
     - "README.md"
     - "CHANGES.md"
@@ -43,6 +48,8 @@ files:
     # the documents that go out (the README points at them); the rest of docs/ is internal
     - "docs/overview-ru.md"
     - "docs/animation-ru.md"
+    - "docs/overview-en.md"
+    - "docs/animation-en.md"
   exclude:
     - "build/**"
     - ".git/**"

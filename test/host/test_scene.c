@@ -2,6 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__has_include)
+#if __has_include("dgx_overlay.h")
+#include "dgx_overlay.h"
+#endif
+#endif
 #include "check.h"
 #include "dgx_ge_scene.h"
 #include "dgx_draw.h"
@@ -408,7 +413,7 @@ int main(void)
         /* at x4 the same, twice: the two points joined along the slant, the far corners empty */
         dgx_screen_t   *four = dgx_vscreen_init(4 * W, 4 * H, 16, DgxScreenRGB);
         dgx_ge_frame_t *quart = dgx_ge_frame_create(four, 0, 0, W, H);
-        CHECK(four && quart && dgx_ge_frame_scale(quart, 4) && dgx_ge_frame_smooth(quart, true) && quart->between);
+        CHECK(four && quart && dgx_ge_frame_scale(quart, 4) && dgx_ge_frame_smooth(quart, true) && quart->smooth == DGX_GE_SMOOTH_ON);
         dgx_ge_frame_set_palette(quart, 0, 2, (const uint8_t[][3]){{0, 0, 0}, {255, 255, 255}});
         quart->canvas.pixels[3 * W + 3] = 1, quart->canvas.pixels[4 * W + 4] = 1;
         dgx_ge_frame_present(quart);
@@ -419,6 +424,40 @@ int main(void)
         CHECK(dgx_get_pixel(four, 11, 15) == quart->lut[0] && dgx_get_pixel(four, 20, 16) == quart->lut[0]);
         dgx_ge_frame_destroy(&half), dgx_ge_frame_destroy(&quart);
         dgx_screen_destroy(&two), dgx_screen_destroy(&four);
+        CHECK(!dgx_ge_frame_smooth(frame, 3) && dgx_ge_frame_smooth(frame, DGX_GE_SMOOTH_NONE)); /* no such way */
+        /*
+         * A part under an overlay goes through the band, one without straight to the display: at 2, 3 and 4, as
+         * blocks, smoothed and SFX, the display the same outside the overlay either way. Points of three colors by
+         * dice, over the edges too (the neighbours beyond them), slanted runs and lone points among them.
+         */
+        uint8_t  dots[W * H];
+        uint32_t dice = 12345;
+        for (int i = 0; i < W * H; ++i) dice = dice * 1103515245u + 12345u, dots[i] = (uint8_t)((dice >> 16) % 3);
+        for (int n = 2; n <= 4; ++n)
+            for (int how = DGX_GE_SMOOTH_NONE; how <= DGX_GE_SMOOTH_SFX; ++how) {
+                dgx_screen_t   *straight = dgx_vscreen_init(n * W, n * H, 16, DgxScreenRGB), *banded = dgx_vscreen_init(n * W, n * H, 16, DgxScreenRGB);
+                dgx_ge_frame_t *fs = dgx_ge_frame_create(straight, 0, 0, W, H), *fb = dgx_ge_frame_create(banded, 0, 0, W, H);
+                CHECK(fs && fb && dgx_ge_frame_scale(fs, n) && dgx_ge_frame_scale(fb, n) && dgx_ge_frame_smooth(fs, how) && dgx_ge_frame_smooth(fb, how));
+                for (dgx_ge_frame_t *f = fs; f; f = f == fs ? fb : NULL) {
+                    dgx_ge_frame_set_palette(f, 0, 3, (const uint8_t[][3]){{0, 0, 0}, {255, 255, 255}, {255, 0, 0}});
+                    memcpy(f->canvas.pixels, dots, sizeof dots);
+                }
+                const dgx_ge_rect_t over = dgx_ge_rect(n * 5, n * 3, 3, 2); /* a fill of 3 x 2 pixels of the display */
+                dgx_ge_frame_overlays_begin(fb);
+                CHECK(dgx_ge_frame_overlay(fb, &(dgx_ge_item_t){.flags = DGX_GE_ITEM_FILL, .clip = over, .color = 2}));
+                dgx_ge_frame_overlays_end(fb);
+                dgx_ge_frame_present(fs), dgx_ge_frame_present(fb);
+                int differ = 0;
+                for (int y = 0; y < n * H; ++y)
+                    for (int x = 0; x < n * W; ++x)
+                        if (!(x >= over.x && x < over.x + over.w && y >= over.y && y < over.y + over.h) &&
+                            dgx_get_pixel(straight, x, y) != dgx_get_pixel(banded, x, y))
+                            ++differ;
+                CHECK(differ == 0 && dgx_get_pixel(banded, n * 5, n * 3) == fb->lut[2]);
+                if (differ) printf("x%d, smoothing %d: %d pixels differ\n", n, how, differ);
+                dgx_ge_frame_destroy(&fs), dgx_ge_frame_destroy(&fb);
+                dgx_screen_destroy(&straight), dgx_screen_destroy(&banded);
+            }
         dgx_screen_destroy(&big);
     }
 
@@ -492,5 +531,96 @@ int main(void)
     dgx_ge_scene_destroy(&scene);
     dgx_ge_frame_destroy(&frame);
     dgx_screen_destroy(&display);
+    /*
+     * A picture larger (an item's scale: a picture in display pixels at the frame's scale): each pixel a square of the
+     * scale, its origin where it is put, mirrored round the origin, cut by the clip, 0 transparent; 1 bit: the color, 4
+     * and 8 bits: the map or the value, a silhouette: the color; repeated a step the larger size; the box as large; at
+     * scale 0 and 1 drawn just as DGX draws it
+     */
+    {
+        dgx_screen_t *s8 = dgx_vscreen_init(16, 12, 8, DgxScreenRGB);
+        uint8_t      *px = ((dgx_vscreen_t *)s8)->v_array;
+#define PX(x, y) px[(y) * 16 + (x)]
+        static const uint8_t one_bits[] = {0xA0, 0x60}; /* 3 x 2: 101 / 011 */
+        const dgx_image_t    one = {3, 2, 0, 1, 1, one_bits};
+        const dgx_ge_rect_t  all = dgx_ge_rect(0, 0, 16, 12);
+        memset(px, 9, 16 * 12);
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &one, .color = 7, .scale = 2}, 4, 4, all, all); /* the origin (0, 1) at 4, 4: from 4, 2 */
+        CHECK(PX(4, 2) == 7 && PX(5, 3) == 7 && PX(6, 2) == 9 && PX(7, 3) == 9 && PX(8, 2) == 7 && PX(9, 3) == 7);
+        CHECK(PX(4, 4) == 9 && PX(5, 5) == 9 && PX(6, 4) == 7 && PX(9, 5) == 7 && PX(10, 2) == 9 && PX(4, 6) == 9 && PX(3, 2) == 9 && PX(4, 1) == 9);
+        CHECK(dgx_ge_rect_equal(dgx_ge_image_box_scaled(&one, 4, 4, false, 2), dgx_ge_rect(4, 2, 6, 4)));
+        memset(px, 9, 16 * 12);
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &one, .color = 7, .scale = 2, .flags = DGX_GE_BLIT_FLIP_X}, 4, 4, all, all); /* mirrored: 101 / 110 */
+        CHECK(dgx_ge_rect_equal(dgx_ge_image_box_scaled(&one, 4, 4, true, 2), dgx_ge_rect(0, 2, 6, 4)));
+        CHECK(PX(0, 2) == 7 && PX(2, 2) == 9 && PX(4, 2) == 7 && PX(5, 3) == 7 && PX(0, 4) == 7 && PX(2, 5) == 7 && PX(4, 4) == 9 && PX(6, 2) == 9);
+        memset(px, 9, 16 * 12);
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &one, .color = 7, .scale = 2}, 4, 4, all, dgx_ge_rect(5, 3, 2, 2)); /* cut */
+        CHECK(PX(4, 2) == 9 && PX(5, 3) == 7 && PX(6, 3) == 9 && PX(6, 4) == 7 && PX(5, 4) == 9 && PX(8, 2) == 9 && PX(7, 4) == 9);
+        static const uint8_t four_bits[] = {0x30, 0x0F}; /* 2 x 2 of 4 bits: 3 0 / 0 15 */
+        const dgx_image_t    four = {2, 2, 0, 0, 4, four_bits};
+        static uint8_t       map[15];
+        map[2] = 42, map[14] = 43;
+        memset(px, 9, 16 * 12);
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &four, .map = map, .scale = 3}, 0, 0, all, all);
+        CHECK(PX(0, 0) == 42 && PX(2, 2) == 42 && PX(3, 0) == 9 && PX(0, 3) == 9 && PX(3, 3) == 43 && PX(5, 5) == 43 && PX(6, 6) == 9);
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &four, .scale = 3, .flags = DGX_GE_BLIT_SILHOUETTE, .color = 5}, 8, 0, all, all);
+        CHECK(PX(8, 0) == 5 && PX(11, 3) == 5 && PX(11, 0) == 9);
+        static const uint8_t eight_bits[] = {200, 0};    /* 2 x 1 of 8 bits */
+        const dgx_image_t    eight = {2, 1, 0, 0, 8, eight_bits};
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &eight, .scale = 2}, 0, 8, all, all);
+        CHECK(PX(0, 8) == 200 && PX(1, 9) == 200 && PX(2, 8) == 9);
+        static const uint8_t dot_bits[] = {0x80};       /* 2 x 1: 10, repeated a step of 4 (twice its width) along a clip */
+        const dgx_image_t    dot = {2, 1, 0, 0, 1, dot_bits};
+        memset(px, 9, 16 * 12);
+        dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &dot, .color = 1, .scale = 2, .flags = DGX_GE_ITEM_REPEAT, .clip = dgx_ge_rect(0, 10, 11, 2)}, 0, 10,
+                         dgx_ge_rect(0, 10, 11, 2), dgx_ge_rect(0, 10, 11, 2));
+        CHECK(PX(0, 10) == 1 && PX(1, 11) == 1 && PX(2, 10) == 9 && PX(4, 10) == 1 && PX(8, 11) == 1 && PX(9, 10) == 1 && PX(10, 10) == 9 && PX(11, 10) == 9);
+        /* scale 0 and 1: as DGX draws it */
+        static uint8_t by_dgx[16 * 12];
+        memset(px, 9, 16 * 12);
+        dgx_image_blit(s8, 5, 5, &one, &(dgx_image_blit_t){.color = 7, .orientation = DgxOutputMirrorX});
+        memcpy(by_dgx, px, sizeof by_dgx);
+        for (int k = 0; k < 2; ++k) {
+            memset(px, 9, 16 * 12);
+            dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &one, .color = 7, .scale = (uint8_t)k, .flags = DGX_GE_BLIT_FLIP_X}, 5, 5, all, all);
+            CHECK(!memcmp(px, by_dgx, sizeof by_dgx));
+        }
+#undef PX
+        dgx_screen_destroy(&s8);
+    }
+#if defined(__has_include)
+#if __has_include("dgx_overlay.h")
+    /*
+     * The display's overlay layer (DGX 0.6.6): a still game, nothing of the frame changed, yet a layer laid shows — mixed
+     * where it lies (black at half over white), nowhere else, the frame under its change sent again at x4 — and taken
+     * away, the frame shows there again
+     */
+    {
+        dgx_screen_t   *shown = dgx_vscreen_init(40, 24, 16, DgxScreenRGB);
+        dgx_ge_frame_t *f     = dgx_ge_frame_create(shown, 0, 0, 10, 6);
+        dgx_screen_t   *layer = dgx_vscreen_init(6, 6, 8, DgxScreenRGB);
+        static const uint16_t black[256];
+        CHECK(shown && f && layer && dgx_ge_frame_scale(f, 4));
+        dgx_ge_frame_set_palette(f, 0, 1, (const uint8_t[][3]){{255, 255, 255}});
+        dgx_ge_frame_present(f);
+        const uint32_t white = f->lut[0];
+        CHECK(dgx_get_pixel(shown, 9, 9) == white && !f->dirty_count);
+        dgx_fill_rectangle(layer, 0, 0, 6, 6, 1);
+        CHECK(dgx_overlay_set(shown, layer, 9, 9, black, 128));
+        dgx_ge_frame_present(f);
+        const uint32_t mixed = dgx_get_pixel(shown, 9, 9);
+        CHECK(mixed != white && mixed != 0 && dgx_get_pixel(shown, 14, 14) == mixed);
+        CHECK(dgx_get_pixel(shown, 8, 9) == white && dgx_get_pixel(shown, 15, 15) == white && dgx_get_pixel(shown, 30, 20) == white);
+        dgx_overlay_clear(shown);
+        dgx_ge_frame_present(f);
+        CHECK(dgx_get_pixel(shown, 9, 9) == white && dgx_get_pixel(shown, 14, 14) == white);
+        dgx_screen_destroy(&layer);
+        dgx_ge_frame_destroy(&f);
+        dgx_screen_destroy(&shown);
+    }
+#else
+    printf("test_scene.c: this DGX has no overlay layer (dgx_overlay.h, 0.6.6): not checked\n");
+#endif
+#endif
     CHECK_DONE();
 }

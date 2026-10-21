@@ -5,6 +5,9 @@
 
 #include "dgx_ge_talk_view.h"
 
+#define SCROLL_W 3 /* points: the bar beside more answers than lines, inside the frame's right edge */
+#define SCROLL_GAP 1 /* points between the bar and the border: a bar of its own, not a thicker border */
+
 static inline uint16_t u16_at(const uint8_t *p)
 {
     return (uint16_t)(p[0] | p[1] << 8);
@@ -112,8 +115,7 @@ static bool take_style(dgx_ge_talk_view_t *v, int number)
         s->x *= u, s->y *= u, s->w *= u, s->h *= u;
         for (int i = 0; i < 4; ++i) s->pad[i] = (uint8_t)(s->pad[i] * u);
         s->border_width = (uint8_t)(s->border_width * u);
-        s->portrait_w   = (uint8_t)(s->portrait_w * u);
-        if (s->frame == 2) s->frame = 1; /* pictures are not scaled: a border instead */
+        s->portrait_w   = (uint8_t)(s->portrait_w * u); /* its pictures (frame, portrait, controls) drawn u times larger */
     }
     const int fw = dgx_ge_frame_width(v->frame) * u, fh = dgx_ge_frame_height(v->frame) * u;
     const int w = s->w > 0 ? s->w : fw + s->w, h = s->h > 0 ? s->h : fh + s->h;
@@ -243,6 +245,9 @@ static void worked(dgx_ge_widget_t *w, int what, void *ctx)
         /* the row under the pointer chosen: the choice moved there; taken when let go */
         for (int k = 0; k < 16 && t->pick != w->value; ++k) dgx_ge_talk_event(t, t->pick < w->value ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
         if (what == DGX_GE_WIDGET_ACTIVATED) dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, v->now_ms);
+    } else if (w->kind == DGX_GE_WIDGET_SLIDER && (w->flags & DGX_GE_WIDGET_SWIPE) && what == DGX_GE_WIDGET_ACTIVATED) {
+        /* a tap on a slider's row: the row chosen, as a tap on any row; its value as it is */
+        for (int k = 0; k < 16 && t->pick != w->min_row; ++k) dgx_ge_talk_event(t, t->pick < w->min_row ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
     } else if ((w->kind == DGX_GE_WIDGET_SLIDER || w->kind == DGX_GE_WIDGET_SWITCH) && what == DGX_GE_WIDGET_CHANGED) {
         /* a control with a range put at a place: its answer chosen, then its own events (more, less) until it is there; its value as it came out */
         for (int k = 0; k < 16 && t->pick != w->min_row; ++k) dgx_ge_talk_event(t, t->pick < w->min_row ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
@@ -269,8 +274,8 @@ static bool control_box(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, int
     if (row >= DGX_GE_TALK_VIEW_CONTROLS || v->control_ids[row] < 0) return false;
     const dgx_ge_style_t *s   = &v->style;
     const dgx_image_t    *img = &v->control_images[row];
-    const int             right = v->box.x + v->box.w - s->pad[2] - (s->portrait == 2 ? s->portrait_w + s->pad[0] : 0);
-    *box = dgx_ge_rect(right - img->width, ty + row * lh + (lh - img->height) / 2, img->width, img->height);
+    const int             right = v->box.x + v->box.w - s->pad[2] - (s->portrait == 2 ? s->portrait_w + s->pad[0] : 0), u = v->unit;
+    *box = dgx_ge_rect(right - img->width * u, ty + row * lh + (lh - img->height * u) / 2, img->width * u, img->height * u);
     (void)t;
     return true;
 }
@@ -278,7 +283,11 @@ static bool control_box(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, int
 /* The widgets anew: what answers to a pointer where the fields are now (hit only; the view draws). */
 static void place_widgets(dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t)
 {
-    dgx_ge_widgets_init(&v->widgets, v->widget_store, DGX_GE_TALK_VIEW_CONTROLS + 3, 1);
+    /* the pointer down on one of them (a swipe going on): kept on the same one laid anew, with where it went down */
+    const dgx_ge_widgets_t was     = v->widgets;
+    const bool             held    = was.widgets && was.pressed >= 0 && was.pressed < was.count;
+    const dgx_ge_widget_t  pressed = held ? v->widget_store[was.pressed] : (dgx_ge_widget_t){0};
+    dgx_ge_widgets_init(&v->widgets, v->widget_store, (int)(sizeof v->widget_store / sizeof v->widget_store[0]), 1);
     const int root = dgx_ge_widgets_add(&v->widgets, -1, &(dgx_ge_widget_t){.kind = DGX_GE_WIDGET_BOX});
     const dgx_ge_rect_t place = text_place(v);
     if (t->state == DGX_GE_TALK_SAYING) {
@@ -287,24 +296,42 @@ static void place_widgets(dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t)
     } else if (t->state == DGX_GE_TALK_CHOOSING) {
         const int lh = v->answer_style.font ? dgx_ge_text_line(v->answer_style.font, v->answers.scale) : 0;
         const int rows = v->answers.shown, list_h = rows > 0 && lh > 0 ? rows * lh : place.h;
+        /* all the answers, the rows seen counted from the top line of their text: swiped up or down, the choice goes along */
         dgx_ge_widgets_add(&v->widgets, root, &(dgx_ge_widget_t){.kind = DGX_GE_WIDGET_LIST, .at_x = (int16_t)(place.x - v->box.x), .at_y = (int16_t)(place.y - v->box.y),
-                                                                 .want_w = (int16_t)place.w, .want_h = (int16_t)list_h, .min = (int16_t)v->answers.top,
-                                                                 .max = (int16_t)(v->answers.top + rows - 1), .value = (int16_t)t->pick, .on = worked, .ctx = v});
+                                                                 .want_w = (int16_t)place.w, .want_h = (int16_t)list_h, .text = &v->answers, .min = 0,
+                                                                 .max = (int16_t)(t->shown > 0 ? t->shown - 1 : 0), .value = (int16_t)t->pick, .on = worked, .ctx = v});
         for (int row = 0; row < rows; ++row) {
             dgx_ge_rect_t b;
             if (!control_box(v, t, row, place.y, lh, &b)) continue;
-            /* with a range: a switch (two values) or a slider over its picture, put at a place by the pointer; without: a button, worked as activate */
+            /*
+             * with a range: a switch (two values) or a slider over its picture, put at a place by the pointer, and a
+             * slider's whole row too, swiped (its picture may be too small to aim at; on it, the picture's own wins:
+             * the narrower); without a range: a button, worked as activate
+             */
             int value, least, most, step;
             const bool    ranged = dgx_ge_talk_control_range(t, v->answers.top + row, &value, &least, &most, &step);
             const uint8_t kind   = !ranged ? DGX_GE_WIDGET_BUTTON : most - least <= step ? DGX_GE_WIDGET_SWITCH : DGX_GE_WIDGET_SLIDER;
-            dgx_ge_widgets_add(&v->widgets, root, &(dgx_ge_widget_t){.kind = kind, .at_x = (int16_t)(b.x - v->box.x), .at_y = (int16_t)(b.y - v->box.y),
-                                                                     .want_w = (int16_t)b.w, .want_h = (int16_t)b.h,
-                                                                     .value = (int16_t)(ranged ? value : v->answers.top + row), .min = (int16_t)(ranged ? least : 0),
-                                                                     .max = (int16_t)(ranged ? most : 0), .step = (int16_t)(ranged ? step : 0),
-                                                                     .min_row = (int16_t)(v->answers.top + row), .on = worked, .ctx = v});
+            /* over its picture across, the row down (less the gap between rows): a finger a little above or below it still hits */
+            const int       gap = lh / DGX_GE_WIDGET_ROW_GAP;
+            dgx_ge_widget_t w   = {.kind = kind, .at_x = (int16_t)(b.x - v->box.x), .at_y = (int16_t)(place.y + row * lh + gap - v->box.y),
+                                   .want_w = (int16_t)b.w, .want_h = (int16_t)(lh - 2 * gap), .value = (int16_t)(ranged ? value : v->answers.top + row), .min = (int16_t)(ranged ? least : 0),
+                                 .max = (int16_t)(ranged ? most : 0), .step = (int16_t)(ranged ? step : 0),
+                                 .min_row = (int16_t)(v->answers.top + row), .on = worked, .ctx = v};
+            dgx_ge_widgets_add(&v->widgets, root, &w);
+            if (kind == DGX_GE_WIDGET_SLIDER) {
+                w.flags = DGX_GE_WIDGET_SWIPE, w.at_x = (int16_t)(place.x - v->box.x), w.want_w = (int16_t)place.w;
+                dgx_ge_widgets_add(&v->widgets, root, &w);
+            }
         }
     }
     dgx_ge_widgets_layout(&v->widgets, v->box);
+    for (int i = 0; held && i < v->widgets.count; ++i) {
+        const dgx_ge_widget_t *w = &v->widget_store[i];
+        if (w->kind != pressed.kind || w->flags != (pressed.flags & ~DGX_GE_WIDGET_FOCUSED) || w->min_row != pressed.min_row) continue;
+        v->widgets.pressed = (int8_t)i, v->widgets.press_x = was.press_x, v->widgets.press_y = was.press_y;
+        v->widgets.press_value = was.press_value, v->widgets.dragged = was.dragged;
+        break;
+    }
 }
 
 bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge_pointer_t *p, uint32_t now_ms)
@@ -334,7 +361,7 @@ void dgx_ge_talk_view_show(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, 
     if (s->frame == 2 && v->frame_pieces) {
         /* a frame of a picture: the fill under it, its corners where they are, its edges and its middle laid again and again between them */
         const dgx_image_t *p = v->frame_pieces;
-        const int          l = p[0].width, t = p[0].height, r = p[2].width, bt = p[6].height;
+        const int          u = v->unit, l = p[0].width * u, t = p[0].height * u, r = p[2].width * u, bt = p[6].height * u;
         const int          xs[3] = {b.x, b.x + l, b.x + b.w - r}, ws[3] = {l, b.w - l - r, r};
         const int          ys[3] = {b.y, b.y + t, b.y + b.h - bt}, hs[3] = {t, b.h - t - bt, bt};
         dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.clip = b, .layer = layer, .flags = DGX_GE_ITEM_FILL, .color = v->colors[0]});
@@ -343,7 +370,7 @@ void dgx_ge_talk_view_show(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, 
             dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = &p[i], .map = v->maps && set >= 0 ? v->maps[set] : NULL, .x = (int16_t)xs[i % 3],
                                                        .y = (int16_t)ys[i / 3], .clip = dgx_ge_rect(xs[i % 3], ys[i / 3], ws[i % 3], hs[i / 3]),
                                                        .layer = layer, .flags = i == 0 || i == 2 || i == 6 || i == 8 ? 0 : DGX_GE_ITEM_REPEAT,
-                                                       .color = v->colors[1]});
+                                                       .color = v->colors[1], .scale = (uint8_t)u});
         }
     } else if (s->frame == 1 || s->frame == 2) {
         /* the frame: its border, then its fill inside it (a frame of a picture without its pictures: as this) */
@@ -359,9 +386,9 @@ void dgx_ge_talk_view_show(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, 
         if (v->face_id >= 0) {
             const int set = dgx_ge_pack_image_set(v->pack, v->face_id);
             dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = &v->face, .map = v->maps && set >= 0 ? v->maps[set] : NULL,
-                                                       .x = (int16_t)(px + v->face.origin_x), .y = (int16_t)(ty + v->face.origin_y),
+                                                       .x = (int16_t)(px + v->face.origin_x * v->unit), .y = (int16_t)(ty + v->face.origin_y * v->unit),
                                                        .clip = dgx_ge_rect(px, ty, s->portrait_w, b.h - s->pad[1] - s->pad[3]), .layer = layer,
-                                                       .color = v->colors[2]});
+                                                       .color = v->colors[2], .scale = v->unit});
         }
         if (s->portrait == 1) tx += s->portrait_w + s->pad[0];
     }
@@ -382,16 +409,24 @@ void dgx_ge_talk_view_show(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, 
                                                        .flags = DGX_GE_ITEM_FILL, .color = v->colors[3]});
         dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = &v->answers.image, .map = v->answers.bits == 8 ? v->ink : NULL, .x = (int16_t)tx,
                                                    .y = (int16_t)ty, .layer = layer, .color = v->colors[2]});
+        if (v->answers.lines > v->answers.shown && v->answers.shown > 0 && lh > 0) {
+            /* more answers than lines: a bar at the right edge inside the frame, its knob as much and as far as the lines seen */
+            const int h = v->answers.shown * lh, kh = h * v->answers.shown / v->answers.lines, ky = h * v->answers.top / v->answers.lines;
+            const int sw = SCROLL_W * v->unit, bx = b.x + b.w - bw - SCROLL_GAP * v->unit - sw; /* points: times the unit in display pixels */
+            dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.clip = dgx_ge_rect(bx, ty, sw, h), .layer = layer, .flags = DGX_GE_ITEM_FILL, .color = v->colors[3]});
+            dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.clip = dgx_ge_rect(bx, ty + ky, sw, kh > 1 ? kh : 1), .layer = layer, .flags = DGX_GE_ITEM_FILL,
+                                                       .color = v->colors[2]});
+        }
         /* the controls: at the right of their lines (left of a portrait there), in the middle of each */
         const int right = b.x + b.w - s->pad[2] - (s->portrait == 2 ? s->portrait_w + s->pad[0] : 0);
         for (int row = 0; row < v->answers.shown && row < DGX_GE_TALK_VIEW_CONTROLS; ++row) {
             if (v->control_ids[row] < 0) continue;
             const dgx_image_t *img = &v->control_images[row];
-            const int          set = dgx_ge_pack_image_set(v->pack, v->control_ids[row]);
+            const int          set = dgx_ge_pack_image_set(v->pack, v->control_ids[row]), u = v->unit;
             dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = img, .map = v->maps && set >= 0 ? v->maps[set] : NULL,
-                                                       .x = (int16_t)(right - img->width + img->origin_x),
-                                                       .y = (int16_t)(ty + row * lh + (lh - img->height) / 2 + img->origin_y), .layer = layer,
-                                                       .color = v->colors[2]});
+                                                       .x = (int16_t)(right - (img->width - img->origin_x) * u),
+                                                       .y = (int16_t)(ty + row * lh + (lh - img->height * u) / 2 + img->origin_y * u), .layer = layer,
+                                                       .color = v->colors[2], .scale = (uint8_t)u});
         }
     }
 }

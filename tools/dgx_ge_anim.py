@@ -30,7 +30,8 @@ The language, a statement a line, '#' to the end of a line is a comment:
         accel 0 300                 pixels a second a second
         signal 3                    tell the game, 0..255
         sound 1                     a sound, 0..255
-        masks 0 2                   the masks of collisions active from now, 0..15
+        masks 0 2                   the masks of collisions active from now, 0..15; a mask, here as in contact
+                                    and hit, may be named as the pack names it (masks BODY TIP, as in its meets)
         carry hand SWORD_3          what is held at a point of the pictures from now (none: nothing):
                                     a frame of what is in the hand, as the hand moves
         contact on landed           look for contacts with the terrain (off: not); an event named is sent
@@ -65,6 +66,8 @@ The language, a statement a line, '#' to the end of a line is a comment:
         set drunk now + 10          now: the moment of the step, seconds of the clock of the game
         goto lost if timer(clock) >= 3600000   timer(NAME): milliseconds from the start of a timer of the game
                                     (dgx_ge_timers.h; -1 when it is not going)
+        velocity axis(lx) * 120, 0  axis(NAME): an axis of the player's pad (dgx_ge_input.h) at the moment of
+                                    the step: lx ly rx ry -1..1, the triggers lt rt 0..1; not in a path
         timer start bomb            a timer of the pack (pack.add_timer) started, its owner the one whose script
                                     this is (an actor, a life of a cell, the rules): its event comes back to it;
                                     timer stop, hold (its time stands), go (on from where it stood)
@@ -130,7 +133,7 @@ EXPR = {"num": 1, "param": 2, "t": 3, "+": 4, "-": 5, "*": 6, "/": 7, "neg": 8,
         "<": 19, "<=": 20, ">": 21, ">=": 22, "==": 23, "!=": 24, "and": 25, "or": 26, "not": 27, "now": 28, "count": 29, "amount": 30,
         "%": 31, "&": 32, "|": 33, "rnd": 34, "timer": 35, "?": 36, "x": 37, "y": 38, "smoothstep": 39,
         "xor": 40, "bits": 41, "bit": 42, "bitfield": 43, "table": 44, "its": 45, "game": 46,
-        "and_then": 47, "or_else": 48, "truth": 49, "if_not": 50, "jump": 51}
+        "and_then": 47, "or_else": 48, "truth": 49, "if_not": 50, "jump": 51, "axis": 52}
 COMPARE = ("<", "<=", ">", ">=", "==", "!=")
 VELOCITY_NAMES = ("vx", "vy")  # the velocity of the actor now, points a second, x forward
 POSITION_NAMES = ("x", "y")    # where the actor is now, points of the scene (x not forward: as it stands in the scene)
@@ -138,6 +141,7 @@ FUNCS = {"min": 2, "max": 2, "abs": 1, "sin": 1, "cos": 1, "sqrt": 1, "exp": 1, 
          "xor": 2, "bits": 1, "bit": 1, "field": 3}
 FUNC_OPS = {"field": "bitfield"}  # a name of the language whose step is named otherwise ("field" is the step of a word's field)
 UNFOLDED = ("rnd",)  # never worked out at assembly: the dice of the game, cast anew every time
+AXES = ("lx", "ly", "rx", "ry", "lt", "rt")  # axis(NAME): the axes of a pad in the order of DGX_GE_AXIS_* (dgx_ge_input.h)
 WORDS = ("and", "or", "not", "its", "game")  # of the language: no name may be one
 # what its. names beyond the params of the one a sense found, by what it is: a body (an actor) or a cell
 ITS_BODY = {"vx": 0xF0, "vy": 0xF1, "image": 0xF2, "script": 0xF3, "flip": 0xF4}
@@ -207,6 +211,7 @@ class Expr:
         self.tables = tables or {}
         self.its = its
         self.games = games or []
+        self.animation = games is not None  # an expression of an animation's own (games given): not of a tile, a dialog, the pack
         self.tokens = re.findall(r"0[xX][0-9a-fA-F]+|\d+\.?\d*|\.\d+|[A-Za-z_]\w*|<=|>=|==|!=|[-+*/%&|(),<>]|\S", text)
         self.i = 0
         self.defines, self.params, self.allow_t = defines, params, allow_t
@@ -331,6 +336,20 @@ class Expr:
             if self.timers.index(name) > 254:
                 raise AnimError(f"{self.where}: 255 timers at most")
             return ("timer", self.timers.index(name))
+        if tok == "axis" and self.peek() == "(" and tok not in self.defines and tok not in self.fields and not (self.params and tok in self.params):
+            if not self.actor or self.params is None or not self.animation:
+                # a tile is laid again only when its cell changes, a dialog's condition is looked at when shown: a stick in
+                # them would be seen as it was then, stale
+                raise AnimError(f"{self.where}: axis is read by a script of an animation, there is none here")
+            if self.allow_t:
+                # a path works out the place by t alone: the stick changes as the player moves it
+                raise AnimError(f"{self.where}: axis is not for a path: its formula gives the place by t alone")
+            self.take("(")
+            name = self.take()
+            self.take(")")
+            if name not in AXES:
+                raise AnimError(f"{self.where}: axis({name}): no such axis ({', '.join(AXES)})")
+            return ("axis", AXES.index(name))
         if tok == "its" and self.peek() == ".":
             self.take(".")
             name = self.take()
@@ -496,6 +515,9 @@ class Expr:
             elif node[0] == "timer":
                 out.extend(struct.pack("<BB", EXPR["timer"], node[1]))
                 depth += 1
+            elif node[0] == "axis":
+                out.extend(struct.pack("<BB", EXPR["axis"], node[1]))
+                depth += 1
             elif node[0] == "field":
                 out.extend(struct.pack("<BBBB", EXPR["field"], node[1], node[2], node[3]))
                 depth += 1
@@ -555,7 +577,7 @@ def whole(value, low, high, where):
     return v
 
 
-def assemble(text, images=None, points=None, events=None, kinds=None, timers=None, kind_params=None, own=None):
+def assemble(text, images=None, points=None, events=None, kinds=None, timers=None, kind_params=None, own=None, constants=None, masks=None):
     """
     The blob of a text, and the names of its scripts, events and params in
     order: Assembled(blob, scripts, events, params, games).
@@ -573,6 +595,10 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
     text alone.
     kind_params: the names of the params of kinds by their names, in order (for its. of a sense of that kind);
     own: (name, number) of this animation as a kind of the pack: a sense of its own kind.
+    constants: the game's names of numbers (TICK_MS) by their values: the text may write them wherever a number goes,
+    as if it defined them; it may not define them again.
+    masks: the masks of the pack by their names (BODY: 1), as in its meets: the text may name a mask where one goes
+    (masks, hit, contact).
     """
     images = images or {}
     points = points or {}
@@ -588,7 +614,9 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
     shared = events is not None
     events = events if shared else []
     declared = set()      # the events this text declares
-    defines = {}          # name -> value
+    constants = dict(constants or {})
+    defines = dict(constants)  # name -> value: the game's first
+    masks = masks or {}
     tables = {}           # name -> (offset after the code, values)
     games = []            # the questions to the game (game.<name>), by their numbers
     table_bytes = bytearray()
@@ -604,6 +632,10 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
     def const(text, low, high, where):
         """A number of the code, worked out here from an expression of numbers and defines."""
         return whole(constant(text, where), low, high, where)
+
+    def mask_of(text, where):
+        """A mask: its name in the pack, or a number."""
+        return masks[text] if text in masks else const(text, 0, 15, where)
 
     def constant(text, where):
         value = Expr(text, defines, None, False, where, tables=tables, games=games).constant()
@@ -633,6 +665,8 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     events.append(e)
         elif word == "define":
             m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\s+(.+)", rest)
+            if m and m.group(1) in constants:
+                raise AnimError(f"{where}: {m.group(1)} is a constant of the pack ({constants[m.group(1)]}): not to be defined again")
             if not m or m.group(1) in defines or m.group(1) in params or m.group(1) in tables or m.group(1) in ("t", "now") + VELOCITY_NAMES + POSITION_NAMES + WORDS or m.group(1) in FUNCS:
                 raise AnimError(f"{where}: define <name> <value>, a new name")
             defines[m.group(1)] = constant(m.group(2), where)
@@ -771,7 +805,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
             elif word == "contact" and rest.split()[:1] and rest.split()[0] not in ("on", "off"):
                 # contact <mask> <side> [within <points>] on <event> [off <event>] [first within <points>] | contact <mask> off
                 words = rest.split()
-                mask = const(words[0], 0, 15, where)
+                mask = mask_of(words[0], where)
                 if words[1:] == ["off"]:
                     code += struct.pack("<BBBBBB", OP["CONTACT_MASK"], mask, 0, 0, 0xFF, 0xFF)
                     continue
@@ -828,9 +862,9 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 words = rest.split()
                 if len(words) < 3 or words[1] != "on":
                     raise AnimError(f"{where}: hit <mask> on <masks> [damage n] [event e] [recoil e]")
-                mask, on, i = const(words[0], 0, 15, where), 0, 2
+                mask, on, i = mask_of(words[0], where), 0, 2
                 while i < len(words) and words[i] not in ("damage", "event", "recoil"):
-                    on |= 1 << const(words[i], 0, 15, where)
+                    on |= 1 << mask_of(words[i], where)
                     i += 1
                 if not on:
                     raise AnimError(f"{where}: hit {mask} on what?")
@@ -1049,7 +1083,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
             elif word == "masks":
                 bits = 0
                 for a in args:
-                    bits |= 1 << const(a, 0, 15, where)
+                    bits |= 1 << mask_of(a, where)
                 code += struct.pack("<BH", OP["MASKS"], bits)
             elif word == "goto" and re.search(r"\sif\s", rest):
                 m = re.fullmatch(r"(\w+)\s+if\s+(.+)", rest)

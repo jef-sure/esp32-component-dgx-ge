@@ -26,6 +26,7 @@ doc = {
     "format": "dgx-ge-sprites", "formatVersion": 1, "name": "t",
     "masks": [{"index": 1, "name": "body", "color": "#ff0000"}, {"index": 2, "name": "the blade", "color": "#0000ff"}],
     "meets": "foreign the_blade body\nown body body  # bump\n",
+    "constants": {"STEP": 100},
     "sets": [{
         "name": "hero", "defaultMask": 1, "canvas": {"left": -2, "top": -2, "width": 7, "height": 3},
         "frames": [
@@ -51,7 +52,7 @@ doc = {
 with open(os.path.join(out, "t.json"), "w") as f:
     json.dump(doc, f)
 with open(os.path.join(out, "hero.anim"), "w") as f:
-    f.write("event go\nscript stand\n    frame HERO_STAND_1 100ms\n    hold\n")
+    f.write("event go\nscript stand\n    masks BODY THE_BLADE\n    frame HERO_STAND_1 STEP ms\n    hold\n")
 
 os.makedirs(os.path.join(out, "dialogs"), exist_ok=True)
 os.makedirs(os.path.join(out, "po"), exist_ok=True)
@@ -74,6 +75,7 @@ def check(ok, what):
 check(sets == {"hero": 0} and pack.sets[0][1] == [(255, 0, 0), (0, 255, 0)], "the set and its colors")
 check(names == ["HERO_HIT_1", "HERO_STAND_1"] + [f"TALK_FRAME_{i}" for i in range(9)], f"picture names {names}")
 # the frame of the style talk: stand-1 cut by its insets (1 each) into nine pictures that make it again, row after row
+from dgx_ge_anim import assemble  # noqa: E402
 from dgx_ge_pack import unpack_pixels  # noqa: E402
 _, _, fw, fh, _, _, fbits, fdata = pack.images[1]
 whole = unpack_pixels(fdata, fw, fh, fbits)
@@ -99,6 +101,9 @@ check([(m[0], m[1], m[2], m[3], m[4], m[5]) for m in masks] == [(0, 1, -1, -2, 3
 check(sum(bin(b).count("1") for b in masks[2][6]) == 8, "the default mask of stand-1: its 8 points")
 check(pack.mask_names == {1: "BODY", 2: "THE_BLADE"}, f"mask names {pack.mask_names}")
 check([a[0] for a in pack.anims] == ["HERO"], "the animation next to the JSON")
+# its masks by their names, the file's constants: the bytes of the numbers
+plain = assemble("event go\nscript stand\n    masks 1 2\n    frame HERO_STAND_1 100ms\n    hold\n", {im[0]: i for i, im in enumerate(pack.images)})
+check(pack.constants == {"STEP": 100} and dict(pack.blobs)["HERO"] == plain.blob, "the masks by name and the constants of the file")
 check([t[0] for t in pack.tilesets] == ["STONE"] and pack.tilesets[0][1] == ["wall", "ledge", "gate"] and pack.tilesets[0][2] == ["back", "front"],
       f"tilesets {pack.tilesets}")
 tiles = dict(pack.blobs)["STONE"]

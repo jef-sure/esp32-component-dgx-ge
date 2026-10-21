@@ -30,6 +30,7 @@ bool dgx_ge_dialog_open(dgx_ge_dialog_t *d, const void *data, size_t size)
     const unsigned roles = p[6], code = u16_at(p + 8), start = u16_at(p + 10);
     if (roles > DGX_GE_DIALOG_ROLES || HEADER_BYTES + 6u * roles + code > size || start >= code) return false;
     d->roles = (uint8_t)roles;
+    d->flags = p[7];
     d->ui    = p + 12;
     d->kinds = p + HEADER_BYTES;
     d->names = d->kinds + 2 * roles;
@@ -137,7 +138,7 @@ static bool holds(const dgx_ge_talk_t *t, const uint8_t *expr)
     if (!expr[0]) return true;
     const dgx_ge_actor_t *a = chooser(t);
     if (a) return dgx_ge_actor_eval(a, expr) != 0;
-    const dgx_ge_expr_ctx_t c = {.now_ms = t->now_ms};
+    const dgx_ge_expr_ctx_t c = {.now_ms = t->now_ms - t->ahead_ms}; /* the world's moment */
     return dgx_ge_expr_eval(expr, &c) != 0;
 }
 
@@ -207,7 +208,7 @@ static void run(dgx_ge_talk_t *t)
             if (left < 3) goto over;
             dgx_ge_actor_t *a = actor_of(t, p[1]);
             t->pc += 3;
-            if (a) dgx_ge_actor_event(a, p[2], t->now_ms, t->say, t->ctx);
+            if (a) dgx_ge_actor_event(a, p[2], t->now_ms - t->ahead_ms, t->say, t->ctx); /* at the world's moment */
             break;
         }
         case OP_GIVE: {
@@ -219,7 +220,7 @@ static void run(dgx_ge_talk_t *t)
             /* as many as there are and go in, place after place */
             while (count > 0 && from && to && from->pockets && to->pockets) {
                 const int place = dgx_ge_pockets_find(from->pockets, kind);
-                const int moved = place >= 0 ? dgx_ge_pockets_move(from->pockets, place, count, to->pockets, -1, t->now_ms) : 0;
+                const int moved = place >= 0 ? dgx_ge_pockets_move(from->pockets, place, count, to->pockets, -1, t->now_ms - t->ahead_ms) : 0;
                 if (moved <= 0) break;
                 count -= moved;
             }
@@ -312,6 +313,11 @@ void dgx_ge_talk_event(dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms)
             run(t);
         }
     }
+}
+
+bool dgx_ge_talk_pauses(const dgx_ge_talk_t *t)
+{
+    return t->state != DGX_GE_TALK_OVER && t->dialog && (t->dialog->flags & DGX_GE_DIALOG_PAUSE);
 }
 
 void dgx_ge_talk_play(dgx_ge_talk_t *t, uint32_t now_ms, bool seen)

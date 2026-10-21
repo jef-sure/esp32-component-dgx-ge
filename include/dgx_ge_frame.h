@@ -70,8 +70,7 @@ typedef struct {
     dgx_ge_item_t *overlays, *shown_overlays;
     dgx_ge_rect_t *shown_boxes;
     uint8_t        overlay_count, shown_overlay_count, overlay_capacity;
-    bool           smooth; /* at a scale of 2 or 4: the points scaled by Scale2x (once, twice), not as blocks (dgx_ge_frame_smooth) */
-    uint8_t       *between; /* smoothing at 4: six rows of the frame scaled by 2, the middle two scaled again */
+    uint8_t        smooth; /* at a scale of 2, 3 or 4: how the points are scaled, DGX_GE_SMOOTH_* (dgx_ge_frame_smooth) */
 } dgx_ge_frame_t;
 
 #ifndef DGX_GE_FRAME_OVERLAYS
@@ -89,12 +88,15 @@ bool dgx_ge_frame_overlay(dgx_ge_frame_t *frame, const dgx_ge_item_t *item);
 void dgx_ge_frame_overlays_end(dgx_ge_frame_t *frame);
 
 /*
- * At a scale of 2 or 4, the points scaled smooth instead of as blocks: Scale2x (EPX) on the indices of the palette,
- * once at 2, twice at 4 — a corner of four points that lie like a step is filled in, so a slanted edge loses its
- * stairs; no new colors, no blur. The look of the game changes (it is the smoothing of the emulators), so it is a
- * choice of the game or the player, off by default. At other scales it does nothing. False: no memory.
+ * At a scale of 2, 3 or 4, the points scaled smooth instead of as blocks, on the indices of the palette, by DGX
+ * (DGX_VSCREEN_SMOOTH, _SMOOTH_SFX), the same with overlays and without: DGX_GE_SMOOTH_ON, Scale2x (EPX) at 2,
+ * Scale3x at 3, Scale2x twice at 4 — a corner of points that lie like a step is filled in, so a slanted edge loses its
+ * stairs; DGX_GE_SMOOTH_SFX, their SFX variants (Scale2xSFX, Scale3xSFX), which keep thin slanted lines whole and cost
+ * more. No new colors, no blur. The look of the game changes (it is the smoothing of the emulators), so it is a
+ * choice of the game or the player, off by default (true is DGX_GE_SMOOTH_ON). At other scales it does nothing.
  */
-bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, bool smooth);
+enum { DGX_GE_SMOOTH_NONE, DGX_GE_SMOOTH_ON, DGX_GE_SMOOTH_SFX };
+bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, int how);
 
 /*
  * The picture moved by dx, dy points (a scene whose window went the other way): the frame's own pixels move in

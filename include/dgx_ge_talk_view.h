@@ -104,7 +104,7 @@ typedef struct {
      * view draws as it does. The talk and the moment, for the callbacks while the pointer is told.
      */
     dgx_ge_widgets_t     widgets;
-    dgx_ge_widget_t      widget_store[DGX_GE_TALK_VIEW_CONTROLS + 3];
+    dgx_ge_widget_t      widget_store[2 * DGX_GE_TALK_VIEW_CONTROLS + 3]; /* the line, the list, a control each and a row to swipe a slider */
     dgx_ge_talk_t       *talk;
     uint32_t             now_ms;
     bool                 pixels;               /* laid in pixels of the display (its layer is one in pixels): the frame's scale its unit */
@@ -140,7 +140,7 @@ void dgx_ge_talk_view_pictures(dgx_ge_talk_view_t *view, const dgx_ge_pack_t *pa
  * style is laid with the frame's scale as its unit (a point of the style so many pixels), the text drawn at the
  * display's own resolution: a soft pen as smooth as the display; a font of pixels as large as the style says in
  * points, times the unit, unless that font was made for the display's scale already (fonts_made, a flag a font of
- * the game's table: the board built it at points x scale, dgx_ge_fonts.py) — then as it is. Pictures (a frame of nine pictures, a
+ * the game's table: DGX made it at points x scale from the game's requests, dgx_ge_fonts) — then as it is. Pictures (a frame of nine pictures, a
  * portrait, controls) are not scaled: a frame of pictures is drawn as a border instead. Taken anew when the frame's
  * scale changes.
  */

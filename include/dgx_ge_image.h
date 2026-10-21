@@ -22,11 +22,18 @@ extern "C" {
 #define DGX_GE_BLIT_FLIP_X     1u /* mirrored left to right about the column of its origin */
 #define DGX_GE_BLIT_SILHOUETTE 2u /* every pixel that is not 0 becomes the color, whatever the map */
 
+/* Where a picture drawn with its origin at x, y lies, each of its pixels a square of scale (0, 1: as it is). */
+static inline dgx_ge_rect_t dgx_ge_image_box_scaled(const dgx_image_t *image, int x, int y, bool flip, int scale)
+{
+    const int n    = scale > 1 ? scale : 1;
+    const int left = flip ? x - (image->width - 1 - image->origin_x) * n : x - image->origin_x * n;
+    return dgx_ge_rect(left, y - image->origin_y * n, image->width * n, image->height * n);
+}
+
 /* Where a picture drawn with its origin at x, y lies. */
 static inline dgx_ge_rect_t dgx_ge_image_box(const dgx_image_t *image, int x, int y, bool flip)
 {
-    const int left = flip ? x - (image->width - 1 - image->origin_x) : x - image->origin_x;
-    return dgx_ge_rect(left, y - image->origin_y, image->width, image->height);
+    return dgx_ge_image_box_scaled(image, x, y, flip, 1);
 }
 
 /* Rows of indices and the rectangle that may be changed. */
@@ -80,13 +87,14 @@ typedef struct {
     uint8_t               flags; /* DGX_GE_BLIT_*, DGX_GE_ITEM_* */
     uint8_t               color; /* of a 1-bit picture, a silhouette, a fill, a card */
     int8_t                feet_dx; /* seen in open space: its feet from the middle of the bottom of its body (no more room than the padding) */
+    uint8_t               scale;   /* each pixel of its picture a square of so many (0, 1: as it is): a picture in display pixels at the frame's scale */
 } dgx_ge_item_t;
 
 /* Are two items drawn the same (where, what, how)? */
 static inline bool dgx_ge_item_same(const dgx_ge_item_t *a, const dgx_ge_item_t *b)
 {
     return a->image == b->image && a->map == b->map && a->x == b->x && a->y == b->y && a->key == b->key && dgx_ge_rect_equal(a->clip, b->clip) &&
-           a->layer == b->layer && a->flags == b->flags && a->color == b->color;
+           a->layer == b->layer && a->flags == b->flags && a->color == b->color && a->scale == b->scale;
 }
 
 /*
