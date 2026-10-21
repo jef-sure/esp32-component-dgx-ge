@@ -57,27 +57,25 @@ tested.
 
 ## Getting started
 
-You need ESP-IDF 5.3 or newer and DGX 0.7.2 or newer, which the component
-takes from the ESP Component Registry by itself. The engine itself is not in
-the registry yet: clone it into your project's `components/` under the name
-`dgx-ge`, which is the name ESP-IDF then knows it by.
+You need ESP-IDF 5.3 or newer. The engine is in the ESP Component Registry;
+add it to the project's `main`, and DGX 0.7.2 or newer comes along by
+itself:
 
 ```sh
-git clone https://github.com/jef-sure/esp32-component-dgx-ge components/dgx-ge
+idf.py add-dependency "jef-sure/dgx-ge^0.1.1"
 ```
 
-The project's `CMakeLists.txt` tells the build how many params an actor
+The component manager puts it into `managed_components/jef-sure__dgx-ge`
+and makes `main` require it, so `main/CMakeLists.txt` needs no `REQUIRES`
+for it (if it names it, the name is `jef-sure__dgx-ge`). There, after
+`idf_component_register`, the build is told how many params an actor
 keeps, as many as the game's pack needs:
 
 ```cmake
-cmake_minimum_required(VERSION 3.22)
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-include(components/dgx-ge/dgx_ge.cmake)
-dgx_ge_params_of_pack(main/assets/game_pack.h)
-project(my-game)
+idf_component_register(SRCS "main.c" INCLUDE_DIRS "."
+                       EMBED_FILES "assets/game.pack")
+dgx_ge_params_of_pack(assets/game_pack.h)
 ```
-
-and `main` requires `dgx-ge`.
 
 A Python script of the game builds its pack with `tools/dgx_ge_pack.py`
 (`Pack`: `add_set`, `add_png`, `add_anim`, `add_dialog` and the rest, then
@@ -93,18 +91,22 @@ dgx_fonts_scale(4)
 dgx_fonts_rules(../fonts.rules)
 ```
 
-The tools need Python 3 and Pillow; fonts made for a board need a host C
+The tools lie in `managed_components/jef-sure__dgx-ge/tools/`. They need
+Python 3 and Pillow; fonts made for a board need a host C
 compiler, FreeType's headers and fontconfig as well.
 
 ## Tests
 
+The tests are in the repository, not in the registry's package:
+
 ```sh
-make -C test/host
+git clone https://github.com/jef-sure/esp32-component-dgx-ge
+make -C esp32-component-dgx-ge/test/host
 ```
 
-The tests take DGX from the managed components of the project the engine
-sits in, or from a DGX checkout next to it (`../esp32-component-dgx`);
-`DGX=<path>` takes any other.
+They take DGX from a checkout next to the engine's
+(`../esp32-component-dgx`), or from the managed components of a project the
+engine is cloned into; `DGX=<path>` takes any other.
 
 ## Documentation
 

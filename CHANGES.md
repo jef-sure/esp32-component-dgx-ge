@@ -1,5 +1,24 @@
 # Changes
 
+## 0.1.1 - 2026-10-21
+
+The first version in the ESP Component Registry (0.1.0 was taken back: its
+package carried the host tests).
+
+- **The package is the include list and nothing else.** The component
+  manager only adds the include list back after its excludes, so the
+  manifest now excludes everything first; `test/` and `.gitignore` no
+  longer go out.
+- **`dgx_ge_params_of_pack` comes from `project_include.cmake`** and is
+  called from `main/CMakeLists.txt` after `idf_component_register`, the
+  path from there; that works for the engine taken from the registry,
+  which is not there before `project()`. `dgx_ge.cmake` stays for a clone
+  in `components/`.
+- The README and the overviews tell how to take the engine from the
+  registry (`idf.py add-dependency "jef-sure/dgx-ge^0.1.1"`), the boards'
+  CMake snippets by their path in `managed_components/`, and the tests from
+  the repository.
+
 ## 0.1.0 - 2026-10-21
 
 Needs DGX 0.7.2 or newer.

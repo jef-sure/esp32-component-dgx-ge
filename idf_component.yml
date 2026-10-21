@@ -1,5 +1,5 @@
 ## IDF Component Manager Manifest File
-version: "0.1.0"
+version: "0.1.1"
 description: "A small engine of 2D and 2.5D games on top of DGX: an indexed frame sent by its changes and scaled, pictures from a pack in flash, actors living by animation scripts, tiles, masks, a world that lives on, dialogs, a sound mixer"
 url: https://github.com/jef-sure/esp32-component-dgx-ge
 repository: https://github.com/jef-sure/esp32-component-dgx-ge.git
@@ -28,6 +28,9 @@ maintainers:
 
 license: MIT
 
+# What goes out is the include list and nothing else. The component manager starts from the whole folder, takes
+# away its own defaults and the exclude list, and only then adds the include list back; so the exclude list takes
+# everything away first, and the include list says what returns.
 files:
   include:
     - "idf_component.yml"
@@ -51,7 +54,4 @@ files:
     - "docs/overview-en.md"
     - "docs/animation-en.md"
   exclude:
-    - "build/**"
-    - ".git/**"
-    - "test/host/build/**"
-    - "**/__pycache__/**"
+    - "**/*"

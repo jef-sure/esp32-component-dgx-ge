@@ -12,3 +12,20 @@ function(dgx_ge_fonts path)
     endif()
     dgx_font_needs_file("${abs}")
 endfunction()
+
+# dgx_ge_params_of_pack(<header>): the params an actor keeps, as the pack of the game needs them. Its header (made by
+# dgx_ge_pack.py) says how many at most, <PREFIX>_ANIM_PARAMS; the whole build (the engine and the game alike) gets
+# DGX_GE_ANIM_PARAMS so many. The path from the CMakeLists that calls it, after its idf_component_register:
+#     dgx_ge_params_of_pack(assets/game_pack.h)
+# ESP-IDF hands build definitions to every component when the build is generated, so one set here reaches the engine
+# as well, though the engine's CMakeLists may have been read before.
+function(dgx_ge_params_of_pack header)
+    get_filename_component(path "${header}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+    file(STRINGS "${path}" line REGEX "^#define [A-Z0-9_]+_ANIM_PARAMS [0-9]+$")
+    if(NOT line)
+        message(FATAL_ERROR "${path}: no _ANIM_PARAMS (made by dgx_ge_pack.py with animations?)")
+    endif()
+    string(REGEX REPLACE "^.* ([0-9]+)$" "\\1" params "${line}")
+    idf_build_set_property(COMPILE_DEFINITIONS "DGX_GE_ANIM_PARAMS=${params}" APPEND)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
+endfunction()

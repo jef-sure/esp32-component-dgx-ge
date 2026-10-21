@@ -702,7 +702,7 @@ if (hero.params[MYGAME_HERO_PARAM_HP] <= 0) dgx_ge_actor_event(&hero, MYGAME_HER
 ```
 
 How many params each actor keeps is worked out by the pack build: as many
-as the greediest animation needs (Part 3, "Try it", `dgx_ge.cmake`).
+as the greediest animation needs (Part 3, "Try it", `dgx_ge_params_of_pack`).
 
 #### Scripts in plain words
 
@@ -1105,10 +1105,9 @@ does not depend on their drivers. A game picks one board explicitly, in its
 `main/CMakeLists.txt`:
 
 ```cmake
-include(${CMAKE_CURRENT_LIST_DIR}/../components/dgx-ge/boards/cyd.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../managed_components/jef-sure__dgx-ge/boards/cyd.cmake)
 idf_component_register(SRCS "main.c" ${BOARD_SRCS}
                        INCLUDE_DIRS "." ${BOARD_INCLUDE_DIRS}
-                       REQUIRES dgx-ge
                        PRIV_REQUIRES ${BOARD_REQUIRES})
 ```
 
@@ -1162,15 +1161,17 @@ previous one is ready, and the actors' time is real time.
 
 The engine's core is plain C on top of DGX's virtual screens, so it builds
 for a computer too: the hardware is replaced by ESP-IDF stubs that come with
-DGX. The engine's tests:
+DGX. The engine's tests are in its repository, not in the registry's
+package:
 
 ```sh
-make -C components/dgx-ge/test/host      # the engine inside an ESP-IDF project
-make -C test/host                        # a standalone copy of the engine
+git clone https://github.com/jef-sure/esp32-component-dgx-ge
+make -C esp32-component-dgx-ge/test/host
 ```
 
-DGX is taken from the project's components or from a neighboring directory,
-`esp32-component-dgx`; another copy can be given with `DGX=<path>`.
+DGX is taken from a neighboring directory, `esp32-component-dgx`, or from
+the managed components of a project the engine is cloned into; another copy
+can be given with `DGX=<path>`.
 
 Your own game can be built the same way: the picture the board would have
 drawn can be saved to a file or shown in a window. Which DGX files and which
@@ -1178,20 +1179,21 @@ stubs that takes can be seen in `test/host/Makefile`.
 
 ### Your own project
 
-1. Put the engine into `components/dgx-ge` of your ESP-IDF project. DGX
-   comes along by itself as a dependency (`jef-sure/dgx`).
+1. Add the engine to your ESP-IDF project from the registry:
+   `idf.py add-dependency "jef-sure/dgx-ge^0.1.1"`. It lands in
+   `managed_components/jef-sure__dgx-ge`, `main` requires it by itself, and
+   DGX comes along as its dependency (`jef-sure/dgx`).
 2. Write a Python script that builds the pack (`Pack`, section 2.2). How to
    write each kind of data is described at the start of
    `tools/dgx_ge_pack.py`. Every kind at once, from pictures to dialogs,
-   goes into the engine's test pack, `test/host/make_test_pack.py`. It is a
-   test, not a game, but it serves well as a reference.
-3. In the project's `CMakeLists.txt`, include `dgx_ge.cmake` after
-   `project.cmake`. It learns from the pack header how many params each
-   actor has to keep:
+   goes into the engine's test pack, `test/host/make_test_pack.py` in the
+   repository. It is a test, not a game, but it serves well as a reference.
+3. In `main/CMakeLists.txt`, after `idf_component_register`, call
+   `dgx_ge_params_of_pack`. It learns from the pack header how many params
+   each actor has to keep:
 
    ```cmake
-   include(components/dgx-ge/dgx_ge.cmake)
-   dgx_ge_params_of_pack(main/assets/mygame_pack.h)
+   dgx_ge_params_of_pack(assets/mygame_pack.h)
    ```
 
 4. Put the pack into the firmware (`EMBED_FILES "assets/mygame.pack"` in

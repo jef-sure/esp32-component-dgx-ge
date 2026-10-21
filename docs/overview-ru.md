@@ -675,7 +675,7 @@ if (hero.params[MYGAME_HERO_PARAM_HP] <= 0) dgx_ge_actor_event(&hero, MYGAME_HER
 ```
 
 Сколько параметров хранит каждый актёр, считает сборка пакета: столько,
-сколько нужно самой жадной анимации (раздел «Попробовать», `dgx_ge.cmake`).
+сколько нужно самой жадной анимации (раздел «Попробовать», `dgx_ge_params_of_pack`).
 
 #### Скрипты человеческим языком
 
@@ -1053,10 +1053,9 @@ if (dgx_ge_load_open(&l, bytes, n, dgx_ge_pack_id(pack), &saved_ms) &&
 `main/CMakeLists.txt`:
 
 ```cmake
-include(${CMAKE_CURRENT_LIST_DIR}/../components/dgx-ge/boards/cyd.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../managed_components/jef-sure__dgx-ge/boards/cyd.cmake)
 idf_component_register(SRCS "main.c" ${BOARD_SRCS}
                        INCLUDE_DIRS "." ${BOARD_INCLUDE_DIRS}
-                       REQUIRES dgx-ge
                        PRIV_REQUIRES ${BOARD_REQUIRES})
 ```
 
@@ -1110,15 +1109,17 @@ for (;;) {
 
 Ядро движка — обычный C поверх виртуальных экранов DGX. Поэтому оно
 собирается и под компьютер: вместо железа подставляются заглушки ESP-IDF,
-которые лежат в DGX. Проверки движка:
+которые лежат в DGX. Проверки движка лежат в его репозитории, в пакет
+регистра они не входят:
 
 ```sh
-make -C components/dgx-ge/test/host      # движок в проекте ESP-IDF
-make -C test/host                        # отдельная копия движка
+git clone https://github.com/jef-sure/esp32-component-dgx-ge
+make -C esp32-component-dgx-ge/test/host
 ```
 
-DGX берётся из компонентов проекта или из соседнего каталога
-`esp32-component-dgx`; другую копию можно указать: `DGX=<путь>`.
+DGX берётся из соседнего каталога `esp32-component-dgx` или из управляемых
+компонентов проекта, в который движок склонирован; другую копию можно
+указать: `DGX=<путь>`.
 
 Так же можно собрать и свою игру: картинку, которую нарисовала бы плата,
 сохранить в файл или показать в окне. Какие файлы DGX и какие заглушки для
@@ -1126,20 +1127,21 @@ DGX берётся из компонентов проекта или из сос
 
 ### Свой проект
 
-1. Положите движок в `components/dgx-ge` своего проекта ESP-IDF. DGX
-   подтянется сам как зависимость (`jef-sure/dgx`).
+1. Добавьте движок в свой проект ESP-IDF из регистра:
+   `idf.py add-dependency "jef-sure/dgx-ge^0.1.1"`. Он ляжет в
+   `managed_components/jef-sure__dgx-ge`, `main` будет требовать его сам,
+   а DGX подтянется как его зависимость (`jef-sure/dgx`).
 2. Напишите скрипт сборки пакета на Python (`Pack`, раздел 2.2). Как
    записать каждый вид данных, сказано в начале `tools/dgx_ge_pack.py`.
    Все виды сразу, от картинок до диалогов, собирает тестовый пакет
-   движка `test/host/make_test_pack.py`. Это проверка, а не игра, но как
+   движка `test/host/make_test_pack.py` в репозитории. Это проверка, а не игра, но как
    справочник он годится.
-3. В `CMakeLists.txt` проекта после `project.cmake` подключите
-   `dgx_ge.cmake`. Он узнаёт из заголовка пакета, сколько параметров
-   хранить каждому актёру:
+3. В `main/CMakeLists.txt` после `idf_component_register` вызовите
+   `dgx_ge_params_of_pack`. Он узнаёт из заголовка пакета, сколько
+   параметров хранить каждому актёру:
 
    ```cmake
-   include(components/dgx-ge/dgx_ge.cmake)
-   dgx_ge_params_of_pack(main/assets/mygame_pack.h)
+   dgx_ge_params_of_pack(assets/mygame_pack.h)
    ```
 
 4. Положите пакет в прошивку (`EMBED_FILES "assets/mygame.pack"` в

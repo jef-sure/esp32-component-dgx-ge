@@ -1,5 +1,6 @@
 # made by the build and the tests
 build/
+dist/
 test/host/build/
 __pycache__/
 *.pyc

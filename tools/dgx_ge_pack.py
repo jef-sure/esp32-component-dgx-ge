@@ -1678,7 +1678,7 @@ class Pack:
             lines.append("")
         if self.anims:
             # the params an actor of the pack keeps at most: the engine is built with DGX_GE_ANIM_PARAMS no fewer
-            # (dgx_ge.cmake: dgx_ge_params_of_pack); an animation with more than it keeps does not open. Two at least:
+            # (dgx_ge_params_of_pack, project_include.cmake); an animation with more than it keeps does not open. Two at least:
             # the lives of cells keep a cell's modifier and tile in the first two (dgx_ge_cells.c)
             lines += [f"#define {self.prefix}_ANIM_PARAMS {max(max(len(p) for *_, p in self.anims), 2)}", ""]
         for name, scripts, events, params in self.anims:
