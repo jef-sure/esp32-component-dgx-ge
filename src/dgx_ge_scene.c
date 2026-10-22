@@ -4,18 +4,18 @@
 #include "dgx_ge_scene.h"
 
 /*
- * The order of drawing as one number a picture: its layer, its key, set or
- * actor, and its number, from the high bits down. Numbers differ, so the
- * order is the same however it is sorted.
+ * The order of drawing: by layer, each layer's pictures counted out into its
+ * part of the order; in a layer as one number a picture, its key and its
+ * number (the set's first, the actors' after them: the set's capacity and
+ * on), from the high bits down. Numbers differ, so the order is the same
+ * however it is sorted.
  */
-#define ORDER_INDEX_BITS 12
-#define ORDER_ACTOR      (1u << ORDER_INDEX_BITS)
-#define ORDER_INDEX_MASK (ORDER_ACTOR - 1u)
+#define ORDER_NUMBER 0xFFFFu
 
 dgx_ge_scene_t *dgx_ge_scene_create(dgx_ge_frame_t *frame, int layers, int set_capacity, int actor_capacity)
 {
     if (layers < 1 || layers > DGX_GE_SCENE_MAX_LAYERS || set_capacity < 0 || actor_capacity < 0) return NULL;
-    if (set_capacity + actor_capacity > (int)ORDER_INDEX_MASK) return NULL;
+    if (set_capacity + actor_capacity > (int)ORDER_NUMBER) return NULL;
     dgx_ge_scene_t *scene = calloc(1, sizeof(*scene));
     if (!scene) return NULL;
     scene->frame          = frame;
@@ -102,15 +102,29 @@ bool dgx_ge_scene_shift(dgx_ge_scene_t *scene, int dx, int dy)
     return true;
 }
 
-/* Where an item lies in the frame now, cut by its own clip; empty when it shows nothing. */
 static int floor_div(int a, int b);
 
+/*
+ * The window the frame holds the picture of: the one shown last, until it is drawn again. A place is marked there,
+ * whenever the window moves in between: the frame's scroll takes the marks along to where the window is then.
+ */
+static int16_t frame_window_x(const dgx_ge_scene_t *scene)
+{
+    return scene->window_shown ? scene->shown_window_x : scene->window_x;
+}
+
+static int16_t frame_window_y(const dgx_ge_scene_t *scene)
+{
+    return scene->window_shown ? scene->shown_window_y : scene->window_y;
+}
+
+/* Where an item lies in the frame, cut by its own clip; empty when it shows nothing. */
 static dgx_ge_rect_t item_box(const dgx_ge_scene_t *scene, const dgx_ge_item_t *item, dgx_ge_rect_t *clip)
 {
     const bool fill = item->flags & DGX_GE_ITEM_FILL, over_clip = fill || (item->flags & DGX_GE_ITEM_REPEAT);
     if ((!item->image && !fill) || item->layer >= scene->layer_count) return dgx_ge_rect(0, 0, 0, 0);
     const int     factor = scene->layers[item->layer].factor;
-    const int     dx = -(scene->window_x * factor >> 8), dy = -(scene->window_y * factor >> 8);
+    const int     dx = -(frame_window_x(scene) * factor >> 8), dy = -(frame_window_y(scene) * factor >> 8);
     dgx_ge_rect_t box = over_clip ? dgx_ge_rect(item->clip.x + dx, item->clip.y + dy, item->clip.w, item->clip.h)
                              : dgx_ge_image_box_scaled(item->image, item->x + dx, item->y + dy, item->flags & DGX_GE_BLIT_FLIP_X, item->scale);
     dgx_ge_rect_t own = scene->frame->canvas.clip;
@@ -147,8 +161,8 @@ void dgx_ge_scene_set_end(dgx_ge_scene_t *scene)
 void dgx_ge_scene_invalidate(dgx_ge_scene_t *scene, int layer, dgx_ge_rect_t place)
 {
     const int factor = layer >= 0 && layer < scene->layer_count ? scene->layers[layer].factor : 256;
-    place.x          = (int16_t)(place.x - (scene->window_x * factor >> 8));
-    place.y          = (int16_t)(place.y - (scene->window_y * factor >> 8));
+    place.x          = (int16_t)(place.x - (frame_window_x(scene) * factor >> 8));
+    place.y          = (int16_t)(place.y - (frame_window_y(scene) * factor >> 8));
     dgx_ge_frame_invalidate(scene->frame, place);
 }
 
@@ -240,11 +254,15 @@ static bool same_shown(const dgx_ge_item_t *shown, const dgx_ge_item_t *actor)
     return dgx_ge_item_same(shown, &a);
 }
 
+static int layer_of(const dgx_ge_scene_t *scene, const dgx_ge_item_t *item)
+{
+    return item->layer < scene->layer_count ? item->layer : 0;
+}
+
 static uint32_t order_of(const dgx_ge_scene_t *scene, const dgx_ge_item_t *item, uint32_t number)
 {
-    const uint32_t layer = item->layer < scene->layer_count ? item->layer : 0;
-    const uint32_t key   = scene->layers[layer].order == DGX_GE_ORDER_KEY ? (uint32_t)(item->key + 32768) : 0u;
-    return layer << 29 | key << 13 | number;
+    const uint32_t key = scene->layers[layer_of(scene, item)].order == DGX_GE_ORDER_KEY ? (uint32_t)(item->key + 32768) : 0u;
+    return key << 16 | number;
 }
 
 static int compare_order(const void *a, const void *b)
@@ -296,11 +314,16 @@ void dgx_ge_scene_draw(dgx_ge_scene_t *scene)
     scene->shown_count = scene->actor_count;
     if (!frame->dirty_count) return;
 
-    /* the order of drawing */
-    int n = 0;
-    for (int i = 0; i < scene->set_count; ++i) scene->order[n++] = order_of(scene, &scene->set[i], (uint32_t)i);
-    for (int i = 0; i < scene->actor_count; ++i) scene->order[n++] = order_of(scene, &scene->actors[i], ORDER_ACTOR | (uint32_t)i);
-    qsort(scene->order, (size_t)n, sizeof(uint32_t), compare_order);
+    /* the order of drawing: the parts of the layers, each sorted */
+    int start[DGX_GE_SCENE_MAX_LAYERS + 1] = {0}, at[DGX_GE_SCENE_MAX_LAYERS];
+    for (int i = 0; i < scene->set_count; ++i) ++start[layer_of(scene, &scene->set[i]) + 1];
+    for (int i = 0; i < scene->actor_count; ++i) ++start[layer_of(scene, &scene->actors[i]) + 1];
+    for (int l = 0; l < scene->layer_count; ++l) start[l + 1] += start[l], at[l] = start[l];
+    for (int i = 0; i < scene->set_count; ++i) scene->order[at[layer_of(scene, &scene->set[i])]++] = order_of(scene, &scene->set[i], (uint32_t)i);
+    for (int i = 0; i < scene->actor_count; ++i)
+        scene->order[at[layer_of(scene, &scene->actors[i])]++] = order_of(scene, &scene->actors[i], scene->set_capacity + (uint32_t)i);
+    for (int l = 0; l < scene->layer_count; ++l) qsort(scene->order + start[l], (size_t)(start[l + 1] - start[l]), sizeof(uint32_t), compare_order);
+    const int n = start[scene->layer_count];
 
     /* every changed place from the paper up; DGX marks what it draws in the buffer, as one batch */
     dgx_screen_progress_up(frame->buffer);
@@ -310,8 +333,8 @@ void dgx_ge_scene_draw(dgx_ge_scene_t *scene)
         canvas.clip               = place;
         dgx_ge_canvas_fill(&canvas, place, scene->paper);
         for (int k = 0; k < n; ++k) {
-            const uint32_t       o = scene->order[k], i = o & ORDER_INDEX_MASK;
-            const dgx_ge_item_t *item = o & ORDER_ACTOR ? &scene->actors[i] : &scene->set[i];
+            const uint32_t       i    = scene->order[k] & ORDER_NUMBER;
+            const dgx_ge_item_t *item = i >= scene->set_capacity ? &scene->actors[i - scene->set_capacity] : &scene->set[i];
             dgx_ge_rect_t        clip;
             dgx_ge_rect_t        box = item_box(scene, item, &clip);
             if (!dgx_ge_rect_overlap(box, place)) continue;

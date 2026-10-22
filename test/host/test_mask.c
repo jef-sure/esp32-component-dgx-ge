@@ -221,5 +221,16 @@ int main(void)
     CHECK(dgx_ge_collisions_touching(reg, &stander, 1, 1, 1, 2, touched, NULL) == 1 && last_touch.area.points == 4); /* within 2 every point of it has one of the floor under it */
     dgx_ge_collisions_destroy(&reg);
     free(data);
+
+    /* two masks of 256 x 256 one over the other: 65536 points meet, more than an area counts (it says as many as it can), its middle in the middle */
+    static uint8_t      screen[256 * 32];
+    memset(screen, 0xFF, sizeof(screen));
+    const dgx_ge_mask_t whole = {.index = 0, .width = 256, .height = 256, .bits = screen};
+    n = dgx_ge_masks_overlap(&whole, 0, 0, false, &whole, 0, 0, false, 8, areas);
+    CHECK(n == 1 && areas[0].points == 0xFFFF && areas[0].box.w == 256 && areas[0].box.h == 256);
+    CHECK(areas[0].cx >= 126 && areas[0].cx <= 128 && areas[0].cy >= 126 && areas[0].cy <= 128);
+    /* in one tile of them all (a tile as large as the overlap): still met, the same middle */
+    n = dgx_ge_masks_overlap(&whole, 0, 0, false, &whole, 0, 0, false, 256, areas);
+    CHECK(n == 1 && areas[0].points == 0xFFFF && areas[0].cx >= 126 && areas[0].cx <= 128 && areas[0].cy >= 126 && areas[0].cy <= 128);
     CHECK_DONE();
 }

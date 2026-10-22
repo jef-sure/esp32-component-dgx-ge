@@ -138,10 +138,11 @@ bool dgx_ge_layout_actor_start(const dgx_ge_layout_t *l, int n, dgx_ge_actor_t *
     const dgx_ge_anim_t  *anim = dgx_ge_layout_actor(l, n, &a) ? dgx_ge_kind(kinds, a.kind) : NULL;
     if (!anim) return false;
     dgx_ge_actor_start(actor, anim, a.script, a.x, a.y, now_ms);
-    actor->flip = a.flip;
+    /* it enters its script so: facing, the params given (a record of the world made from it keeps them) */
+    actor->flip = actor->entered_flip = a.flip;
     for (int i = 0; i < a.params; ++i) {
         const uint8_t *g = a.given + PARAM * i;
-        if (g[0] < DGX_GE_ANIM_PARAMS) actor->params[g[0]] = i16_at(g + 2);
+        if (g[0] < DGX_GE_ANIM_PARAMS) actor->params[g[0]] = actor->entered_params[g[0]] = i16_at(g + 2);
     }
     return true;
 }

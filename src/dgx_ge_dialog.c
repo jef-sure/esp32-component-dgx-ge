@@ -1,4 +1,6 @@
+#include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "dgx_ge_dialog.h"
@@ -78,7 +80,7 @@ const char *dgx_ge_string(const dgx_ge_strings_t *s, int id)
 
 int dgx_ge_strings_form(const dgx_ge_strings_t *s, int n, int forms)
 {
-    const int16_t           param = (int16_t)n;
+    const int32_t           param = n;
     const dgx_ge_expr_ctx_t c     = {.params = &param, .param_count = 1};
     const int               form  = s && s->rule ? (int)dgx_ge_expr_eval(s->rule, &c) : n != 1;
     return form < 0 ? 0 : form >= forms ? forms - 1 : form;
@@ -86,11 +88,11 @@ int dgx_ge_strings_form(const dgx_ge_strings_t *s, int n, int forms)
 
 const char *dgx_ge_strings_number(const dgx_ge_strings_t *s, int first, int forms, int n, char *out, size_t size)
 {
-    const int16_t one = (int16_t)n;
+    const int32_t one = n;
     return dgx_ge_strings_numbers(s, first, forms, &one, 1, out, size);
 }
 
-const char *dgx_ge_strings_numbers(const dgx_ge_strings_t *s, int first, int forms, const int16_t *n, int count, char *out, size_t size)
+const char *dgx_ge_strings_numbers(const dgx_ge_strings_t *s, int first, int forms, const int32_t *n, int count, char *out, size_t size)
 {
     if (!size) return out;
     const char *text = dgx_ge_string(s, first + (forms > 1 && count > 0 ? dgx_ge_strings_form(s, n[0], forms) : 0));
@@ -99,10 +101,11 @@ const char *dgx_ge_strings_numbers(const dgx_ge_strings_t *s, int first, int for
     for (const char *p = text; *p && o + 1 < size;) {
         const char *close = *p == '{' ? strchr(p, '}') : NULL;
         if (close) {
-            char      digits[8];
-            const int nd = count > 0 ? snprintf(digits, sizeof digits, "%d", n[k < count ? k : count - 1]) : 0;
+            /* {name}: the next number; {i} (the packer's, a translation in another order): the number of that place */
+            const int at = p[1] >= '0' && p[1] <= '9' ? atoi(p + 1) : k++;
+            char      digits[12]; /* -2147483648 */
+            const int nd = count > 0 ? snprintf(digits, sizeof digits, "%" PRId32, n[at < count ? at : count - 1]) : 0;
             for (int i = 0; i < nd && o + 1 < size; ++i) out[o++] = digits[i];
-            ++k;
             p = close + 1;
         } else {
             out[o++] = *p++;
@@ -182,7 +185,7 @@ static void run(dgx_ge_talk_t *t)
                 t->forms                    = p[7] ? p[7] : 1;
                 t->count                    = p[0] == OP_SAY_N ? 1 : p[8];
                 for (int i = 0; i < t->count; ++i) {
-                    const int16_t v = a && a->anim && param[i] < a->anim->params ? a->params[param[i]] : 0;
+                    const int32_t v = a && a->anim && param[i] < a->anim->params ? a->params[param[i]] : 0;
                     if (i) t->more[i - 1] = v;
                     else t->number = v;
                 }
@@ -200,7 +203,7 @@ static void run(dgx_ge_talk_t *t)
             t->shown = 0;
             while (answer_at(t, t->shown)) ++t->shown;
             if (!t->shown) break; /* nothing to say to it: on past it */
-            t->state = DGX_GE_TALK_CHOOSING, t->pick = 0;
+            t->state = DGX_GE_TALK_CHOOSING, t->pick = 0, ++t->choices;
             t->wait_ms = u16_at(p + 3), t->since_ms = t->now_ms;
             return;
         }
@@ -248,7 +251,7 @@ void dgx_ge_talk_start(dgx_ge_talk_t *t, const dgx_ge_dialog_t *dialog, const dg
     memset(t, 0, sizeof(*t));
     t->dialog = dialog;
     for (int i = 0; i < dialog->roles && i < DGX_GE_DIALOG_ROLES; ++i) t->actors[i] = cast && cast->roles ? cast->roles[i] : NULL;
-    if (cast) t->game = cast->game, t->kinds = cast->kinds;
+    if (cast) t->game = cast->game, t->kinds = cast->kinds, t->fields = cast->fields, t->field_count = cast->fields ? cast->field_count : 0;
     t->pc     = dialog->start;
     t->style  = style;
     t->now_ms = now_ms;
@@ -261,7 +264,8 @@ void dgx_ge_talk_start(dgx_ge_talk_t *t, const dgx_ge_dialog_t *dialog, const dg
 static bool control_actor(const dgx_ge_talk_t *t, const uint8_t *a, dgx_ge_actor_t *c)
 {
     const dgx_ge_actor_t *owner = chooser(t);
-    const dgx_ge_anim_t  *anim  = u16_at(a + 4) != NO_KIND && t->kinds ? dgx_ge_kind(t->kinds, u16_at(a + 4)) : NULL;
+    const uint16_t        kind  = u16_at(a + 4);
+    const dgx_ge_anim_t  *anim  = kind != NO_KIND && kind != DGX_GE_DIALOG_FIELD && t->kinds ? dgx_ge_kind(t->kinds, kind) : NULL;
     if (!anim || !owner || a[6] >= DGX_GE_ANIM_PARAMS) return false;
     dgx_ge_actor_start(c, anim, 0, 0, 0, t->now_ms);
     c->params[0] = owner->params[a[6]];
@@ -287,14 +291,35 @@ static void tell_control(dgx_ge_talk_t *t, const uint8_t *a, int which)
     if (t->pick >= t->shown) t->pick = t->shown ? (uint8_t)(t->shown - 1) : 0;
 }
 
+/* An answer taken: on to its label (none, or past the end: the talk is over). */
+static void take(dgx_ge_talk_t *t, const uint8_t *a)
+{
+    if (!a || u16_at(a + 2) >= t->dialog->size) {
+        t->state = DGX_GE_TALK_OVER;
+        return;
+    }
+    t->pc = u16_at(a + 2);
+    run(t);
+}
+
 void dgx_ge_talk_event(dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms)
 {
     t->now_ms = now_ms;
+    if (t->editing) return; /* a field edited: the one showing it says when it is done */
     if (t->state == DGX_GE_TALK_SAYING) {
         if (event == DGX_GE_UI_ACTIVATE || event == DGX_GE_UI_NEXT) run(t);
     } else if (t->state == DGX_GE_TALK_CHOOSING) {
         const uint8_t *a       = answer_at(t, t->pick);
-        const bool     control = a && u16_at(a + 4) != NO_KIND;
+        const bool     field   = a && u16_at(a + 4) == DGX_GE_DIALOG_FIELD;
+        const bool     control = a && u16_at(a + 4) != NO_KIND && !field;
+        /* a field: activate edits it (a field the game did not give stays as it is) */
+        if (field) {
+            if (event == DGX_GE_UI_ACTIVATE && dgx_ge_talk_field(t, t->pick)) {
+                t->editing = true;
+                return;
+            }
+            if (event == DGX_GE_UI_ACTIVATE) return;
+        }
         /* more, less: the control's; without one they move the choice */
         if (control && (event == DGX_GE_UI_MORE || event == DGX_GE_UI_LESS)) {
             tell_control(t, a, event == DGX_GE_UI_MORE ? 1 : 2);
@@ -305,14 +330,26 @@ void dgx_ge_talk_event(dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms)
         if (event == DGX_GE_UI_ACTIVATE) {
             if (control) tell_control(t, a, 0);
             if (control && u16_at(a + 2) == STAYS) return;
-            if (!a || u16_at(a + 2) >= t->dialog->size) {
-                t->state = DGX_GE_TALK_OVER;
-                return;
-            }
-            t->pc = u16_at(a + 2);
-            run(t);
+            take(t, a);
         }
     }
+}
+
+const dgx_ge_field_t *dgx_ge_talk_field(const dgx_ge_talk_t *t, int shown)
+{
+    const uint8_t *a = t->state == DGX_GE_TALK_CHOOSING ? answer_at(t, shown) : NULL;
+    if (!a || u16_at(a + 4) != DGX_GE_DIALOG_FIELD || !t->fields || a[6] >= t->field_count) return NULL;
+    const dgx_ge_field_t *f = &t->fields[a[6]];
+    return f->text && f->size ? f : NULL;
+}
+
+void dgx_ge_talk_field_done(dgx_ge_talk_t *t, bool changed)
+{
+    if (!t->editing) return;
+    t->editing = false, t->since_ms = t->now_ms; /* a choice with a time: its time from now, not from before the editing */
+    if (changed) ++t->changes;
+    const uint8_t *a = answer_at(t, t->pick);
+    if (a && u16_at(a + 2) != STAYS) take(t, a);
 }
 
 bool dgx_ge_talk_pauses(const dgx_ge_talk_t *t)
@@ -323,7 +360,7 @@ bool dgx_ge_talk_pauses(const dgx_ge_talk_t *t)
 void dgx_ge_talk_play(dgx_ge_talk_t *t, uint32_t now_ms, bool seen)
 {
     t->now_ms = now_ms;
-    if (!t->wait_ms) return;
+    if (!t->wait_ms || t->editing) return; /* a field edited: a choice with a time waits for it */
     if (t->state == DGX_GE_TALK_SAYING) {
         if (seen && !t->seen) t->seen = true, t->seen_ms = now_ms;
         if (t->seen && (int32_t)(now_ms - t->seen_ms) >= t->wait_ms) run(t);
@@ -361,7 +398,7 @@ bool dgx_ge_talk_control_range(const dgx_ge_talk_t *t, int shown, int *value, in
 {
     const uint8_t *a = t->state == DGX_GE_TALK_CHOOSING ? answer_at(t, shown) : NULL;
     const dgx_ge_actor_t *owner = chooser(t);
-    const dgx_ge_anim_t  *anim  = a && u16_at(a + 4) != NO_KIND && t->kinds ? dgx_ge_kind(t->kinds, u16_at(a + 4)) : NULL;
+    const dgx_ge_anim_t  *anim  = a && u16_at(a + 4) != NO_KIND && u16_at(a + 4) != DGX_GE_DIALOG_FIELD && t->kinds ? dgx_ge_kind(t->kinds, u16_at(a + 4)) : NULL;
     if (!anim || !owner || a[6] >= DGX_GE_ANIM_PARAMS || anim->params < 4) return false;
     *value = owner->params[a[6]];
     *least = (int16_t)u16_at(anim->initial + 2), *most = (int16_t)u16_at(anim->initial + 4), *step = (int16_t)u16_at(anim->initial + 6);

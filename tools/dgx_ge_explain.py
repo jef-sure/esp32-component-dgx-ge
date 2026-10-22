@@ -686,6 +686,9 @@ def main(argv):
     args = list(argv)
     while args:
         a = args.pop(0)
+        if a in ("-h", "--help"):
+            print(__doc__.strip())
+            return
         if a == "--lang" and args:
             lang = args.pop(0)
         elif a == "--masks" and args:

@@ -84,6 +84,17 @@ int main(int argc, char **argv)
     CHECK(guard.script == LAY_HERO_SCRIPT_WALK && dgx_ge_actor_x(&guard) == 30 && dgx_ge_actor_y(&guard) == 28 && !guard.flip &&
           guard.params[LAY_HERO_PARAM_HP] == 5 && guard.params[LAY_HERO_PARAM_SPEED] == 1);
     CHECK(!dgx_ge_layout_actor_start(&l, 1, &guard, &kinds, 0));
+    /* laid facing left (a copy of the room with its facing bit set: the record is 10 bytes before its params): it entered its script so */
+    {
+        uint8_t *copy = malloc(n);
+        memcpy(copy, blob, n);
+        dgx_ge_layout_t turned;
+        CHECK(dgx_ge_layout_open(&turned, copy, n) && dgx_ge_layout_actor(&turned, LAY_SCENE_ROOM1_ACTOR_GUARD, &a));
+        copy[a.given - copy - 10 + 8] |= 1;
+        CHECK(dgx_ge_layout_actor_start(&turned, LAY_SCENE_ROOM1_ACTOR_GUARD, &guard, &kinds, 0) && guard.flip);
+        CHECK(guard.entered_flip && guard.entered_params[LAY_HERO_PARAM_HP] == 5 && guard.entered_params[LAY_HERO_PARAM_SPEED] == 1);
+        free(copy);
+    }
 
     /* the layers and pictures into a scene: factors and orders, the pictures as pieces of its set */
     dgx_screen_t   *display = dgx_vscreen_init(64, 32, 16, DgxScreenRGB);

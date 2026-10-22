@@ -71,6 +71,7 @@ typedef struct {
     dgx_ge_rect_t *shown_boxes;
     uint8_t        overlay_count, shown_overlay_count, overlay_capacity;
     uint8_t        smooth; /* at a scale of 2, 3 or 4: how the points are scaled, DGX_GE_SMOOTH_* (dgx_ge_frame_smooth) */
+    dgx_ge_rect_t  cover;  /* pixels of the display something else draws on (dgx_ge_frame_cover): not sent; w 0 none */
 } dgx_ge_frame_t;
 
 #ifndef DGX_GE_FRAME_OVERLAYS
@@ -94,6 +95,8 @@ void dgx_ge_frame_overlays_end(dgx_ge_frame_t *frame);
  * stairs; DGX_GE_SMOOTH_SFX, their SFX variants (Scale2xSFX, Scale3xSFX), which keep thin slanted lines whole and cost
  * more. No new colors, no blur. The look of the game changes (it is the smoothing of the emulators), so it is a
  * choice of the game or the player, off by default (true is DGX_GE_SMOOTH_ON). At other scales it does nothing.
+ * Smoothed, a square looks at the points around its own: a changed place is sent with one point more around it, two
+ * with SFX or at 4 (dgx_ge_frame_invalidate); a place under an overlay, as it is.
  */
 enum { DGX_GE_SMOOTH_NONE, DGX_GE_SMOOTH_ON, DGX_GE_SMOOTH_SFX };
 bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, int how);
@@ -102,12 +105,21 @@ bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, int how);
  * The picture moved by dx, dy points (a scene whose window went the other way): the frame's own pixels move in
  * RAM, the display moves its picture itself when it can (dgx_scroll_no_fill: a panel along its own axis, a display
  * read back; else all of the frame is sent again), what was marked moves with it, and the strips that came in at
- * the edges are marked for the scene to draw. The overlays stay where they are: the frame under them is marked.
+ * the edges are marked for the scene to draw. The overlays stay where they are: the frame under them is marked, and
+ * where the display moved them along.
  * Upside down, wiping, or a move as large as the frame: all of it is drawn again. True when the display moved it.
  */
 bool dgx_ge_frame_scroll(dgx_ge_frame_t *frame, int dx, int dy);
 
-/* Mark the frame under a rectangle of the display (pixels), whatever the scale and the way up. */
+/*
+ * A rectangle of the display (pixels) covered by something that draws there itself (a keyboard on the display, DGX-DI's):
+ * the frame sends nothing into it, to the pixel, whatever the scale, overlays and the way up, and does not move the
+ * display's picture itself (dgx_ge_frame_scroll draws all again). A rectangle of no size: nothing covered; what was
+ * covered is marked, drawn anew as the frame has it. One at a time: another replaces it.
+ */
+void dgx_ge_frame_cover(dgx_ge_frame_t *frame, dgx_ge_rect_t display);
+
+/* Mark the frame under a rectangle of the display (pixels), whatever the scale and the way up: sent again, nothing of it changed. */
 void dgx_ge_frame_invalidate_pixels(dgx_ge_frame_t *frame, dgx_ge_rect_t display);
 
 dgx_ge_frame_t *dgx_ge_frame_create(dgx_screen_t *display, int x, int y, int width, int height);
@@ -164,8 +176,8 @@ void dgx_ge_frame_set_palette(dgx_ge_frame_t *frame, int first, int count, const
 void dgx_ge_frame_tint(dgx_ge_frame_t *frame, uint32_t rgb, uint8_t amount);
 
 /*
- * Mark a rectangle as changed. Close rectangles are merged, and when there
- * are too many of them the two that cost least together become one.
+ * Mark a rectangle as changed (smoothed, with the points around it whose squares look at it, dgx_ge_frame_smooth).
+ * Close rectangles are merged, and when there are too many of them the two that cost least together become one.
  */
 void dgx_ge_frame_invalidate(dgx_ge_frame_t *frame, dgx_ge_rect_t r);
 void dgx_ge_frame_invalidate_all(dgx_ge_frame_t *frame);
@@ -182,7 +194,7 @@ void dgx_ge_frame_present(dgx_ge_frame_t *frame);
  */
 void dgx_ge_frame_wipe(dgx_ge_frame_t *frame, int x);
 
-/* The picture upside down, or upright again: all of it shown anew. */
+/* The picture upside down, or upright again: all of it shown anew (smoothed too: the upright picture mirrored, to the pixel). */
 void dgx_ge_frame_upside_down(dgx_ge_frame_t *frame, bool upside);
 
 #ifdef __cplusplus

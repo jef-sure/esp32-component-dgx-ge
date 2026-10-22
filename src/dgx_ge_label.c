@@ -29,8 +29,12 @@ void dgx_ge_label_free(dgx_ge_label_t *l)
 void dgx_ge_label_set(dgx_ge_label_t *l, const char *text)
 {
     if (!text) text = "";
-    if (!strncmp(l->text, text, sizeof l->text - 1) && strlen(text) < sizeof l->text) return;
-    snprintf(l->text, sizeof l->text, "%s", text);
+    /* as much as it holds, cut between letters (never inside one of several bytes); the same as it has: nothing */
+    size_t n = strlen(text);
+    if (n > sizeof l->text - 1)
+        for (n = sizeof l->text - 1; n > 0 && ((uint8_t)text[n] & 0xC0) == 0x80; --n) {}
+    if (strlen(l->text) == n && !memcmp(l->text, text, n)) return;
+    memcpy(l->text, text, n), l->text[n] = 0;
     dgx_ge_textbox_set(&l->box, l->text, &l->style, false, 0);
     mark(l);
 }

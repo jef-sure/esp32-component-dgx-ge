@@ -243,6 +243,15 @@ script stick                          # the pad of the game's input: the sticks 
     set power axis(rt) * 100
     hold
 
+script sober                          # a moment kept in a param and waited for, hours into the clock (32 bits)
+    set hp now + 10
+    set power now * 100000            # past 32 bits: the nearest limit
+label sober_wait
+    frame ONE 1000ms
+    goto sober_wait if now < hp
+    set action 7
+    hold
+
 group alive: stand, run, fall, hop, walkwall
 on hit: alive -> hurt now
 on stop: run -> stand branch
@@ -389,7 +398,8 @@ pack.add_crop("FACE", "FOUR", 1, 0, 2, 2, (0, 1))
 pack.add_style("inked", place=(0, 0, 120, 40), padding=(2, 2, 2, 2), font="font0ss", scale=(20, 12), pen="soft",
                fill=(200, 180, 120), text=(40, 20, 0))
 pack.add_style("pixels_soft", place=(0, 0, 120, 40), padding=(2, 2, 2, 2), font="TerminusTTFMedium12", pen="soft")
-pack.add_style("faced", place=(0, 0, 60, 30), padding=(2, 2, 2, 2), font="TerminusTTFMedium12", portrait="left", portrait_width=6)
+pack.add_style("faced", place=(0, 0, 60, 30), padding=(2, 2, 2, 2), font="TerminusTTFMedium12", portrait="left", portrait_width=6,
+               appear="letters", letter_ms=20)
 pack.add_dialog("""
 dialog faces
 roles guard CARRIER "Guard" face FACE, kid CARRIER "Kid"
@@ -466,6 +476,23 @@ label loud
 label back
     end
 """)
+# text fields of the game: one smaller than the engine edits at most, one larger (DGX_GE_FIELD_BYTES, 32: so much of it
+# typed); answers with them, the second on to a line when it is done; a choice with a time, which waits while a field
+# is edited
+pack.add_field("name", 8, letters="abcdefghijklmnopqrstuvwxyz\u00e9")
+pack.add_field("motto", 40, letters="abcdefghijklmnopqrstuvwxyz ")
+pack.add_dialog("""
+dialog names
+game SETTINGS
+choose game 5s -> back
+    "Name" field name
+    "Motto" field motto -> said
+    "Back" -> back
+label said
+    say game "Said."
+label back
+    end
+""")
 # lines of a number: a param of the one saying it, its forms in the language of the pack (three in test.po), one without
 pack.add_dialog("""
 dialog clock
@@ -475,6 +502,48 @@ say game "Volume {volume}." 1s
 say game "Sound {sound}, volume {volume}." 1s
 end
 """)
+# a choice gone back to with other answers as many (a knife taken, then given back): shown anew; a long answer, in two
+# lines of the style talk
+pack.add_dialog("""
+dialog swap
+roles guard CARRIER "Guard", kid CARRIER "Kid"
+style talk
+label ask
+    choose kid
+        "Leave." -> out
+        "Take the knife." if count(KNIFE) == 0 -> take
+        "Give back the knife you took from the guard a moment ago." if count(KNIFE) > 0 -> back
+        "Wait." -> ask
+label take
+    give guard KNIFE 1 to kid
+    goto ask
+label back
+    give kid KNIFE 1 to guard
+    goto ask
+label out
+    end
+""")
+# a control that shows another answer for one, as many (too loud, fine); answers longer together than 511 bytes (once
+# the most a choice was laid in): all of them
+pack.add_dialog("""
+dialog loud
+game SETTINGS
+choose game
+    "Volume" control SLIDER volume
+    "Too loud." if volume > 2 -> out
+    "Fine." if volume <= 2 -> out
+label out
+    end
+""")
+# a line of a number longer than 95 bytes (once the most such a line was made in): whole
+pack.add_dialog("""
+dialog tale
+game SETTINGS
+say game "The volume is {volume} now, and so it stays until somebody comes and turns the knob again, to the left or right." 1s
+end
+""")
+pack.add_dialog("dialog many\nroles kid CARRIER\n    choose kid\n" + "".join(f'        "{"word " * 40}{i}" -> out\n' for i in range(3))
+                + "label out\n    end\n")
 # lives of cells: a latch (its modifier: 0 shut .. 12 up) goes up a step of 4 every 100 ms when told to open, signals at
 # the top, stays up as long as its own param stay says (a link may say), comes down and rests; broken, its tile is
 # another and its modifier keeps its low bits with bit 7 set
@@ -768,7 +837,7 @@ script turn
     goto go
 on bumped: go -> turn now
 """)])
-pack.add_crowd("FIELD", 8, (0, 0, 200, 150), seed=7,
+pack.add_crowd("FIELD", 8, (0, 0, 200, 150), seed=3,
                kinds=[{"kind": "WOLF", "side": 1, "layer": 1, "by_y": True}, {"kind": "SHEEP", "side": 2, "layer": 1, "damage": "hp", "by_y": True}],
                groups=[{"kind": "WOLF", "count": 1, "area": (10, 10, 20, 20)}, {"kind": "SHEEP", "count": 3, "area": (120, 80, 60, 50), "flip": "either"}])
 pack.add_crowd("NURSERY", 2, (0, 0, 100, 100), kinds=[{"kind": "MOTHER", "side": 3}, {"kind": "SHEEP", "side": 2}],
@@ -797,6 +866,52 @@ script look
 pack.add_crowd("BLIND", 2, (0, 0, 80, 32), kinds=[{"kind": "LOOKOUT", "side": 5}, {"kind": "MARKER", "side": 6}],
                groups=[{"kind": "LOOKOUT", "area": (8, 16, 1, 1)}, {"kind": "MARKER", "area": (58, 16, 1, 1)}])
 pack.add_crowd("PEN", 1, (0, 0, 60, 40), kinds=[{"kind": "WALKER", "side": 4}], groups=[{"kind": "WALKER", "area": (30, 20, 1, 1)}])
+# a body over many cells (of 8 x 8): what it touches is found among more bodies of tiles than are gathered at once
+slab = pack.add_image("SLAB", hero, 1, 1, [1], 4, (0, 0))
+pack.add_mask(slab, 1, 0, 0, 72, 40, [1] * (72 * 40))
+
+# the clock of the scripts: slow motion however the calls come, an event from its own say, one in its past, a long absence
+pack.add_anim("TIMING", """
+event go
+param n 0
+
+script creep                          # an eighth of a point a second: 12.5 points in 100 s
+    velocity 1 / 8, 0
+    frame ONE 60000ms
+    frame ONE 60000ms
+    hold
+
+script slow                           # an eighth of a point a second a second from rest: 6.25 points and 1.25 a second at 10 s
+    accel 1 / 8, 0
+    frame ONE 60000ms
+    hold
+
+script caller                         # tells the game, which answers go at once: the rest of the step is not made
+    signal 1
+    dx 7
+    frame ONE 100ms
+    hold
+
+script gone
+    set n 5
+    frame EIGHT 50ms
+    dx 10
+    frame ONE 50ms
+    hold
+
+script runner                         # 20 points a second
+    velocity 20 0
+    frame ONE 1000ms
+    hold
+
+script tick                           # a frame of 166 ms for ever: half an hour is 10843 of them, all lived through
+    add n 1
+    frame ONE 166ms
+    goto tick
+
+on go: caller -> gone now
+on go: runner -> gone now
+""")
 pack.write(sys.argv[1], sys.argv[2])
 
 

@@ -27,6 +27,7 @@ import re
 import struct
 import sys
 import zlib
+from contextlib import contextmanager
 
 MAGIC = 0x4B504744  # "DGPK"
 VERSION = 4
@@ -72,6 +73,34 @@ def pack_pixels(values, width, height, bits):
 def name_of(text):
     """A name of the pack and the header: letters and digits kept, the rest '_', upper case."""
     return re.sub(r"[^A-Za-z0-9]", "_", text).upper()
+
+
+def values_of(im):
+    """The pixel values of a picture, row after row (Image.getdata goes in Pillow 14, get_flattened_data came in 12.1)."""
+    return list(im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata())
+
+
+def write_files(files):
+    """
+    Files whole or not at all: each written beside its place first, then all put in their places (none is changed when
+    one cannot be written). files: [(path, bytes or str)].
+    """
+    temps = []
+    try:
+        for path, data in files:
+            temps.append((path + ".tmp", path))
+            with open(path + ".tmp", "wb") as f:
+                f.write(data.encode("utf-8") if isinstance(data, str) else data)
+        for temp, path in temps:
+            os.replace(temp, path)
+    finally:
+        for temp, _ in temps:
+            if os.path.exists(temp):
+                os.remove(temp)
+
+
+# the blobs the packer adds itself as it writes the pack (write): no other may take their names
+OWN_BLOBS = ("STRINGS", "GAME", "CHASE", "TIMERS", "STYLES", "SOUNDS")
 
 
 TIMER_RESETS = ("never", "scene", "map")
@@ -141,8 +170,21 @@ def read_wav(path, stereo=False):
     return [sum(values[i:i + channels]) // channels for i in range(0, len(values), channels)], rate
 
 
+@contextmanager
+def _errors_of(path, what):
+    """An error of a text (line 3: ...) told with the text named: the file it is of, else what it is."""
+    from dgx_ge_anim import AnimError
+    from dgx_ge_dialog import DialogError
+    try:
+        yield
+    except (AnimError, DialogError) as e:
+        raise type(e)(f"{path or what}: {e}") from None
+
+
 class Pack:
     def __init__(self, prefix):
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", prefix):
+            raise ValueError(f"the prefix of a pack {prefix!r}: capitals, digits and _, from a capital (MYGAME: MYGAME_SET_HERO)")
         self.prefix = prefix
         self.sets = []    # (name, [(r, g, b), ...])
         self.images = []  # (name, set, width, height, origin_x, origin_y, bits, pixels)
@@ -175,6 +217,8 @@ class Pack:
         self.zone_kinds = []  # the words of zones' kinds (exit, trap), by first use: their numbers
         self.screen = None  # (width, height) of the device's screen, as the editor's file says
         self.constants = {}  # the game's names of numbers its scripts write (add_constants), by their values
+        self.fields = []  # (name, size) of the game's text fields dialogs edit (add_field): their numbers
+        self.field_letters = set()  # what can be typed into them: what a font typed must have
         self.warnings = []
 
     def add_set(self, name, colors):
@@ -216,7 +260,9 @@ class Pack:
             raise ValueError(f"{path}: not a picture of a palette ({im.mode})")
         palette = im.getpalette()
         width, height = im.size
-        raw = list(im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata())
+        raw = values_of(im)
+        if max(raw, default=0) >= len(palette) // 3:
+            raise ValueError(f"{path}: value {max(raw)} has no color in its palette (of {len(palette) // 3})")
         if bits is None:
             bits = 1 if len(palette) // 3 <= 2 else 4 if len(self.sets[set_id][1]) <= 15 else 8
         if bits == 1:
@@ -279,8 +325,8 @@ class Pack:
 
     def add_sprites(self, path, images=None):
         """
-        The sprites of the sprite editor (dgx-ge-sprites, its
-        sprite-format-ru.md): every set a set of colors (those of its PNGs),
+        A document of the format "dgx-ge-sprites" (what the sprite editor
+        saves; any tool may write it): every set a set of colors (those of its PNGs),
         every frame a picture <SET>_<FILE> (or its packName, as the editor
         gives it: DAGGER) with its origin and masks: those
         drawn, or else the default mask of the set made of the points of the
@@ -332,11 +378,28 @@ class Pack:
                         break
                 else:
                     raise ValueError(f"{path}: no picture {fr['image']} of set {st['name']}")
-            # the colors of the set: the palette of its pictures, up to the highest index they use
+            # the colors of the set, up to the highest value its pictures use: the values are taken as they are, so a
+            # value has the color the palettes of the pictures that use it give it, all alike (a palette may stop at the
+            # last value its own picture uses); a value none uses, as the first palette that has it says
             pictures = [Image.open(p) for p in files]
-            top = max((max(im.getdata(), default=0) for im in pictures), default=0)
-            palette = pictures[0].getpalette() if pictures else []
-            colors = [tuple(palette[3 * i:3 * i + 3]) for i in range(1, top + 1)]
+            used = [set(values_of(im)) for im in pictures]
+            palettes = [im.getpalette() or [] for im in pictures]
+            top = max((max(u, default=0) for u in used), default=0)
+            colors = []
+            for i in range(1, top + 1):
+                said = {}  # the color -> the first picture that uses value i so
+                for p, u, pal in zip(files, used, palettes):
+                    if i in u:
+                        if len(pal) < 3 * i + 3:
+                            raise ValueError(f"{p}: value {i} has no color in its palette (of {len(pal) // 3})")
+                        said.setdefault(tuple(pal[3 * i:3 * i + 3]), p)
+                if len(said) > 1:
+                    (a, pa), (b, pb) = list(said.items())[:2]
+                    raise ValueError(f"set {st['name']}: value {i} is {a} in {pa}, {b} in {pb}: the frames of a set share their colors")
+                if said:
+                    colors.append(next(iter(said)))
+                else:
+                    colors.append(next((tuple(pal[3 * i:3 * i + 3]) for pal in palettes if len(pal) >= 3 * i + 3), (0, 0, 0)))
             set_id = self.add_set(name_of(st["name"]), colors)
             made[st["name"]] = set_id
             bits = 4 if top <= 15 else 8
@@ -359,12 +422,12 @@ class Pack:
                     self.add_point(image, pname, pt["x"], pt["y"], pt.get("z", 1))
                 if not masks and st.get("defaultMask") is not None:
                     w, h = im.size
-                    self.add_mask(image, st["defaultMask"], -ox, -oy, w, h, [1 if v else 0 for v in im.getdata()])
+                    self.add_mask(image, st["defaultMask"], -ox, -oy, w, h, [1 if v else 0 for v in values_of(im)])
             anim = os.path.join(here, f"{st['name']}.anim")
             rules = {m.get("rules") for m in doc.get("maps", [])} - {None, ""}
             if os.path.exists(anim) and st["name"] not in rules:  # the rules of a map are the graph's (add_graph), not a kind
                 with open(anim, encoding="utf-8") as f:
-                    anims.append((name_of(st["name"]), f.read()))
+                    anims.append((name_of(st["name"]), f.read(), anim))
         # the animations of the sets together, in their order: each knows the others (sense, appear) and every picture
         if anims:
             self.add_anims(anims)
@@ -455,7 +518,7 @@ class Pack:
         for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
             if name.endswith(".dlg"):
                 with open(os.path.join(folder, name), encoding="utf-8") as f:
-                    self.add_dialog(f.read())
+                    self.add_dialog(f.read(), os.path.join(folder, name))
         # the game as a whole (its constants, timers, sounds, crops, shows, chases), its scenes, its graph of scenes
         self._add_game_of(doc, path, pack_names)
         if doc.get("screen"):
@@ -472,7 +535,7 @@ class Pack:
 
     def _links_of(self, doc, path):
         """
-        The links of the editor's scenes (sprite-format-ru.md, "Сцены": links, and entries' fires) as the engine takes
+        The links of the document's scenes (its scenes' links, and entries' fires) as the engine takes
         them (dgx_ge_links.h, dgx_ge_layout.h). The cells of a map are numbered through it: its scenes in the order of
         the file, a scene's grids in order, a grid row by row (firsts: by scene, the number of the first cell of each of
         its grids; a scene outside the maps is numbered on its own). The links of a map are one list, a blob
@@ -566,7 +629,7 @@ class Pack:
         return out
 
     def _add_game_of(self, doc, path, pack_names):
-        """The editor's "Игра целиком" (sprite-format-ru.md): the same calls a game's script of building makes."""
+        """The game as a whole of a document (its game, timers, sounds, crops, shows, chases): the same calls a game's script of building makes."""
         for c in doc.get("game", []):
             self.add_game(**{c["name"]: c["value"]})
         for t in doc.get("timers", []):
@@ -585,7 +648,7 @@ class Pack:
 
     def _add_layout(self, sc, path, pack_names, links):
         """
-        A scene as the editor laid it (sprite-format-ru.md, "Сцены") as a blob SCENE_<NAME>, "DGSC" (include/dgx_ge_layout.h):
+        A scene as the document lays it (its scenes) as a blob SCENE_<NAME>, "DGSC" (include/dgx_ge_layout.h):
         its layers, pictures, zones, entries, sources of links, actors and grids (each with the number of its first cell
         in its map, links: _links_of); the names of its objects into the header.
         """
@@ -714,7 +777,7 @@ class Pack:
 
     def _add_graph_of(self, doc, path, here, links):
         """
-        The editor's graph of scenes and maps (sprite-format-ru.md, "Граф сцен") as a Graph, in the order of names it
+        The document's graph of scenes and maps as a Graph, in the order of names it
         gives; an entry's fires, the first link of the source it names in its map (links: _links_of).
         """
         from dgx_ge_graph import Graph
@@ -733,7 +796,8 @@ class Pack:
                 return f.read()
 
         for m in doc.get("maps", []):
-            g.map(m["name"], data=m.get("data") or None, rules=rules_of(m.get("rules")), number=m.get("number", 0))
+            g.map(m["name"], data=m.get("data") or None, rules=rules_of(m.get("rules")), number=m.get("number", 0),
+                  path=os.path.join(here, f"{m['rules']}.anim") if m.get("rules") else None)
         scenes = [sc for sc in doc.get("scenes", []) if sc.get("map")]
         index = {}
         for m in doc.get("maps", []):
@@ -1026,7 +1090,7 @@ class Pack:
         """
         for name, data, rules, _ in graph.maps:
             if rules:
-                self.add_anim(name_of(f"{graph.name}_{name}_RULES"), graph.rules_text(rules))
+                self.add_anim(name_of(f"{graph.name}_{name}_RULES"), graph.rules_text(rules), graph.paths.get(name))
         names = {n: i for i, (n, _) in enumerate(self.blobs)}
 
         def blob_of(name):
@@ -1284,9 +1348,11 @@ class Pack:
         it goes round until stopped. Stereo is kept as the middle (L + R) / 2 at the full rate and the side (L - R) / 2
         at a 2^side-th of it (side=1: half; the two of one signal differ little), side=None: left and right as they
         are; channels that hardly differ are kept mono. gain: its loudness against the recording (0.5 half), made into
-        its samples here (nothing at play). Without samples it is only a name: it plays nothing. Returns its number.
+        its samples here (nothing at play). Without samples it is only a name: it plays nothing. A name given before
+        without samples (a document names its sounds, add_sprites) gets them now, at its number. Returns its number.
         """
-        if name in self.sounds:
+        at = self.sounds.index(name) if name in self.sounds else None
+        if at is not None and (self.sound_data[at] is not None or (wav is None and samples is None)):
             raise ValueError(f"sound {name} twice")
         if wav is not None:
             samples, rate = read_wav(wav, stereo)
@@ -1304,8 +1370,12 @@ class Pack:
             raise ValueError(f"sound {name}: a rate of 1..65535, not {rate}")
         if codec not in SOUND_CODECS:
             raise ValueError(f"sound {name}: codec adpcm or pcm8, not {codec}")
+        data = (list(samples), rate, loop, codec, side) if samples is not None and len(samples) else None
+        if at is not None:
+            self.sound_data[at] = data  # the name's samples
+            return at
         self.sounds.append(name)
-        self.sound_data.append((list(samples), rate, loop, codec, side) if samples is not None and len(samples) else None)
+        self.sound_data.append(data)
         return len(self.sounds) - 1
 
     def _sounds_blob(self):
@@ -1346,11 +1416,27 @@ class Pack:
         return head + b"".join(entries) + data
 
     def add_blob(self, name, data):
-        """Bytes the game makes sense of itself; returns its number. A name once: it is a number of the header."""
-        if any(n == name for n, _ in self.blobs):
-            raise ValueError(f"a blob named {name} twice (an animation and a dialog of one name?)")
+        """
+        Bytes the game makes sense of itself; returns its number. A name once: it is a number of the header. The names
+        of the blobs the packer adds itself (OWN_BLOBS: STRINGS, GAME, ...) are not for others.
+        """
+        self._new_blob_name(name)
         self.blobs.append((name, bytes(data)))
         return len(self.blobs) - 1
+
+    def _new_blob_name(self, name):
+        if name_of(name) in OWN_BLOBS:
+            raise ValueError(f"a blob named {name}: the packer's own blob {name_of(name)} has that name (an animation, a dialog, a blob)")
+        if any(n == name for n, _ in self.blobs):
+            raise ValueError(f"a blob named {name} twice (an animation and a dialog of one name?)")
+
+    def _own_blob(self, name, data):
+        """A blob the packer makes as it writes the pack: made again by a second write, in its place."""
+        for i, (n, _) in enumerate(self.blobs):
+            if n == name:
+                self.blobs[i] = (name, bytes(data))
+                return
+        self.blobs.append((name, bytes(data)))
 
     def add_constants(self, **constants):
         """
@@ -1364,11 +1450,41 @@ class Pack:
                 raise ValueError(f"constant {name}: a name and a 32-bit number, not {value}")
             self.constants[name] = int(value)
 
+    def add_field(self, name, size, keyboard=None, letters=None):
+        """
+        A text field of the game, which a dialog's answer edits (field <name>): <PREFIX>_FIELD_<NAME>, its number (the
+        game's dgx_ge_field_t of the cast by it), and <PREFIX>_FIELD_<NAME>_SIZE, the bytes the game gives it, the 0
+        at the end too (2..255). What can be typed into it, and the caret '_', a font that shows it must have (a font
+        typed, add_font: typed_letters()): keyboard, the JSON of a layout of DGX-DI's keyboard (its editor's: each key's
+        label, else its character and its character with shift, as DGX-DI draws them; its labels drawn in that font
+        too); letters, a string of them (typed otherwise). Given before the dialogs that edit it. Its number.
+        """
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or any(n == name for n, _ in self.fields):
+            raise ValueError(f"field {name}: a name, once")
+        if not 2 <= int(size) <= 255:
+            raise ValueError(f"field {name}: its size 2..255 bytes, the 0 at the end too, not {size}")
+        if keyboard:
+            with open(keyboard, encoding="utf-8") as f:
+                layout = json.load(f)
+            if layout.get("format") != "dgx-di-keyboard":
+                raise ValueError(f"field {name}: {keyboard} is not a layout of DGX-DI's keyboard")
+            for page in layout.get("pages", []):
+                for row in page.get("rows", []):
+                    for key in row:
+                        if key.get("label"):
+                            self.field_letters.update(key["label"])
+                        elif "char" in key:
+                            self.field_letters.update(key["char"] + key.get("upper", ""))
+        self.field_letters.update(letters or "")
+        self.field_letters.add("_")
+        self.fields.append((name, int(size)))
+        return len(self.fields) - 1
+
     def script_masks(self):
         """The masks an animation's text may name where a mask goes: by their names, as in meets."""
         return {n: i for i, n in self.mask_names.items()}
 
-    def add_anim(self, name, text):
+    def add_anim(self, name, text, path=None):
         """
         Scripts of animation (see dgx_ge_anim.py) as a blob; the pictures they
         name are those added before. Events are the pack's: one name, one
@@ -1377,6 +1493,7 @@ class Pack:
         <PREFIX>_<NAME>_SCRIPT_<script>, <PREFIX>_<NAME>_EVENT_<event> (and
         <PREFIX>_EVENT_<event>), <PREFIX>_<NAME>_PARAM_<param>, and the
         questions to the game it declares: <PREFIX>_<NAME>_GAME_<name>.
+        path: the file the text is of, for its errors (none: they name the animation).
         """
         from dgx_ge_anim import assemble
 
@@ -1387,23 +1504,27 @@ class Pack:
         kinds = {n: i for i, (n, _) in enumerate(self.blobs)}
         # the params of the kinds added before (its. of a sense of them), and this one as a kind of its own
         kind_params = {n: list(ps) for n, _, _, ps in self.anims}
-        done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, len(self.blobs)), self.constants, self.script_masks())
+        with _errors_of(path, f"animation {name}"):
+            done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, len(self.blobs)), self.constants,
+                            self.script_masks())
         self.anims.append((name, done.scripts, done.events, done.params))
         self.games[name] = done.games
         return self.add_blob(name, done.blob)
 
     def add_anims(self, anims):
         """
-        Animations that sense one another (a wolf and the sheep it hunts): [(name, text)], as add_anim each, but every
-        one knows the others as kinds (sense, shoot, appear, count) and their params (its.), whatever their order:
-        their blobs are numbered first, in this order, then each is made. Returns their numbers.
+        Animations that sense one another (a wolf and the sheep it hunts): [(name, text)] or [(name, text, path)], as
+        add_anim each, but every one knows the others as kinds (sense, shoot, appear, count) and their params (its.),
+        whatever their order: their blobs are numbered first, in this order, then each is made. Returns their numbers.
         """
         from dgx_ge_anim import assemble
 
-        anims = list(anims)
-        names = [n for n, _ in anims]
+        anims = [(a[0], a[1], a[2] if len(a) > 2 else None) for a in anims]
+        names = [n for n, _, _ in anims]
         if len(set(names)) != len(names) or any(n == b for n in names for b, _ in self.blobs):
             raise ValueError(f"animations {names}: a name twice")
+        for name in names:
+            self._new_blob_name(name)
         first = len(self.blobs)
         for name in names:
             self.blobs.append((name, None))  # a number now, the blob below
@@ -1411,10 +1532,12 @@ class Pack:
         points = dict(self.point_names, **{n.lower(): v for n, v in self.point_names.items()})
         kinds = {n: i for i, (n, _) in enumerate(self.blobs)}
         kind_params = {n: list(ps) for n, _, _, ps in self.anims}
-        for name, text in anims:  # the params each declares, in order: param <name> <value>
+        for name, text, _ in anims:  # the params each declares, in order: param <name> <value>
             kind_params[name] = [m.group(1) for m in (re.match(r"\s*param\s+(\w+)\b", line.split("#")[0]) for line in text.splitlines()) if m]
-        for i, (name, text) in enumerate(anims):
-            done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, first + i), self.constants, self.script_masks())
+        for i, (name, text, path) in enumerate(anims):
+            with _errors_of(path, f"animation {name}"):
+                done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, first + i), self.constants,
+                                self.script_masks())
             self.anims.append((name, done.scripts, done.events, done.params))
             self.games[name] = done.games
             self.blobs[first + i] = (name, done.blob)
@@ -1425,30 +1548,35 @@ class Pack:
         from dgx_ge_dialog import read_po
         self.strings.translations.update(read_po(po_path))
 
-    def add_dialog(self, text):
+    def add_dialog(self, text, path=None):
         """
         A dialog (see dgx_ge_dialog.py) as a blob named as the dialog; the kinds
         its roles name are animations added before. Its strings go into the
         strings of the pack (one blob, STRINGS, added when the pack is written).
         The header gets <PREFIX>_<DIALOG>_ROLE_<role> and <PREFIX>_STYLE_<style>.
+        path: the file the text is of, for its errors (none: they name the dialog).
         """
         from dgx_ge_dialog import assemble_dialog
         kinds = {n: i for i, (n, _) in enumerate(self.blobs)}
         params = {name: {p: (i, 0) for i, p in enumerate(ps)} for name, _, _, ps in self.anims}
-        done = assemble_dialog(text, self.strings, kinds, params, self.events, self.styles, {im[0]: i for i, im in enumerate(self.images)},
-                               self.timers, self.constants)
+        named = re.search(r"^\s*dialog\s+(\w+)", text, re.M)
+        with _errors_of(path, f"dialog {named.group(1)}" if named else "a dialog"):
+            done = assemble_dialog(text, self.strings, kinds, params, self.events, self.styles, {im[0]: i for i, im in enumerate(self.images)},
+                                   self.timers, self.constants, {n: i for i, (n, _) in enumerate(self.fields)})
         self.dialogs.append((done.name, done.roles))
         return self.add_blob(name_of(done.name), done.blob)
 
     def add_font(self, name, points=None, mono=False, family=None, postscript=None, source=None, dgx=None, file=None, letters=None,
-                 texts=True):
+                 texts=True, typed=False):
         """
         A font of the game by name, in the table in this order (<PREFIX>_FONT_<NAME>); styles name it. Given how, it is
         a request of DGX's fonts (write_fonts: DGX makes it for the board, or takes it as it is): made, at points of the
         frame (times the board's scale), mono, of a family (a pattern of the rules) or a face by its PostScript name, or
         of a font file (source); as it is, one of DGX's own (dgx) or a font of the game (file, a .c it compiles). letters:
-        characters it must have besides; texts: whether it must have the letters the pack prints (its dialogs). A name
-        only: the font named, its request given before or after, or by the game itself.
+        characters it must have besides; texts: whether it must have the letters the pack prints (its dialogs); typed:
+        whether it shows the game's text fields (the style of a dialog that edits them; a keyboard's labels): it must
+        have what can be typed into them (typed_letters). A name only: the font named, its request given before or
+        after, or by the game itself.
         """
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
             raise ValueError(f"font {name}: a C identifier (DGX names the font dgx_font_{name}())")
@@ -1460,7 +1588,7 @@ class Pack:
             made, kept = bool(points or source), bool(dgx or file)
             if made == kept or (dgx and file) or (kept and (mono or family or postscript)) or (family and postscript):
                 raise ValueError(f"font {name}: made (points, with mono, family or postscript; or a source) or kept as it is (dgx or file)")
-            how["texts"] = texts
+            how["texts"], how["typed"] = texts, typed
             if self.font_requests.get(name, how) != how:
                 raise ValueError(f"font {name}: told twice, differently")
             self.font_requests[name] = how
@@ -1470,10 +1598,15 @@ class Pack:
         """
         The requests of the game's fonts (add_font) as DGX's file of requests (DGX's font2c/dgx_fonts.py; the words a
         contract with DGX): a need a font in the order of the table, paths from the file's directory; a font that must
-        have what the pack prints takes letters_path as its text (write_letters). Read by the game's build through the
+        have what the pack prints takes letters_path as its text (write_letters); a font typed, besides, what can be typed
+        into the game's fields, a file written beside letters_path (<name>.typed). Read by the game's build through the
         engine (dgx_ge_fonts in its project_include.cmake) and by a host's (dgx_fonts.py build).
         """
         here = os.path.dirname(os.path.abspath(path))
+        typed_path = None
+        if letters_path and self.field_letters and any(how.get("typed") for how in self.font_requests.values()):
+            typed_path = os.path.splitext(letters_path)[0] + ".typed"
+            write_files([(typed_path, self.typed_letters() + "\n")])
         lines = ["# The fonts of the game, as requests of DGX's fonts: made by dgx_ge_pack.py (Pack.add_font), not to be edited."]
         for name in self.fonts:
             how = self.font_requests.get(name)
@@ -1492,10 +1625,11 @@ class Pack:
                     lines.append(f"{key} {os.path.relpath(os.path.abspath(how[key]), here)}")
             if how["texts"] and letters_path:
                 lines.append(f"text {os.path.relpath(os.path.abspath(letters_path), here)}")
+            if how.get("typed") and typed_path:
+                lines.append(f"text {os.path.relpath(os.path.abspath(typed_path), here)}")
             if how.get("letters"):
                 lines.append(f"letters {how['letters']}")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        write_files([(path, "\n".join(lines) + "\n")])
 
     def add_style(self, name, **f):
         """
@@ -1577,8 +1711,7 @@ class Pack:
 
     def write_pot(self, path):
         """Every msgid of the dialogs in its context: the template a translation is made from."""
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(self.strings.pot())
+        write_files([(path, self.strings.pot())])
 
     def letters(self):
         """
@@ -1596,10 +1729,13 @@ class Pack:
                     shown.update(c for c in part if c.isprintable())
         return "".join(sorted(shown))
 
+    def typed_letters(self):
+        """What can be typed into the game's text fields (add_field) and the caret: what a font typed must have besides."""
+        return "".join(sorted(c for c in self.field_letters if c.isprintable()))
+
     def write_letters(self, path):
         """The letters the pack can print (letters()) as a text, a line of them."""
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(self.letters() + "\n")
+        write_files([(path, self.letters() + "\n")])
 
     def build(self):
         tables = len(self.sets) * 8 + len(self.images) * 16 + len(self.blobs) * 8 + len(self.masks) * 16 + len(self.points) * 8
@@ -1637,14 +1773,14 @@ class Pack:
         lines = [f"/* Made by dgx_ge_pack.py: the numbers of {self.prefix.lower()}.pack. Do not edit. */", "#pragma once", ""]
         for kind, items in (("SET", self.sets), ("IMG", self.images), ("BLOB", self.blobs)):
             for i, item in enumerate(items):
-                lines.append(f"#define {self.prefix}_{kind}_{item[0]} {i}")
+                lines.append(f"#define {self.prefix}_{kind}_{name_of(item[0])} {i}")
             lines.append(f"#define {self.prefix}_{kind}_COUNT {len(items)}")
             lines.append("")
         for name, tiles, slots in self.tilesets:
             for i, t in enumerate(tiles):
-                lines.append(f"#define {self.prefix}_{name}_TILE_{name_of(t)} {i + 1}")
+                lines.append(f"#define {self.prefix}_{name_of(name)}_TILE_{name_of(t)} {i + 1}")
             for i, sl in enumerate(slots):
-                lines.append(f"#define {self.prefix}_{name}_SLOT_{name_of(sl)} {i}")
+                lines.append(f"#define {self.prefix}_{name_of(name)}_SLOT_{name_of(sl)} {i}")
             lines.append("")
         for i, (n, _) in enumerate(self.game):
             lines.append(f"#define {self.prefix}_GAME_{name_of(n)} {i}")
@@ -1656,11 +1792,11 @@ class Pack:
                     lines.append(f"#define {self.prefix}_{name_of(g.name)}_{kind}_{name_of(n)} {i}")
             lines.append("")
         for index, name in sorted(self.mask_names.items()):
-            lines.append(f"#define {self.prefix}_MASK_{name} {index}")
+            lines.append(f"#define {self.prefix}_MASK_{name_of(name)} {index}")
         if self.mask_names:
             lines.append("")
         for name, number in self.point_names.items():
-            lines.append(f"#define {self.prefix}_POINT_{name} {number}")
+            lines.append(f"#define {self.prefix}_POINT_{name_of(name)} {number}")
         if self.point_names:
             lines.append("")
         for i, n in enumerate(self.sounds):
@@ -1673,18 +1809,22 @@ class Pack:
         if self.timers:
             lines.append("")
         for i, e in enumerate(self.events):
-            lines.append(f"#define {self.prefix}_EVENT_{e.upper()} {i}")
+            lines.append(f"#define {self.prefix}_EVENT_{name_of(e)} {i}")
         if self.events:
             lines.append("")
         if self.anims:
             # the params an actor of the pack keeps at most: the engine is built with DGX_GE_ANIM_PARAMS no fewer
-            # (dgx_ge_params_of_pack, project_include.cmake); an animation with more than it keeps does not open. Two at least:
-            # the lives of cells keep a cell's modifier and tile in the first two (dgx_ge_cells.c)
-            lines += [f"#define {self.prefix}_ANIM_PARAMS {max(max(len(p) for *_, p in self.anims), 2)}", ""]
+            # (dgx_ge_params_of_pack, project_include.cmake); an animation with more than it keeps does not open, so a
+            # build that keeps fewer stops here (the engine's default from its header). Two at least: the lives of cells
+            # keep a cell's modifier and tile in the first two (dgx_ge_cells.c)
+            params = max(max(len(p) for *_, p in self.anims), 2)
+            lines += [f"#define {self.prefix}_ANIM_PARAMS {params}", '#include "dgx_ge_anim.h"', f"#if DGX_GE_ANIM_PARAMS < {self.prefix}_ANIM_PARAMS",
+                      f'#error "the actors of this pack keep {params} params, the build fewer (DGX_GE_ANIM_PARAMS): '
+                      'dgx_ge_params_of_pack(<this header>) in the game\'s CMakeLists, GAME_PACK_H in its Makefile of the computer"', "#endif", ""]
         for name, scripts, events, params in self.anims:
             for kind, items in (("SCRIPT", scripts), ("EVENT", events), ("PARAM", params), ("GAME", self.games.get(name, ()))):
                 for i, item in enumerate(items):
-                    lines.append(f"#define {self.prefix}_{name}_{kind}_{item.upper()} {i}")
+                    lines.append(f"#define {self.prefix}_{name_of(name)}_{kind}_{name_of(item)} {i}")
             lines.append("")
         for i, s in enumerate(self.styles):
             lines.append(f"#define {self.prefix}_STYLE_{name_of(s)} {i}")
@@ -1694,6 +1834,10 @@ class Pack:
             lines.append(f"#define {self.prefix}_FONTS(X) " + " ".join(f"X({name_of(s)}, {s})" for s in self.fonts))
         if self.fonts:
             lines.append(f"#define {self.prefix}_FONT_COUNT {len(self.fonts)}")  # the game's fonts by these numbers: so many
+        for i, (name, size) in enumerate(self.fields):
+            lines += [f"#define {self.prefix}_FIELD_{name_of(name)} {i}", f"#define {self.prefix}_FIELD_{name_of(name)}_SIZE {size}"]
+        if self.fields:
+            lines.append(f"#define {self.prefix}_FIELD_COUNT {len(self.fields)}")
         for name, roles in self.dialogs:
             for i, r in enumerate(roles):
                 lines.append(f"#define {self.prefix}_{name_of(name)}_ROLE_{name_of(r)} {i}")
@@ -1708,34 +1852,42 @@ class Pack:
                 for i, n in enumerate(items):
                     if n:
                         lines.append(f"#define {self.prefix}_SCENE_{name_of(scene)}_{kind}_{name_of(n)} {i}")
-        return "\n".join(lines)
+        # names given alike (stand-1 and stand_1, a set named COUNT): one name of the header for two things
+        seen = {}
+        for line in lines:
+            if line.startswith("#define "):
+                macro = line.split()[1].split("(")[0]
+                if macro in seen and seen[macro] != line:
+                    raise ValueError(f"the header names two things {macro}: {seen[macro]!r} and {line!r} (names alike once letters "
+                                     "other than A-Z and 0-9 are _)")
+                seen[macro] = line
+        return "\n".join(lines).rstrip("\n") + "\n"  # a C file ends with a line's end
 
     def write(self, pack_path, header_path=None, sounds_path=None):
         """
         The pack, and its header. sounds_path: the samples of the sounds (the blob SOUNDS) written there apart, not in
         the pack: a board without sound leaves them out of its flash; the sounds' names and numbers stay in the header.
         """
-        if self.strings.texts and "STRINGS" not in (n for n, _ in self.blobs):
-            self.add_blob("STRINGS", self.strings.blob())  # the strings of the dialogs, once, last
-        if self.game and "GAME" not in (n for n, _ in self.blobs):
-            self.add_blob("GAME", struct.pack("<IHH", 0x4D474744, 1, len(self.game)) + b"".join(struct.pack("<i", v) for _, v in self.game))
-        if self.chases and "CHASE" not in (n for n, _ in self.blobs):
-            self.add_blob("CHASE", struct.pack("<IHH", 0x48434744, 1, len(self.chases)) + b"".join(r for _, r in self.chases))
-        if self.timers and "TIMERS" not in (n for n, _ in self.blobs):
-            self.add_blob("TIMERS", self._timers_blob())   # the timers of the game, by their names
-        if self.styles and "STYLES" not in (n for n, _ in self.blobs):
-            self.add_blob("STYLES", self._styles_blob())   # the styles dialogs name
+        files = []  # all made first, then written together (write_files): a refusal or a file that cannot be written changes none
+        if self.strings.texts:
+            self._own_blob("STRINGS", self.strings.blob())  # the strings of the dialogs, once, last
+        if self.game:
+            self._own_blob("GAME", struct.pack("<IHH", 0x4D474744, 1, len(self.game)) + b"".join(struct.pack("<i", v) for _, v in self.game))
+        if self.chases:
+            self._own_blob("CHASE", struct.pack("<IHH", 0x48434744, 1, len(self.chases)) + b"".join(r for _, r in self.chases))
+        if self.timers:
+            self._own_blob("TIMERS", self._timers_blob())   # the timers of the game, by their names
+        if self.styles:
+            self._own_blob("STYLES", self._styles_blob())   # the styles dialogs name
         if any(self.sound_data) and sounds_path:
-            with open(sounds_path, "wb") as f:
-                f.write(self._sounds_blob())                # the samples of the sounds apart: a file of the board that plays them
-        elif any(self.sound_data) and "SOUNDS" not in (n for n, _ in self.blobs):
-            self.add_blob("SOUNDS", self._sounds_blob())   # the samples of the sounds, one blob
+            files.append((sounds_path, self._sounds_blob()))  # the samples of the sounds apart: a file of the board that plays them
+        elif any(self.sound_data):
+            self._own_blob("SOUNDS", self._sounds_blob())   # the samples of the sounds, one blob
         blob = self.build()
-        with open(pack_path, "wb") as f:
-            f.write(blob)
+        files.append((pack_path, blob))
         if header_path:
-            with open(header_path, "w") as f:
-                f.write(self.header(self.prefix))
+            files.append((header_path, self.header(self.prefix)))
+        write_files(files)
         for w in self.warnings:
             print("warning:", w, file=sys.stderr)
         return len(blob)

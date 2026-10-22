@@ -1,0 +1,20 @@
+# Guition JC1060P470: an ESP32-P4 with a 7-inch 1024x600 JD9165 on MIPI-DSI, 16 MB flash, 32 MB PSRAM. What the board
+# needs of a game's sdkconfig, with the file of its chip's revision after this one and the game's own last:
+# SDKCONFIG_DEFAULTS="<this>;<this>.rev1;<the game's>" (a later file over an earlier). Mine is of revision 1.3
+# (sdkconfig.defaults.rev1); a build for revision 3 does not start on it.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# DGX: the panel, its bus and the virtual screens the engine draws into
+CONFIG_DGX_ENABLE_DSI=y
+CONFIG_DGX_ENABLE_JD9165=y
+CONFIG_DGX_ENABLE_VSCREEN=y
+
+# The frame buffers the display is sent from live in PSRAM (its speed: the file of the revision)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_CACHE_L2_CACHE_256KB=y
+
+# its flash may be a Boya chip as the 10"'s is: its own driver then (nothing changes for another chip)
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y

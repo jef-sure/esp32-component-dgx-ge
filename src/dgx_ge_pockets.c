@@ -244,17 +244,17 @@ void dgx_ge_pockets_write(const dgx_ge_pockets_t *p, dgx_ge_save_t *s)
         dgx_ge_save_u16(s, t->kind);
         dgx_ge_save_u8(s, t->script);
         dgx_ge_save_u8(s, t->count);
-        for (int k = 0; k < DGX_GE_POCKET_PARAMS; ++k) dgx_ge_save_i16(s, t->params[k]);
+        for (int k = 0; k < DGX_GE_POCKET_PARAMS; ++k) dgx_ge_save_i32(s, t->params[k]);
     }
 }
 
-#define PLACE_BYTES (4 + 2 * DGX_GE_POCKET_PARAMS)
+#define PLACE_BYTES(l) (4 + DGX_GE_LOAD_PARAM_BYTES(l) * DGX_GE_POCKET_PARAMS)
 
 bool dgx_ge_pockets_read_check(const dgx_ge_pockets_t *p, dgx_ge_load_t *l)
 {
     const int capacity = dgx_ge_load_u8(l), params = dgx_ge_load_u8(l);
-    if (l->failed || capacity != p->capacity || params != DGX_GE_POCKET_PARAMS || dgx_ge_load_left(l) < (size_t)capacity * PLACE_BYTES) return false;
-    l->at += (size_t)capacity * PLACE_BYTES;
+    if (l->failed || capacity != p->capacity || params != DGX_GE_POCKET_PARAMS || dgx_ge_load_left(l) < (size_t)capacity * PLACE_BYTES(l)) return false;
+    l->at += (size_t)capacity * PLACE_BYTES(l);
     return true;
 }
 
@@ -262,13 +262,13 @@ bool dgx_ge_pockets_read(dgx_ge_pockets_t *p, dgx_ge_load_t *l)
 {
     const int capacity = dgx_ge_load_u8(l), params = dgx_ge_load_u8(l);
     if (l->failed || capacity != p->capacity || params != DGX_GE_POCKET_PARAMS) return false;
-    if (dgx_ge_load_left(l) < (size_t)capacity * PLACE_BYTES) return false;
+    if (dgx_ge_load_left(l) < (size_t)capacity * PLACE_BYTES(l)) return false;
     for (int i = 0; i < p->capacity; ++i) {
         dgx_ge_pocket_t *t = &p->places[i];
         t->kind   = dgx_ge_load_u16(l);
         t->script = dgx_ge_load_u8(l);
         t->count  = dgx_ge_load_u8(l);
-        for (int k = 0; k < DGX_GE_POCKET_PARAMS; ++k) t->params[k] = dgx_ge_load_i16(l);
+        for (int k = 0; k < DGX_GE_POCKET_PARAMS; ++k) t->params[k] = dgx_ge_load_param(l);
     }
     return true;
 }

@@ -3,7 +3,8 @@
 /*
  * Expressions of the blobs of the engine, made by the assembler of
  * animations (tools/dgx_ge_anim.py, Expr): its length u8, then steps for a
- * stack of floats: NUM f32, PARAM u8, T, the operators + - * / and NEG, MIN
+ * stack of floats (a whole number exact up to 2^24: a param past it is
+ * rounded, as a float rounds it): NUM f32, PARAM u8, T, the operators + - * / and NEG, MIN
  * MAX ABS SIN COS SQRT EXP, VX VY, the comparisons LT LE GT GE EQ NE and AND
  * OR NOT (1 or 0), NOW (the moment of the step, seconds of the clock of the
  * game), COUNT u16 kind (how many of a kind the actor has in its pockets),
@@ -53,7 +54,7 @@ enum { ITS_VX = 0xF0, ITS_VY, ITS_IMAGE, ITS_SCRIPT, ITS_FLIP, ITS_TILE, ITS_MOD
 
 /* The one a sense found, for its. while its expression is worked out; NULL otherwise. */
 typedef struct {
-    const int16_t *params;
+    const int32_t *params;
     int            count;
     float          vx, vy; /* points a second, x forward of the one looking */
     int            image, script, flip, tile, mod, cell;
@@ -70,7 +71,7 @@ typedef int (*dgx_ge_expr_count_fn)(const void *who, unsigned kind);
  * fifteen numbers (past the sixth, a number of a call goes through the stack of an Xtensa).
  */
 typedef struct {
-    const int16_t       *params;
+    const int32_t       *params;
     int                  param_count;
     const uint32_t      *words;
     int                  word_count;

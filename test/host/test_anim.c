@@ -146,6 +146,61 @@ static void breed_say(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, 
     ++calves;
 }
 
+/* The clock's game: signal 1 answered with go at once, at the moment it is said; the frames told (add n 1) counted */
+static int clock_frames;
+
+static void clock_say(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, uint32_t at_ms, void *ctx)
+{
+    if (what == DGX_GE_ANIM_SIGNAL && value == 1) dgx_ge_actor_event(a, TEST_TIMING_EVENT_GO, at_ms, clock_say, ctx);
+    if (what == DGX_GE_ANIM_PARAM) ++clock_frames;
+}
+
+/* The time of the scripts: motion that adds up however the calls come, events from its own say and from its past, a long absence lived through. */
+static void clock_tests(const dgx_ge_pack_t *pack)
+{
+    size_t         n;
+    const uint8_t *blob = dgx_ge_pack_blob(pack, TEST_BLOB_TIMING, &n);
+    dgx_ge_anim_t  anim;
+    CHECK(blob && dgx_ge_anim_open(&anim, blob, n));
+
+    /* an eighth of a point a second, 100 s: 12.5 points by calls of 1, 16 and 100 ms, and in one */
+    const uint32_t steps[] = {1, 16, 100, 100000};
+    for (int k = 0; k < 4; ++k) {
+        dgx_ge_actor_t a;
+        dgx_ge_actor_start(&a, &anim, TEST_TIMING_SCRIPT_CREEP, 0, 0, 0);
+        for (uint32_t t = 0; t <= 100000; t += steps[k]) dgx_ge_actor_advance(&a, t, NULL, NULL);
+        CHECK(a.x == 3200);
+        /* and from rest at an eighth of a point a second a second, 10 s: 6.25 points, 1.25 a second */
+        dgx_ge_actor_start(&a, &anim, TEST_TIMING_SCRIPT_SLOW, 0, 0, 0);
+        for (uint32_t t = 0; t <= 10000; t += steps[k] < 10000 ? steps[k] : 10000) dgx_ge_actor_advance(&a, t, NULL, NULL);
+        CHECK(a.x == 1600 && a.vx == 320);
+    }
+
+    /* the game answers a signal with an event at once: the new script begins at the moment of the step, the rest of the step not made */
+    dgx_ge_actor_t c;
+    dgx_ge_actor_start(&c, &anim, TEST_TIMING_SCRIPT_CALLER, 0, 0, 0);
+    dgx_ge_actor_advance(&c, 0, clock_say, NULL);
+    CHECK(c.script == TEST_TIMING_SCRIPT_GONE && c.image == TEST_IMG_EIGHT && c.x == 0 && c.due_ms == 50 && c.params[TEST_TIMING_PARAM_N] == 5);
+    dgx_ge_actor_advance(&c, 100, clock_say, NULL);
+    CHECK(c.image == TEST_IMG_ONE && c.x == 10 * 256 && c.holding);
+
+    /* an event at once from before the moment its motion has come to: the motion back to it, its frames and its place of one moment */
+    dgx_ge_actor_start(&c, &anim, TEST_TIMING_SCRIPT_RUNNER, 0, 0, 0);
+    dgx_ge_actor_advance(&c, 500, NULL, NULL);
+    CHECK(dgx_ge_actor_event(&c, TEST_TIMING_EVENT_GO, 400, NULL, NULL));
+    CHECK(c.script == TEST_TIMING_SCRIPT_GONE && c.entered_ms == 400 && c.entered_x == 8 * 256 && c.x == 8 * 256 && c.due_ms == 450 &&
+          c.image == TEST_IMG_EIGHT);
+    dgx_ge_actor_advance(&c, 500, NULL, NULL);
+    CHECK(c.x == 20 * 256 && c.holding); /* 2 more points of its run, 10 of dx */
+
+    /* half an hour away in one call: every one of its 10843 frames made, time is never lost (the clock of a game stands on a pause) */
+    dgx_ge_actor_start(&c, &anim, TEST_TIMING_SCRIPT_TICK, 0, 0, 0);
+    dgx_ge_actor_advance(&c, 0, clock_say, NULL);
+    clock_frames = 0;
+    dgx_ge_actor_advance(&c, 30 * 60 * 1000, clock_say, NULL);
+    CHECK(clock_frames == 10843 && c.params[TEST_TIMING_PARAM_N] == 10844 && c.due_ms == 10844u * 166);
+}
+
 /* The questions of the test's game: far (0) is 21, near (1) what ctx says. */
 static float answer(int what, void *ctx)
 {
@@ -162,7 +217,7 @@ int main(int argc, char **argv)
     const uint8_t *blob = dgx_ge_pack_blob(&pack, TEST_BLOB_HERO, &n);
     dgx_ge_anim_t  anim;
     CHECK(blob && dgx_ge_anim_open(&anim, blob, n));
-    CHECK(anim.scripts == 26 && anim.events == 6 && anim.params == 3);
+    CHECK(anim.scripts == 27 && anim.events == 6 && anim.params == 3);
 
     /* a run: frames at their times, the moves between them */
     dgx_ge_actor_t a;
@@ -253,6 +308,7 @@ int main(int argc, char **argv)
     dgx_ge_actor_advance(&shifted, 1500, say, NULL);
     dgx_ge_actor_shift(&shifted, 1000, 500);
     CHECK(dgx_ge_actor_x(&shifted) == 120 - 1000 && dgx_ge_actor_y(&shifted) == 44 - 500);
+    CHECK(shifted.entered_x == (100 - 1000) * 256 && shifted.entered_y == (50 - 500) * 256); /* where it entered its script, as a record keeps it */
     dgx_ge_actor_advance(&shifted, 1999, say, NULL);
     CHECK(dgx_ge_actor_x(&shifted) == 139 - 1000 && dgx_ge_actor_y(&shifted) == 145 - 500);
     /* what masks do when they meet, as the script says: from the step after the first frame until the next masks */
@@ -349,6 +405,27 @@ int main(int argc, char **argv)
     CHECK(said_tell == TEST_EVENT_DRANK_WINE && said_at == 20000);
     dgx_ge_actor_advance(&tipsy, 20500, say, NULL);
     CHECK(params_changed == 1); /* add 0: no change, nothing told */
+
+    /*
+     * a moment kept in a param (now + 10, seconds of the clock) at 10 hours of it, at 40000 s, 2.3 days (where a float
+     * of the milliseconds over 1000 falls short of the second) and 23 days: whole, and waited for to its second; past
+     * 32 bits a value stops at the limit, so does add
+     */
+    const uint32_t clocks[] = {36000000u, 40000000u, 199991000u, 2000000000u};
+    for (int i = 0; i < 4; ++i) {
+        dgx_ge_actor_t sober;
+        dgx_ge_actor_start(&sober, &anim, TEST_HERO_SCRIPT_SOBER, 0, 0, clocks[i]);
+        dgx_ge_actor_advance(&sober, clocks[i] + 9999, NULL, NULL);
+        CHECK(sober.params[TEST_HERO_PARAM_HP] == (int32_t)(clocks[i] / 1000 + 10) && sober.params[TEST_HERO_PARAM_POWER] == INT32_MAX &&
+              sober.params[TEST_HERO_PARAM_ACTION] == 0);
+        dgx_ge_actor_advance(&sober, clocks[i] + 10000, NULL, NULL);
+        CHECK(sober.params[TEST_HERO_PARAM_ACTION] == 7);
+    }
+    dgx_ge_actor_t low;
+    dgx_ge_actor_start(&low, &anim, TEST_HERO_SCRIPT_HURT, 0, 0, 0);
+    low.params[TEST_HERO_PARAM_HP] = INT32_MIN + 2; /* add hp -5 */
+    dgx_ge_actor_advance(&low, 0, NULL, NULL);
+    CHECK(low.params[TEST_HERO_PARAM_HP] == INT32_MIN);
 
     /* the world of a map acted on: a cell told an event with a value, a button pressed, a cell cleared; their numbers worked out */
     {
@@ -576,7 +653,7 @@ int main(int argc, char **argv)
     const int            at[4][3] = {{0, 0, 3}, {30, 40, 1}, {-60, 80, 3}, {90, 0, 5}};
     for (int i = 0; i < 4; ++i) {
         dgx_ge_actor_start(&herd[i], &anim, i ? TEST_HERO_SCRIPT_STAND : TEST_HERO_SCRIPT_LOOK, at[i][0], at[i][1], 0);
-        herd[i].params[TEST_HERO_PARAM_HP] = (int16_t)at[i][2];
+        herd[i].params[TEST_HERO_PARAM_HP] = at[i][2];
         const dgx_ge_body_t body = {&pack, TEST_IMG_ONE, at[i][0], at[i][1], false, 0};
         dgx_ge_collisions_set(reg, i, &body, (uint16_t)(i + 1), 1);
         dgx_ge_collisions_actor(reg, i, &herd[i]);
@@ -621,6 +698,10 @@ int main(int argc, char **argv)
     CHECK(calves == 1 && calf_params == 2 && dgx_ge_actor_x(&calf) == 5 && dgx_ge_actor_y(&calf) == 6);
     CHECK(calf.params[TEST_HERO_PARAM_HP] == 61 && calf.entered_params[TEST_HERO_PARAM_HP] == 61 && calf.params[TEST_HERO_PARAM_ACTION] == 7);
     CHECK(dgx_ge_anim_said_params(&calf) == 0);
+    dgx_ge_actor_start(&breeder, &anim, TEST_HERO_SCRIPT_BREED, 0, 0, 0);
+    breeder.params[TEST_HERO_PARAM_POWER] = 100000; /* given past 16 bits: whole */
+    dgx_ge_actor_advance(&breeder, 50, breed_say, NULL);
+    CHECK(calves == 2 && calf.params[TEST_HERO_PARAM_HP] == 50001 && calf.entered_params[TEST_HERO_PARAM_HP] == 50001);
 
     /* a watch set again with other events after a step took the feet off the floor: the loss is told, with the new event */
     dgx_ge_actor_t hopper2;
@@ -650,6 +731,7 @@ int main(int argc, char **argv)
     memcpy(broken, blob, n);
     CHECK(!dgx_ge_anim_open(&anim, broken, n - 1));
     free(broken);
+    clock_tests(&pack);
     free(data);
     CHECK_DONE();
 }

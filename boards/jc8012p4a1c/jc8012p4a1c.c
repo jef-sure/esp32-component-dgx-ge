@@ -3,6 +3,9 @@
  * PHY powered by LDO 3 at 2.5 V, reset 27, backlight 23), lying: 1280x800 (a frame of 320x200 four times larger fills
  * it). Its touch panel's firmware is the game's to embed: jc8012p4a1c_touch.fw, see board_pointer_start.
  */
+#include <stdlib.h>
+#include <string.h>
+
 #include "bus/dgx_dsi_esp32.h"
 #include "dgx_ge_board.h"
 #include "dgx_draw.h"
@@ -10,6 +13,7 @@
 #include "drivers/jd9365.h"
 #include "dgx_ge_mixer.h"
 #include "dgx_di_gsl3680.h"
+#include "dgx_di_keyboard.h"
 #include "dgx_di_pad.h"
 #include "dgx_ge_input.h"
 #include "driver/i2c_master.h"
@@ -160,10 +164,64 @@ uint32_t board_pad_buttons(void)
     return padded ? pad.buttons : 0;
 }
 
+/*
+ * The keyboard on the display (DGX-DI's), its memory only while it is open: its struct and what it typed for the game to
+ * take (board_keyboard_typed). It takes its fingers in board_pointer, before the pad and the game.
+ */
+const bool board_keyboard_able = true;
+
+enum { KEYBOARD_TYPED = 16 };
+static struct {
+    dgx_di_keyboard_t kb;
+    uint32_t          typed[KEYBOARD_TYPED];
+    uint8_t           count;
+} *keyboard;
+
+bool board_keyboard_open(dgx_screen_t *display, const uint8_t *layout, size_t size, dgx_font_t *font, dgx_ge_rect_t field, dgx_ge_rect_t *band)
+{
+    board_keyboard_close();
+    if (!(keyboard = calloc(1, sizeof *keyboard))) return false;
+    const dgx_di_rect_t away = {.x = (int16_t)field.x, .y = (int16_t)field.y, .w = (int16_t)field.w, .h = (int16_t)field.h};
+    if (!dgx_di_keyboard_open(&keyboard->kb, display, board_mm_w, board_mm_h, layout, size, font, &away)) {
+        free(keyboard), keyboard = NULL;
+        return false;
+    }
+    *band = dgx_ge_rect(keyboard->kb.x, keyboard->kb.y, keyboard->kb.w, keyboard->kb.h);
+    return true;
+}
+
+void board_keyboard_close(void)
+{
+    if (!keyboard) return;
+    dgx_di_keyboard_close(&keyboard->kb);
+    free(keyboard), keyboard = NULL;
+}
+
+int board_keyboard_typed(uint32_t *typed, int max)
+{
+    const int n = keyboard ? (keyboard->count < max ? keyboard->count : max) : 0;
+    if (!n) return 0;
+    memcpy(typed, keyboard->typed, (size_t)n * sizeof *typed);
+    memmove(keyboard->typed, keyboard->typed + n, (size_t)(keyboard->count - n) * sizeof *typed);
+    keyboard->count = (uint8_t)(keyboard->count - n);
+    return n;
+}
+
+/* no buttons of its own: a game's buttons come from the pad on its display, if any */
+const bool board_buttons_able = false;
+
+uint32_t board_buttons(void)
+{
+    return 0;
+}
+
 bool board_pointer(uint32_t now_ms, int *x, int *y)
 {
     static bool was; /* the first finger down at the last read */
     dgx_di_pointer_read(&pointer, now_ms);
+    if (keyboard) /* the keyboard's fingers its own: never the pad's, never the first */
+        keyboard->count = (uint8_t)(keyboard->count + dgx_di_keyboard_take(&keyboard->kb, &pointer, now_ms, keyboard->typed + keyboard->count,
+                                                                         KEYBOARD_TYPED - keyboard->count));
     if (padded) dgx_di_pad_take(&pad, &pointer); /* the pad's fingers its own: never the first */
     const bool down = dgx_di_pointer_first(&pointer, x, y);
     if (down && !was) ESP_LOGI("touch", "down at %d, %d of the display%s", *x, *y, turned ? " (turned)" : "");
@@ -187,25 +245,27 @@ const uint8_t board_sound_volume = 16;
 static SemaphoreHandle_t      sound_lock;
 static esp_codec_dev_handle_t speaker;
 
-void board_sound_lock(void)
+/* the mixer's lock: the task fills while the game plays and stops */
+static void sound_guard(bool take)
 {
-    if (sound_lock) xSemaphoreTake(sound_lock, portMAX_DELAY);
-}
-
-void board_sound_unlock(void)
-{
-    if (sound_lock) xSemaphoreGive(sound_lock);
+    if (take) xSemaphoreTake(sound_lock, portMAX_DELAY);
+    else xSemaphoreGive(sound_lock);
 }
 
 static void sound_task(void *arg)
 {
     struct dgx_ge_mixer *mixer = arg;
     static int16_t       samples[P4_SOUND_FRAMES];
+    bool                 told = false;
     for (;;) {
-        board_sound_lock();
         dgx_ge_mixer_fill(mixer, samples, P4_SOUND_FRAMES);
-        board_sound_unlock();
-        esp_codec_dev_write(speaker, samples, sizeof(samples));
+        if (esp_codec_dev_write(speaker, samples, sizeof(samples)) == ESP_CODEC_DEV_OK) continue;
+        /* not written: as long as they would have sounded, the mixer's time going on, the task never spinning */
+        if (!told) {
+            ESP_LOGE("sound", "the codec takes no samples");
+            told = true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(P4_SOUND_FRAMES * 1000 / board_sound_rate) + 1);
     }
 }
 
@@ -244,6 +304,7 @@ bool board_sound_start(struct dgx_ge_mixer *mixer)
     }
     esp_codec_dev_set_out_vol(speaker, P4_VOLUME);
     sound_lock = xSemaphoreCreateMutex();
+    if (sound_lock) mixer->lock = sound_guard; /* before the task: from its first fill on */
     if (!sound_lock || xTaskCreate(sound_task, "sound", 3072, mixer, 6, NULL) != pdPASS) {
         ESP_LOGE(TAG, "no task");
         return false;

@@ -12,15 +12,17 @@ CFLAGS  += -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
 PYTHON  ?= python3
 BUILD   := build
 
-TESTS := test_pack test_scene test_anim test_mask test_tiles test_world test_save test_widgets test_shots test_pockets test_cells test_graph test_timers test_show test_chase test_walk test_dialog test_text test_label test_sound test_mixer test_talk_view test_crowd test_input test_layout
+TESTS := test_pack test_scene test_frame test_anim test_mask test_tiles test_world test_save test_widgets test_shots test_pockets test_cells test_graph test_timers test_show test_chase test_walk test_dialog test_text test_label test_sound test_mixer test_talk_view test_crowd test_input test_layout test_host_nvs
 
-# what of DGX the engine stands on, built for the host as the tests of DGX build it (DGX 0.7: its sources by topic)
-DGX_SRCS := $(addprefix $(DGX)/src/, screen/screen.c screen/screen_bus.c screen/pixels.c screen/bitmap.c \
-              draw/draw.c draw/lines.c draw/circles.c draw/polygons.c draw/ellipse.c draw/bezier.c draw/texture.c draw/scroll.c \
-              vscreen/vscreen.c vscreen/transfer.c vscreen/scale.c vscreen/lut.c vscreen/overlay.c vscreen/bw_screen.c vscreen/image.c \
-              text/font.c text/hw_font.c bus/fb_area.c bus/fb_tiles.c bus/fb_flip.c)
-DGX_FLAGS := -I$(DGX)/test/host/stubs -I$(DGX)/include -I$(DGX)/src -include $(DGX)/test/host/stubs/esp_log.h -Wno-format
+# what of DGX the engine stands on, as DGX gives it for a computer (DGX 0.8: host/dgx_host.mk, its sources by group, the
+# stubs of ESP-IDF); its fonts each test names
+include $(DGX)/host/dgx_host.mk
+DGX_SRCS := $(DGX_HOST_SRCS_SCREEN) $(DGX_HOST_SRCS_DRAW) $(DGX_HOST_SRCS_VSCREEN) $(DGX_HOST_SRCS_TEXT) $(DGX_HOST_SRCS_MORPH) $(DGX_HOST_SRCS_FB)
+DGX_FLAGS := $(DGX_HOST_CPPFLAGS) -Wno-format
 CPPFLAGS += -I$(ROOT)/include -I$(BUILD) $(DGX_FLAGS)
+# the params an actor keeps, as the test pack needs them (TEST_ANIM_PARAMS; its header stops a build of fewer), as a
+# game's build takes them from its pack (dgx_ge_params_of_pack)
+CPPFLAGS += -DDGX_GE_ANIM_PARAMS=8
 # the display input DGX-DI, as DGX is found: the managed component of the project the engine sits in, a component
 # beside the engine (named as ESP-IDF names it, or not), or a checkout next to the engine's; the join of its touch
 # with the input (dgx_ge_input_di.h) is tested then, without it that test is skipped
@@ -30,7 +32,7 @@ DI_FLAGS := $(if $(DI),-I$(DI)/include)
 ENGINE_SRCS := $(addprefix $(ROOT)/src/, dgx_ge_image.c dgx_ge_frame.c dgx_ge_scene.c)
 HEADERS := $(wildcard $(ROOT)/include/*.h) $(wildcard $(ROOT)/src/*.h) check.h
 
-all: $(addprefix run-, $(TESTS)) run-rules run-sprites run-scenes run-explain run-dialog-rules run-text-layout
+all: $(addprefix run-, $(TESTS)) run-rules run-sprites run-scenes run-explain run-dialog-rules run-text-layout run-pack-rules
 
 run-rules:
 	$(PYTHON) -I test_anim_rules.py
@@ -116,8 +118,15 @@ $(BUILD)/test.pack $(BUILD)/test_pack.h $(BUILD)/test_sounds.h &: make_test_pack
 $(BUILD)/test_pack: test_pack.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_pack.c $(ROOT)/src/dgx_ge_pack.c -o $@
 
+# NVS on the computer, the board host's (boards/host): its stubs before DGX's, its file store
+$(BUILD)/test_host_nvs: test_host_nvs.c $(ROOT)/boards/host/host_nvs.c $(ROOT)/boards/host/stubs/nvs.h $(ROOT)/boards/host/stubs/nvs_flash.h check.h | $(BUILD)
+	$(CC) -I$(ROOT)/boards/host/stubs $(CPPFLAGS) $(CFLAGS) test_host_nvs.c $(ROOT)/boards/host/host_nvs.c -o $@
+
 $(BUILD)/test_scene: test_scene.c $(ENGINE_SRCS) $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_scene.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
+
+$(BUILD)/test_frame: test_frame.c $(ENGINE_SRCS) $(HEADERS) | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) test_frame.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
 
 # the scripts: what draws from pockets and lays into the world goes with them
 ANIM_SRCS := $(ROOT)/src/dgx_ge_anim.c $(ROOT)/src/dgx_ge_mask.c $(ROOT)/src/dgx_ge_pockets.c $(ROOT)/src/dgx_ge_world.c $(ROOT)/src/dgx_ge_cells.c $(ROOT)/src/dgx_ge_links.c $(ROOT)/src/dgx_ge_graph.c $(ROOT)/src/dgx_ge_game.c $(ROOT)/src/dgx_ge_timers.c $(ROOT)/src/dgx_ge_save.c
@@ -141,7 +150,10 @@ $(BUILD):
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all clean run-rules run-explain run-dialog-rules run-text-layout
+.PHONY: all clean run-rules run-explain run-dialog-rules run-text-layout run-pack-rules
+
+run-pack-rules: | $(BUILD)
+	CC=$(CC) $(PYTHON) -I test_pack_rules.py
 
 run-text-layout: $(BUILD)/text_lay
 	DGX=$(DGX) $(PYTHON) -I test_text_layout.py $(BUILD)/text_lay
@@ -176,7 +188,6 @@ $(BUILD)/test_graph: test_graph.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)
 $(BUILD)/test_timers: test_timers.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_timers.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c -lm -o $@
 
-# the crowd's kinds keep up to 8 params
 # the scenes of the editor's file: the packer's checks (test_scenes.py), and the pack the engine's test opens
 $(BUILD)/layout/layout.pack $(BUILD)/layout/layout_pack.h &: test_scenes.py $(ROOT)/tools/dgx_ge_pack.py $(ROOT)/tools/dgx_ge_graph.py $(ROOT)/tools/dgx_ge_anim.py | $(BUILD)
 	$(PYTHON) -I test_scenes.py
@@ -184,10 +195,10 @@ $(BUILD)/layout/layout.pack $(BUILD)/layout/layout_pack.h &: test_scenes.py $(RO
 run-scenes: $(BUILD)/layout/layout.pack
 
 $(BUILD)/test_layout: test_layout.c $(ROOT)/src/dgx_ge_layout.c $(ROOT)/src/dgx_ge_tiles.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/layout/layout_pack.h $(HEADERS) | $(BUILD)
-	$(CC) $(CPPFLAGS) -I$(BUILD)/layout -DDGX_GE_ANIM_PARAMS=8 $(CFLAGS) test_layout.c $(ROOT)/src/dgx_ge_layout.c $(ROOT)/src/dgx_ge_tiles.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
+	$(CC) $(CPPFLAGS) -I$(BUILD)/layout $(CFLAGS) test_layout.c $(ROOT)/src/dgx_ge_layout.c $(ROOT)/src/dgx_ge_tiles.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
 
 $(BUILD)/test_crowd: test_crowd.c $(ROOT)/src/dgx_ge_crowd.c $(ROOT)/src/dgx_ge_tiles.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
-	$(CC) $(CPPFLAGS) -DDGX_GE_ANIM_PARAMS=8 $(CFLAGS) test_crowd.c $(ROOT)/src/dgx_ge_crowd.c $(ROOT)/src/dgx_ge_tiles.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) test_crowd.c $(ROOT)/src/dgx_ge_crowd.c $(ROOT)/src/dgx_ge_tiles.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
 
 $(BUILD)/test_show: test_show.c $(ROOT)/src/dgx_ge_show.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_show.c $(ROOT)/src/dgx_ge_show.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
@@ -205,7 +216,7 @@ $(BUILD)/test_sound: test_sound.c $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_sound.c -o $@
 
 $(BUILD)/test_mixer: test_mixer.c $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(BUILD)/test_sounds.h $(HEADERS) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) test_mixer.c $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_pack.c -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) test_mixer.c $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_pack.c -o $@ -pthread
 
 $(BUILD)/test_input: test_input.c $(ROOT)/src/dgx_ge_input.c $(DI_SRCS) $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(DI_FLAGS) $(CFLAGS) test_input.c $(ROOT)/src/dgx_ge_input.c $(DI_SRCS) -lm -o $@
@@ -220,7 +231,7 @@ $(BUILD)/test_text: test_text.c $(ROOT)/src/dgx_ge_text.c $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_text.c $(ROOT)/src/dgx_ge_text.c $(DGX_SRCS) $(DGX)/src/fonts/TerminusTTFMedium12.c $(DGX)/src/fonts/font0ss.c -lm -o $@
 
 $(BUILD)/text_lay: text_lay.c $(ROOT)/src/dgx_ge_text.c $(HEADERS) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) text_lay.c $(ROOT)/src/dgx_ge_text.c $(DGX_SRCS) $(DGX)/src/fonts/TerminusTTFMedium12.c $(DGX)/src/fonts/ArialRegular12.c -lm -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) text_lay.c $(ROOT)/src/dgx_ge_text.c $(DGX_SRCS) $(DGX)/src/fonts/TerminusTTFMedium12.c $(DGX)/src/fonts/DroidSansRegular9.c -lm -o $@
 
 $(BUILD)/test_talk_view: test_talk_view.c $(ROOT)/src/dgx_ge_widgets.c $(ROOT)/src/dgx_ge_input.c $(ROOT)/src/dgx_ge_talk_view.c $(ROOT)/src/dgx_ge_text.c $(ROOT)/src/dgx_ge_dialog.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_talk_view.c $(ROOT)/src/dgx_ge_widgets.c $(ROOT)/src/dgx_ge_input.c $(ROOT)/src/dgx_ge_talk_view.c $(ROOT)/src/dgx_ge_text.c $(ROOT)/src/dgx_ge_dialog.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) $(DGX)/src/fonts/TerminusTTFMedium12.c $(DGX)/src/fonts/font0ss.c -lm -o $@

@@ -110,6 +110,7 @@ cases = {
     "axis of no such name": BASE + "script c\n    dx axis(z)\n    hold\n",
     "axis of a number": BASE + "script c\n    dx axis(0)\n    hold\n",
     "axis in a param's start": "param p axis(lx)\n" + BASE,
+    "set past a float": "param p 0\n" + BASE + "script c\n    set p 16777217\n    hold\n",
 }
 failed = 0
 for name, text in cases.items():
@@ -168,6 +169,13 @@ done = assemble("param k 0\ngame far\ngame sees near\n" + BASE + "script c\n    
 want = bytes([OP["SET_X"], 0]) + bytes([2 + 5 + 1 + 2 + 1, EXPR["game"], 2]) + struct.pack("<Bf", EXPR["num"], 2) + bytes([EXPR["*"], EXPR["game"], 0, EXPR["+"]])
 if done.games != ["far", "sees", "near"] or want not in done.blob or EXPR["game"] != 46:
     print(f"test_anim_rules.py: game {done.games} {done.blob.hex()} has no {want.hex()}")
+    failed += 1
+# set and add of a constant: of 16 bits in the step itself, beyond them (a param holds 32) as an expression of a float
+done = assemble("param p 0\n" + BASE + "script c\n    set p -32768\n    add p 100000\n    set p -16777216\n    hold\n")
+want = (struct.pack("<BBh", OP["SET"], 0, -32768) + bytes([OP["ADD_X"], 0, 5]) + struct.pack("<Bf", EXPR["num"], 100000)
+        + bytes([OP["SET_X"], 0, 5]) + struct.pack("<Bf", EXPR["num"], -16777216) + bytes([OP["HOLD"]]))
+if not done.blob.endswith(want):
+    print(f"test_anim_rules.py: set and add {done.blob.hex()} do not end with {want.hex()}")
     failed += 1
 # axis() only in a script of an animation: not in a piece of a tile, not in a dialog's condition (stale there)
 for name, make in [("a tile", lambda: Expr("axis(lx)", {}, {}, False, "t", actor=False)),

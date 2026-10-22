@@ -5,6 +5,7 @@
 
 #include "check.h"
 #include "dgx_ge_pack.h"
+#include "dgx_ge_pockets.h"
 #include "dgx_ge_world.h"
 #include "test_pack.h"
 
@@ -32,7 +33,7 @@ int main(int argc, char **argv)
 {
     /* the ring: three places; the fourth record takes the place of the first */
     dgx_ge_world_t *w = dgx_ge_world_create(3);
-    CHECK(w != NULL && sizeof(dgx_ge_object_t) == 24);
+    CHECK(w != NULL && sizeof(dgx_ge_object_t) == 28);
     dgx_ge_object_t o = {.scene = 5, .kind = 1}, got;
     const int32_t   a = dgx_ge_world_add(w, &o);
     o.kind            = 2;
@@ -83,6 +84,61 @@ int main(int argc, char **argv)
     dgx_ge_world_remove(k, s2);
     CHECK(dgx_ge_world_add(k, &shard) >= 0 && count_of(k, 2) == 3);
     dgx_ge_world_destroy(&k);
+
+    /* a free place first: of a, b, c, b removed, d takes its place and a is still there; full again, the oldest goes */
+    dgx_ge_world_t *f = dgx_ge_world_create(3);
+    o                 = (dgx_ge_object_t){.scene = 3};
+    const int32_t fa = dgx_ge_world_add(f, &o), fb = dgx_ge_world_add(f, &o), fc = dgx_ge_world_add(f, &o);
+    dgx_ge_world_remove(f, fb);
+    const int32_t fd = dgx_ge_world_add(f, &o);
+    CHECK(fd >= 0 && dgx_ge_world_get(f, fa, &got) && dgx_ge_world_get(f, fc, &got) && dgx_ge_world_get(f, fd, &got) && count_of(f, 3) == 3);
+    const int32_t fe = dgx_ge_world_add(f, &o);
+    CHECK(fe >= 0 && !dgx_ge_world_get(f, fa, &got) && dgx_ge_world_get(f, fc, &got) && dgx_ge_world_get(f, fd, &got));
+    /* the same with a kept record in the way: a free place goes before a record not kept */
+    dgx_ge_world_clear(f);
+    const int32_t fk = dgx_ge_world_add(f, &sword), fs = dgx_ge_world_add(f, &shard), ft = dgx_ge_world_add(f, &shard);
+    dgx_ge_world_remove(f, ft);
+    CHECK(dgx_ge_world_add(f, &shard) >= 0 && dgx_ge_world_get(f, fk, &got) && dgx_ge_world_get(f, fs, &got));
+    /* boxes that could not be made: none at all (no box missing among them), and they may be asked for again */
+    CHECK(!dgx_ge_world_boxes(f, NULL, 2, 0) && dgx_ge_world_new_box(f) == 0);
+    CHECK(dgx_ge_world_boxes(f, NULL, 2, 4) && dgx_ge_world_new_box(f) == 1);
+    dgx_ge_world_destroy(&f);
+
+    /*
+     * Characters leaving with what they hold, more of them than boxes: the oldest not kept gives up its box and is
+     * forgotten whole; the newest keeps its things. Every box held by a kept record: refused, nothing changed.
+     */
+    dgx_ge_world_t   *h = dgx_ge_world_create(3);
+    dgx_ge_pockets_t *held = dgx_ge_pockets_create(NULL, 4, 0);
+    CHECK(h && held && dgx_ge_world_boxes(h, NULL, 2, 4));
+    const dgx_ge_pocket_t blade = {.kind = 7, .script = 1}, flask = {.kind = 8};
+    const dgx_ge_object_t guard = {.scene = 4, .kind = 3};
+    dgx_ge_pockets_put(held, &blade, 1);
+    const int32_t ha = dgx_ge_world_add_holding(h, &guard, held, 0);
+    CHECK(ha >= 0 && held->places[0].count == 0 && dgx_ge_world_box(h, ha) && dgx_ge_world_box(h, ha)->places[0].kind == 7);
+    dgx_ge_pockets_put(held, &flask, 2);
+    const int32_t hb = dgx_ge_world_add_holding(h, &guard, held, 0);
+    CHECK(hb >= 0 && dgx_ge_world_box(h, hb) && dgx_ge_world_box(h, hb) != dgx_ge_world_box(h, ha));
+    dgx_ge_pockets_put(held, &blade, 1);
+    const int32_t hc = dgx_ge_world_add_holding(h, &guard, held, 0);
+    dgx_ge_object_t was;
+    CHECK(hc >= 0 && !dgx_ge_world_get(h, ha, &was) && dgx_ge_world_get(h, hb, &was) && held->places[0].count == 0);
+    const dgx_ge_pockets_t *in = dgx_ge_world_box(h, hc);
+    CHECK(in && in->places[0].kind == 7 && in->places[0].count == 1 && in->places[1].count == 0); /* its own, nothing of the forgotten */
+    /* nothing held: no box needed */
+    const int32_t hd = dgx_ge_world_add_holding(h, &guard, held, 0);
+    CHECK(hd >= 0 && !dgx_ge_world_box(h, hd));
+    /* every box held by a kept record (a heap, a chest): no box for a new one, and the world and its pockets as they were */
+    dgx_ge_world_clear(h);
+    dgx_ge_object_t chest = {.scene = 4, .kind = 5, .keep = true};
+    chest.box = (uint8_t)dgx_ge_world_new_box(h);
+    CHECK(dgx_ge_world_add(h, &chest) >= 0);
+    chest.box = (uint8_t)dgx_ge_world_new_box(h);
+    CHECK(dgx_ge_world_add(h, &chest) >= 0 && dgx_ge_world_new_box(h) == 0);
+    dgx_ge_pockets_put(held, &blade, 1);
+    CHECK(dgx_ge_world_add_holding(h, &guard, held, 0) == -1 && held->places[0].count == 1);
+    dgx_ge_pockets_destroy(&held);
+    dgx_ge_world_destroy(&h);
 
     /*
      * Kept and made again: an actor kept after it was sent into a script and

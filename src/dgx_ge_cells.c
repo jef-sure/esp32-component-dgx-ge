@@ -37,7 +37,7 @@ static int find(const dgx_ge_cells_t *c, uint16_t cell)
     return -1;
 }
 
-bool dgx_ge_cells_set(dgx_ge_cells_t *c, uint16_t cell, int own, int16_t value)
+bool dgx_ge_cells_set(dgx_ge_cells_t *c, uint16_t cell, int own, int32_t value)
 {
     const int i = find(c, cell);
     if (i < 0 || own < 0 || own >= DGX_GE_CELL_OWN) return false;
@@ -91,7 +91,7 @@ static bool play(dgx_ge_cells_t *c, const dgx_ge_life_t *was, const dgx_ge_anim_
     a.pc = life->pc, a.pending = life->pending, a.pending_when = life->pending_when;
     int tile = 0, mod = 0;
     c->io.get(life->cell, &tile, &mod, c->io.ctx);
-    a.params[PARAM_MOD] = (int16_t)mod, a.params[PARAM_TILE] = (int16_t)tile;
+    a.params[PARAM_MOD] = mod, a.params[PARAM_TILE] = tile;
     for (int i = 0; i < DGX_GE_CELL_OWN && PARAM_OWN + i < DGX_GE_ANIM_PARAMS; ++i) a.params[PARAM_OWN + i] = life->own[i];
     heard_t heard = {c, life->cell};
     if (event >= 0) dgx_ge_actor_event(&a, event, now_ms, say, &heard);
@@ -104,7 +104,7 @@ static bool play(dgx_ge_cells_t *c, const dgx_ge_life_t *was, const dgx_ge_anim_
     return a.holding;
 }
 
-bool dgx_ge_cells_event(dgx_ge_cells_t *c, uint16_t cell, uint16_t kind, int event, int own, int16_t value, uint32_t now_ms)
+bool dgx_ge_cells_event(dgx_ge_cells_t *c, uint16_t cell, uint16_t kind, int event, int own, int32_t value, uint32_t now_ms)
 {
     if (c->io.cells && cell >= c->io.cells) return false;
     int i = find(c, cell);
@@ -156,7 +156,7 @@ void dgx_ge_cells_play(dgx_ge_cells_t *c, uint32_t now_ms)
     }
 }
 
-#define LIFE_BYTES (2 + 2 + 1 + 1 + 1 + 2 + 4 + 2 * DGX_GE_CELL_OWN)
+#define LIFE_BYTES(l) (2 + 2 + 1 + 1 + 1 + 2 + 4 + DGX_GE_LOAD_PARAM_BYTES(l) * DGX_GE_CELL_OWN)
 
 void dgx_ge_cells_save(const dgx_ge_cells_t *c, dgx_ge_save_t *s)
 {
@@ -172,7 +172,7 @@ void dgx_ge_cells_save(const dgx_ge_cells_t *c, dgx_ge_save_t *s)
         dgx_ge_save_u8(s, f->pending_when);
         dgx_ge_save_u16(s, f->pc);
         dgx_ge_save_u32(s, f->due_ms);
-        for (int k = 0; k < DGX_GE_CELL_OWN; ++k) dgx_ge_save_i16(s, f->own[k]);
+        for (int k = 0; k < DGX_GE_CELL_OWN; ++k) dgx_ge_save_i32(s, f->own[k]);
     }
     dgx_ge_save_chunk_end(s);
 }
@@ -182,7 +182,7 @@ static bool load(const dgx_ge_cells_t *c, dgx_ge_cells_t *into, dgx_ge_load_t *l
 {
     if (!dgx_ge_load_chunk(l, "CELL")) return false;
     const int count = dgx_ge_load_u16(l), own = dgx_ge_load_u8(l);
-    if (l->failed || count > c->capacity || own != DGX_GE_CELL_OWN || dgx_ge_load_left(l) < (size_t)count * LIFE_BYTES) return false;
+    if (l->failed || count > c->capacity || own != DGX_GE_CELL_OWN || dgx_ge_load_left(l) < (size_t)count * LIFE_BYTES(l)) return false;
     for (int i = 0; i < count; ++i) {
         dgx_ge_life_t f;
         f.cell         = dgx_ge_load_u16(l);
@@ -192,7 +192,7 @@ static bool load(const dgx_ge_cells_t *c, dgx_ge_cells_t *into, dgx_ge_load_t *l
         f.pending_when = dgx_ge_load_u8(l);
         f.pc           = dgx_ge_load_u16(l);
         f.due_ms       = dgx_ge_load_u32(l) + later_ms;
-        for (int k = 0; k < DGX_GE_CELL_OWN; ++k) f.own[k] = dgx_ge_load_i16(l);
+        for (int k = 0; k < DGX_GE_CELL_OWN; ++k) f.own[k] = dgx_ge_load_param(l);
         /* its kind's: its script and the passing it waits for (a script + 1, 0 none) of it; where it is in the code is checked as it plays */
         const dgx_ge_anim_t *anim = dgx_ge_kind(c->kinds, f.kind);
         if (!anim || f.script >= anim->scripts || f.pending > anim->scripts || (c->io.cells && f.cell >= c->io.cells)) return false;

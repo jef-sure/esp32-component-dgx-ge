@@ -13,6 +13,10 @@ msgid "Not translated here."
 msgstr ""
 
 msgctxt "clock"
+msgid "Sound {sound}, volume {volume}."
+msgstr "Громкость {volume}, звук {sound}."
+
+msgctxt "clock"
 msgid "{volume} minute left"
 msgid_plural "{volume} minutes left"
 msgstr[0] "Осталась {volume} минута"

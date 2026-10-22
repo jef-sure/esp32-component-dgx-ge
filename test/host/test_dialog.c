@@ -59,7 +59,8 @@ int main(int argc, char **argv)
     CHECK(blob && dgx_ge_dialog_open(&post, blob, n) && post.roles == 3);
     blob = dgx_ge_pack_blob(&pack, TEST_BLOB_OTHER, &n);
     CHECK(blob && dgx_ge_dialog_open(&other, blob, n) && other.roles == 0);
-    CHECK(!strcmp(dgx_ge_string(&strings, 9999), "") && strings.count == 26); /* 7 of post, 2 names, 4 of other (Thanks. there), 6 of page, 2 of faces (Hi., Bye.), 4 of clock */
+    CHECK(!strcmp(dgx_ge_string(&strings, 9999), "") && strings.count == 39); /* 7 of post, 2 names, 4 of other (Thanks. there), 6 of page, 2 of faces (Hi., Bye.), 3 of names (Back there), 4 of clock,
+                                                                             4 of swap, 2 of loud (Volume there), 1 of tale, 3 of many */
 
     /* times: a line on by itself, an important one only once seen whole, a choice unanswered where silence leads */
     dgx_ge_talk_t t;
@@ -247,14 +248,21 @@ int main(int argc, char **argv)
     dgx_ge_talk_play(&t, 1000, true);
     CHECK(t.state == DGX_GE_TALK_SAYING && t.forms == 1 && t.number == 5);
     CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, t.number, line, sizeof line), "Volume 5."));
-    /* a line of several numbers: each {name} in order, as they were when it was said */
+    /* a line of several numbers: each {name} as they were when it was said; translated in another order, each by its name */
     settings.params[TEST_SETTINGS_PARAM_SOUND] = 1;
     dgx_ge_talk_play(&t, 1000, true);
     dgx_ge_talk_play(&t, 2000, true);
     settings.params[TEST_SETTINGS_PARAM_SOUND] = 0;
-    const int16_t said[] = {t.number, t.more[0]};
+    const int32_t said[] = {t.number, t.more[0]};
     CHECK(t.state == DGX_GE_TALK_SAYING && t.count == 2 && t.number == 1 && t.more[0] == 5);
-    CHECK(!strcmp(dgx_ge_strings_numbers(&strings, t.string, t.forms, said, t.count, line, sizeof line), "Sound 1, volume 5."));
+    CHECK(!strcmp(dgx_ge_strings_numbers(&strings, t.string, t.forms, said, t.count, line, sizeof line), "Громкость 5, звук 1."));
+    CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Громкость {1}, звук {0}.")); /* as the packer put it */
+    /* numbers past 16 bits, as they were said, to the last of 32 */
+    settings.params[TEST_SETTINGS_PARAM_VOLUME] = 40000;
+    dgx_ge_talk_start(&t, &clock, &(dgx_ge_cast_t){.game = &settings}, 0, 0, NULL, NULL);
+    CHECK(t.number == 40000 && !strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, t.number, line, sizeof line), "Осталось 40000 минут"));
+    CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, INT32_MIN, line, sizeof line), "Осталось -2147483648 минут"));
+    settings.params[TEST_SETTINGS_PARAM_VOLUME] = 5;
 
     /* not a dialog */
     CHECK(!dgx_ge_dialog_open(&other, data, 4) && !dgx_ge_dialog_open(&other, NULL, 100));

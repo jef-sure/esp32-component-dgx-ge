@@ -21,7 +21,8 @@ extern "C" {
  * does on meeting (hit): read once, when the game gives the kind.
  *
  * Hits: between two looks a shot goes along a line. The terrain is looked at
- * first, by a ray (a wall cuts the way); then the bodies of the collisions,
+ * first, by a ray at every point of the way (a wall cuts the way, a floor
+ * solid only along its top too); then the bodies of the collisions,
  * by their boxes and, those touched, by their masks point by point; the first
  * met along the way counts. The bodies of its owner are passed by, sides as
  * the meets say. The game is told what was met and decides: the shot gone, a

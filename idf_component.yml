@@ -10,9 +10,10 @@ dependencies:
   idf:
     version: ">=5.3.0"
   jef-sure/dgx:
-    version: "^0.7.2"  # 0.7.2: fonts made at build time from requests (dgx_ge_fonts); 0.7.0: one set of flags for every transfer, Scale3x and the SFX smoothing; 0.6.6: the overlay layer of a screen; 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
-    # to work on DGX together with the engine, take it from a checkout instead:
-    # override_path: "<the path of a DGX checkout>"
+    version: "^0.8.0"  # 0.8.0: Arial and Verdana gone (free fonts only), the licenses of the fonts shown, its host build in host/dgx_host.mk (the engine's host tests and PoP's host take it); 0.7.3: configures on CMake older than 3.19; 0.7.2: fonts made at build time from requests (dgx_ge_fonts); 0.7.0: one set of flags for every transfer, Scale3x and the SFX smoothing; 0.6.6: the overlay layer of a screen; 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
+    # to work on DGX together with the engine, put a copy of its checkout (not a link: a link makes it two
+    # components) into the project's components/ as jef-sure__dgx; override_path names it after its directory,
+    # and the engine and DGX-DI, which require jef-sure__dgx, do not find it
 
 tags:
   - game
@@ -41,9 +42,26 @@ files:
     - "src/**/*.h"
     - "include/**/*.h"
     # the boards games have run on: taken by a game into its own build, not built by the library
-    - "boards/*.c"
     - "boards/*.h"
-    - "boards/*.cmake"
+    - "boards/*/*.c"
+    - "boards/*/board.cmake"
+    - "boards/*/sdkconfig.defaults*"
+    # the computer as a board: its build for a game (host.mk) and its stubs of ESP-IDF
+    - "boards/host/host.mk"
+    - "boards/host/stubs/**/*.h"
+    # the example, its sources and its art (not what a build of it leaves)
+    - "examples/*/README.md"
+    - "examples/*/Makefile"
+    - "examples/*/CMakeLists.txt"
+    - "examples/*/sdkconfig.defaults"
+    - "examples/*/.gitignore"
+    - "examples/*/main/*.c"
+    - "examples/*/main/CMakeLists.txt"
+    - "examples/*/main/idf_component.yml"
+    - "examples/*/main/assets/*"
+    - "examples/*/anim/*.anim"
+    - "examples/*/art/*.png"
+    - "examples/*/tools/*.py"
     - "tools/**/*.py"
     - "README.md"
     - "CHANGES.md"
@@ -53,5 +71,9 @@ files:
     - "docs/animation-ru.md"
     - "docs/overview-en.md"
     - "docs/animation-en.md"
+    - "docs/host-ru.md"
+    - "docs/host-en.md"
+    - "docs/workflow-ru.md"
+    - "docs/workflow-en.md"
   exclude:
     - "**/*"

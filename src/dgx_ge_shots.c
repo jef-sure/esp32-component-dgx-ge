@@ -111,9 +111,9 @@ void dgx_ge_shots_play(dgx_ge_shots_t *s, uint32_t now_ms, const dgx_ge_terrain_
         int32_t x0, y0, x1, y1;
         place_at(s, sh, from_ms, &x0, &y0);
         place_at(s, sh, now_ms, &x1, &y1);
-        /* the terrain first: a wall cuts the way */
+        /* the terrain first: a wall cuts the way; looked at every point of it, so a band of one (a floor solid at its top) is never passed */
         dgx_ge_shot_hit_t hit  = {.handle = -1};
-        bool              wall = terrain && dgx_ge_terrain_ray(terrain, x0, y0, x1, y1, 2, &hit.contact);
+        bool              wall = terrain && dgx_ge_terrain_ray(terrain, x0, y0, x1, y1, 1, &hit.contact);
         int32_t           ex = x1, ey = y1;
         if (wall) ex = hit.contact.x, ey = hit.contact.y;
         /* then the bodies, on the way left; the moment: as far along the whole way as what it met */

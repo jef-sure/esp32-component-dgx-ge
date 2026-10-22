@@ -123,6 +123,36 @@ int main(void)
     dgx_ge_input_update(&keys, DGX_GE_KEY_UP | DGX_GE_KEY_LEFT);
     CHECK(keys.pressed == DGX_GE_KEY_UP && keys.held == (DGX_GE_KEY_UP | DGX_GE_KEY_LEFT));
 
+    {
+        /*
+         * A button dragged (a scroll bar): a tap is a tap; moved up or down less than half its width, still a tap; past
+         * that, told changed at every move with the pointer where it is, and no tap when let go
+         */
+        dgx_ge_widget_t  store[2];
+        dgx_ge_widgets_t d;
+        dgx_ge_widgets_init(&d, store, 2, 1);
+        const int root = dgx_ge_widgets_add(&d, -1, &(dgx_ge_widget_t){.kind = DGX_GE_WIDGET_BOX});
+        const int bar  = dgx_ge_widgets_add(&d, root, &(dgx_ge_widget_t){.kind = DGX_GE_WIDGET_BUTTON, .flags = DGX_GE_WIDGET_DRAG, .want_w = 10,
+                                                                         .want_h = 60, .on = told});
+        dgx_ge_widgets_layout(&d, dgx_ge_rect(100, 20, 40, 80));
+        CHECK(bar == 1 && store[1].w == 10 && store[1].h == 60);
+        told_count = 0;
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 105, .y = 50, .down = true, .pressed = true});
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 105, .y = 54, .down = true}); /* 4 < 5: not yet */
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 105, .y = 54, .released = true});
+        CHECK(told_count >= 1 && told_what[told_count - 1] == DGX_GE_WIDGET_ACTIVATED && !d.dragged);
+        told_count = 0;
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 105, .y = 50, .down = true, .pressed = true});
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 105, .y = 56, .down = true});
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 106, .y = 70, .down = true});
+        CHECK(d.dragged && d.move_x == 106 && d.move_y == 70 && d.press_y == 50);
+        int changed = 0;
+        for (int i = 0; i < told_count && i < 8; ++i) changed += told_what[i] == DGX_GE_WIDGET_CHANGED;
+        const int before = told_count;
+        dgx_ge_widgets_pointer(&d, &(dgx_ge_pointer_t){.x = 106, .y = 70, .released = true});
+        CHECK(changed == 2 && told_count == before); /* changed twice, nothing when let go */
+    }
+
     dgx_ge_textbox_free(&label), dgx_ge_textbox_free(&rows);
     dgx_ge_scene_destroy(&scene);
     dgx_ge_frame_destroy(&frame);

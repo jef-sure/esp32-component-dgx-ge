@@ -57,9 +57,11 @@ int main(int argc, char **argv)
     dgx_ge_load_t l;
     uint32_t      saved;
     CHECK(dgx_ge_load_open(&l, buf, n, 0xDA7A, &saved) && saved == 5000);
-    /* of other data, or of version 1 (it named no data): not taken */
+    /* of other data, of version 1 (it named no data), of a version after this one: not taken */
     CHECK(!dgx_ge_load_open(&l, buf, n, 0xDA7B, NULL));
     buf[4] = 1;
+    CHECK(!dgx_ge_load_open(&l, buf, n, 0xDA7A, NULL));
+    buf[4] = DGX_GE_SAVE_VERSION + 1;
     CHECK(!dgx_ge_load_open(&l, buf, n, 0xDA7A, NULL));
     buf[4] = DGX_GE_SAVE_VERSION;
     CHECK(dgx_ge_load_open(&l, buf, n, 0xDA7A, NULL));
@@ -77,22 +79,22 @@ int main(int argc, char **argv)
     dgx_ge_save_chunk_end(&s);
     CHECK(dgx_ge_save_end(&s) == 0);
 
-    /* a world with boxes, lives, timers and pockets, saved at 5000 and loaded 1000 later: the same, times 1000 on */
+    /* a world with boxes, lives, timers and pockets, saved at 5000 and loaded 1000 later: the same, times 1000 on; params past 16 bits */
     dgx_ge_world_t *w = dgx_ge_world_create(4);
     CHECK(w && dgx_ge_world_boxes(w, &kinds, 2, 3));
     const int32_t a = dgx_ge_world_add(w, &(dgx_ge_object_t){.scene = 1, .kind = TEST_BLOB_KNIFE, .script = 2, .flip = true, .x = 10 * 256, .y = 20 * 256, .since_ms = 4000, .params = {5, -6}});
-    const int32_t b = dgx_ge_world_add(w, &(dgx_ge_object_t){.scene = 2, .kind = TEST_BLOB_KNIFE, .keep = true, .count = 3, .since_ms = 4500});
+    const int32_t b = dgx_ge_world_add(w, &(dgx_ge_object_t){.scene = 2, .kind = TEST_BLOB_KNIFE, .keep = true, .count = 3, .since_ms = 4500, .params = {36010, -40000}});
     dgx_ge_object_t chest = {.scene = 1, .kind = TEST_BLOB_KNIFE, .box = (uint8_t)dgx_ge_world_new_box(w), .since_ms = 4900};
     CHECK(chest.box == 1);
     const int32_t c = dgx_ge_world_add(w, &chest);
     CHECK(a >= 0 && b >= 0 && c >= 0);
     dgx_ge_pockets_t *box = dgx_ge_world_box(w, c);
-    CHECK(box && dgx_ge_pockets_put(box, &(dgx_ge_pocket_t){.kind = TEST_BLOB_KNIFE, .script = 1, .params = {9, 8}}, 2) >= 0);
+    CHECK(box && dgx_ge_pockets_put(box, &(dgx_ge_pocket_t){.kind = TEST_BLOB_KNIFE, .script = 1, .params = {9, 100000}}, 2) >= 0);
     dgx_ge_world_remove(w, a); /* a gone: its place free, the serial of the ring moved on */
 
     dgx_ge_cells_t cells;
     CHECK(dgx_ge_cells_init(&cells, &kinds, 3, &(dgx_ge_cells_io_t){.get = nothing_get, .set = nothing_set}));
-    cells.lives[0] = (dgx_ge_life_t){.cell = 31, .kind = TEST_BLOB_KNIFE, .script = 1, .pending = 2, .pending_when = 1, .pc = 77, .due_ms = 4800, .own = {3, 4}};
+    cells.lives[0] = (dgx_ge_life_t){.cell = 31, .kind = TEST_BLOB_KNIFE, .script = 1, .pending = 2, .pending_when = 1, .pc = 77, .due_ms = 4800, .own = {3, 40000}};
     cells.lives[1] = (dgx_ge_life_t){.cell = 32, .kind = TEST_BLOB_KNIFE, .due_ms = 5000};
     cells.count    = 2;
 
@@ -102,7 +104,7 @@ int main(int argc, char **argv)
     timers.count     = 1;
 
     dgx_ge_pockets_t *mine = dgx_ge_pockets_create(&kinds, 4, 0);
-    CHECK(mine && dgx_ge_pockets_put(mine, &(dgx_ge_pocket_t){.kind = TEST_BLOB_KNIFE, .script = 3, .params = {1, 2}}, 5) >= 0);
+    CHECK(mine && dgx_ge_pockets_put(mine, &(dgx_ge_pocket_t){.kind = TEST_BLOB_KNIFE, .script = 3, .params = {1, 2000010}}, 5) >= 0);
 
     static uint8_t blob[2048];
     dgx_ge_save_begin(&s, blob, sizeof blob, 0, 5000);
@@ -130,16 +132,46 @@ int main(int argc, char **argv)
           dgx_ge_pockets_count(mine2, TEST_BLOB_KNIFE) == 0);
     CHECK(dgx_ge_world_load(w2, &l, later) && dgx_ge_cells_load(&cells2, &l, later) && dgx_ge_timers_load(&timers2, &l, later) && dgx_ge_pockets_load(mine2, &l, "MINE"));
     dgx_ge_object_t o;
-    CHECK(!dgx_ge_world_get(w2, a, &o) && dgx_ge_world_get(w2, b, &o) && o.scene == 2 && o.keep && o.count == 3 && o.since_ms == 5500);
+    CHECK(!dgx_ge_world_get(w2, a, &o) && dgx_ge_world_get(w2, b, &o) && o.scene == 2 && o.keep && o.count == 3 && o.since_ms == 5500 && o.params[0] == 36010 && o.params[1] == -40000);
     CHECK(dgx_ge_world_get(w2, c, &o) && o.box == 1 && o.since_ms == 5900 && !o.flip);
     dgx_ge_pockets_t *box2 = dgx_ge_world_box(w2, c);
-    CHECK(box2 && dgx_ge_pockets_count(box2, TEST_BLOB_KNIFE) == 2 && box2->places[0].params[1] == 8);
+    CHECK(box2 && dgx_ge_pockets_count(box2, TEST_BLOB_KNIFE) == 2 && box2->places[0].params[1] == 100000);
     CHECK(dgx_ge_world_next(w2, 1, -1) == c && dgx_ge_world_next(w2, 1, c) == -1); /* the order of the ring as it was */
     const int32_t d = dgx_ge_world_add(w2, &(dgx_ge_object_t){.scene = 3});
     CHECK(d >= 0 && d == dgx_ge_world_add(w, &(dgx_ge_object_t){.scene = 3})); /* the next handle the same as the saved world would give */
-    CHECK(cells2.count == 2 && cells2.lives[0].cell == 31 && cells2.lives[0].pc == 77 && cells2.lives[0].due_ms == 5800 && cells2.lives[0].own[1] == 4 && cells2.lives[1].due_ms == 6000);
+    CHECK(cells2.count == 2 && cells2.lives[0].cell == 31 && cells2.lives[0].pc == 77 && cells2.lives[0].due_ms == 5800 && cells2.lives[0].own[1] == 40000 && cells2.lives[1].due_ms == 6000);
+    CHECK(dgx_ge_cells_set(&cells2, 32, 0, 70000) && cells2.lives[1].own[0] == 70000);
     CHECK(timers2.count == 1 && timers2.timers[0].owner == 500 && timers2.timers[0].held && timers2.timers[0].start_ms == 5000 && timers2.timers[0].next_ms == 6000 && timers2.timers[0].held_ms == 5900 && timers2.timers[0].limit_ms == 60000);
-    CHECK(dgx_ge_pockets_count(mine2, TEST_BLOB_KNIFE) == 5 && mine2->places[0].script == 3 && mine2->places[0].params[1] == 2);
+    CHECK(dgx_ge_pockets_count(mine2, TEST_BLOB_KNIFE) == 5 && mine2->places[0].script == 3 && mine2->places[0].params[1] == 2000010);
+
+    /* a save of version 2 (params of 16 bits), written as it was then: read as it was made */
+    dgx_ge_save_begin(&s, blob, sizeof blob, 0, 5000);
+    dgx_ge_save_chunk(&s, "WRLD");
+    dgx_ge_save_u16(&s, 1), dgx_ge_save_u16(&s, 0), dgx_ge_save_u16(&s, 9), dgx_ge_save_u8(&s, DGX_GE_WORLD_PARAMS); /* capacity, next, serial */
+    dgx_ge_save_u16(&s, 9), dgx_ge_save_u16(&s, 4), dgx_ge_save_u16(&s, TEST_BLOB_KNIFE), dgx_ge_save_u8(&s, 1), dgx_ge_save_u8(&s, 0);
+    dgx_ge_save_u8(&s, 1), dgx_ge_save_u8(&s, 0), dgx_ge_save_i32(&s, 256), dgx_ge_save_i32(&s, 512), dgx_ge_save_u32(&s, 4000);
+    dgx_ge_save_i16(&s, -300), dgx_ge_save_i16(&s, 32767), dgx_ge_save_u8(&s, 0); /* its params; no boxes */
+    dgx_ge_save_chunk_end(&s);
+    dgx_ge_save_chunk(&s, "CELL");
+    dgx_ge_save_u16(&s, 1), dgx_ge_save_u8(&s, DGX_GE_CELL_OWN);
+    dgx_ge_save_u16(&s, 12), dgx_ge_save_u16(&s, TEST_BLOB_KNIFE), dgx_ge_save_u8(&s, 0), dgx_ge_save_u8(&s, 0), dgx_ge_save_u8(&s, 0);
+    dgx_ge_save_u16(&s, 0), dgx_ge_save_u32(&s, 4000), dgx_ge_save_i16(&s, -2), dgx_ge_save_i16(&s, 7);
+    dgx_ge_save_chunk_end(&s);
+    dgx_ge_save_chunk(&s, "MINE");
+    dgx_ge_save_u8(&s, 4), dgx_ge_save_u8(&s, DGX_GE_POCKET_PARAMS);
+    for (int i = 0; i < 4; ++i) dgx_ge_save_u16(&s, TEST_BLOB_KNIFE), dgx_ge_save_u8(&s, 0), dgx_ge_save_u8(&s, i == 0), dgx_ge_save_i16(&s, -1), dgx_ge_save_i16(&s, 5);
+    dgx_ge_save_chunk_end(&s);
+    const size_t old = dgx_ge_save_end(&s);
+    blob[4] = 2;
+    dgx_ge_world_t *w1 = dgx_ge_world_create(1);
+    CHECK(old && dgx_ge_load_open(&l, blob, old, 0, NULL) && dgx_ge_world_load(w1, &l, 0) && dgx_ge_cells_load(&cells2, &l, 0) && dgx_ge_pockets_load(mine2, &l, "MINE"));
+    CHECK(dgx_ge_world_next(w1, 4, -1) >= 0 && dgx_ge_world_get(w1, dgx_ge_world_next(w1, 4, -1), &o) && o.x == 256 && o.since_ms == 4000 && o.params[0] == -300 && o.params[1] == 32767);
+    CHECK(cells2.count == 1 && cells2.lives[0].cell == 12 && cells2.lives[0].own[0] == -2 && cells2.lives[0].own[1] == 7);
+    CHECK(dgx_ge_pockets_count(mine2, TEST_BLOB_KNIFE) == 1 && mine2->places[0].params[0] == -1 && mine2->places[0].params[1] == 5);
+    /* the same bytes said to be of version 3: params of 32 bits, so many bytes are not there: refused */
+    blob[4] = 3;
+    CHECK(dgx_ge_load_open(&l, blob, old, 0, NULL) && !dgx_ge_world_load_check(w1, &l) && !dgx_ge_cells_load_check(&cells2, &l) && !dgx_ge_pockets_load_check(mine2, &l, "MINE"));
+    dgx_ge_world_destroy(&w1);
 
     /* refused, nothing changed: a world of another size, pockets of another capacity, a save without the chunk */
     dgx_ge_world_t *w3 = dgx_ge_world_create(5);

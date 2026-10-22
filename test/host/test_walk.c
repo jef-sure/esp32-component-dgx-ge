@@ -14,6 +14,12 @@ static bool open_cell(const dgx_ge_walker_t *w, int col, int row, int side, void
     return maze[row][col] == '.';
 }
 
+static bool open_all(const dgx_ge_walker_t *w, int col, int row, int side, void *ctx)
+{
+    (void)w, (void)col, (void)row, (void)side, (void)ctx;
+    return true;
+}
+
 static int      arrived;
 static uint32_t arrived_at[16];
 
@@ -108,5 +114,47 @@ int main(void)
     dgx_ge_walk_play(&c, &g, 4125, arrive, NULL);
     dgx_ge_walk_xy(&c, &g, &x, &y);
     CHECK(c.dir == 2 && c.col == 2 && x == 2 * 8 + 4 && y == 10);
+
+    /*
+     * A turn while a corner is still being cut (off the middle): no jump to the corner, it waits for the next middle.
+     * Up 4 points before column 2's middle, one point on (3 off), right asked: up still, right at the middle above.
+     */
+    dgx_ge_walk_grid_t open = {.cols = 9, .rows = 9, .cell_w = 8, .cell_h = 8, .wrap_x = true, .wrap_y = true, .open = open_all};
+    dgx_ge_walk_start(&c, 1, 4, 80 * 256, 5000);
+    c.corner = 4;
+    dgx_ge_walk_want(&c, &open, 1, 5000, NULL, NULL);
+    dgx_ge_walk_want(&c, &open, 2, 5050, NULL, NULL);
+    dgx_ge_walk_play(&c, &open, 5062, NULL, NULL);
+    int bx, by;
+    dgx_ge_walk_xy(&c, &open, &bx, &by);
+    dgx_ge_walk_want(&c, &open, 1, 5062, NULL, NULL);
+    dgx_ge_walk_xy(&c, &open, &x, &y);
+    CHECK(x == bx && y == by && c.dir == 2 && c.want == 1);
+    dgx_ge_walk_play(&c, &open, 5150, NULL, NULL);
+    CHECK(c.col == 2 && c.row == 3 && c.dir == 1 && c.off_x == 0 && c.off_y == 0);
+    /* turns asked at random, corners of any size: never a jump, never faster than its speed (a point a step for the rounding) */
+    srand(3);
+    int jumps = 0;
+    for (int k = 0; k < 300; ++k) {
+        dgx_ge_walk_start(&c, 4, 4, (uint32_t)(40 + rand() % 120) * 256, 0);
+        c.corner = (uint8_t)(1 + rand() % 12);
+        dgx_ge_walk_want(&c, &open, rand() % 4, 0, NULL, NULL);
+        uint32_t t = 0;
+        for (int step = 0; step < 60; ++step) {
+            int x0, y0, x1, y1, x2, y2;
+            dgx_ge_walk_xy(&c, &open, &x0, &y0);
+            const uint32_t dt = 1 + (uint32_t)(rand() % 40);
+            dgx_ge_walk_play(&c, &open, t += dt, NULL, NULL);
+            dgx_ge_walk_xy(&c, &open, &x1, &y1);
+            const int far = (int)(c.speed / 256 * dt / 1000) + 2;
+            /* across a tunnel the point goes round: the way is the shorter one */
+            const int ddx = (abs(x1 - x0) + 36) % 72 - 36, ddy = (abs(y1 - y0) + 36) % 72 - 36;
+            jumps += abs(ddx) > far || abs(ddy) > far;
+            dgx_ge_walk_want(&c, &open, rand() % 4, t, NULL, NULL);
+            dgx_ge_walk_xy(&c, &open, &x2, &y2);
+            jumps += abs((abs(x2 - x1) + 36) % 72 - 36) > 1 || abs((abs(y2 - y1) + 36) % 72 - 36) > 1;
+        }
+    }
+    CHECK(jumps == 0);
     CHECK_DONE();
 }

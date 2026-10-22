@@ -141,11 +141,16 @@ The position is computed exactly at the moment of every step, and for now
 at every call of `advance`. So a parabolic jump (`velocity 40 -200`,
 `accel 0 600`) follows the same curve at any call rate.
 Coordinates and velocities are kept in 1/256 of a scene point (scene points are explained in overview-en.md, 2.5).
-Each segment of the path is rounded to the nearest 1/256 instead of
-dropping the remainder; otherwise slow movement would fall behind by a
-fraction at every call. A fractional velocity (`velocity 1000 / 83, 0`, a
-point per game tick with a tick of 83 ms) is kept exactly, not rounded to
-whole points a second.
+What a call moves beyond those units is not dropped: the actor keeps it
+(of the place to 1/2000000 of a unit, of the velocity, while it
+accelerates, to 1/1000), and the next call goes on from it. So the way
+adds up to the same unit however the time is cut into calls: an eighth
+of a point a second covers 12.5 points in 100 s at a call a millisecond,
+at 60 calls a second and in one call alike. A fractional velocity
+(`velocity 1000 / 83, 0`, a point per game tick with a tick of 83 ms) is
+kept to 1/256 of a point a second, not rounded to whole points a second.
+A velocity the game sets on an actor that does not accelerate is taken as
+it is, and so is a place it sets on one at rest.
 
 `velocity` sets the velocity anew; it does not add to it. To stop an actor,
 use `velocity 0 0` and `accel 0 0`.
@@ -182,9 +187,10 @@ is made of constants, the assembler decides it by itself: `0 and x` is 0,
 Bits of integers: `&`, `|`, `%` and the functions `xor(a, b)`, `bits(x)`
 (how many ones), `bit(n)` (2ⁿ; 0 for n outside 0..30), and
 `field(x, first, count)` (`count` bits starting at bit `first`). A negative
-number is in two's complement: `bits(-1)` = 32. A param holds
-−32768..32767, so it has 15 bits (0..32767), and those bits inverted are
-`xor(x, 32767)`. Take genes kept in two params: the kinship with a mate
+number is in two's complement: `bits(-1)` = 32. A param holds 32 bits,
+but the bits go through a float on their way, so 24 of them come through
+exact (0..16777215), and those bits inverted are `xor(x, 16777215)`. Take
+genes kept in two params of 15 bits: the kinship with a mate
 whose genes were copied into `mate_g1` is `bits(xor(g1, mate_g1))`, a
 mutation is `xor(g1, bit(rnd(14)))`, a trait is `field(g1, 4, 3)`.
 
@@ -264,6 +270,14 @@ at once and costs nothing on the board. One with params is worked out at the
 moment of the step: `velocity`, `accel`, `set`, `add` (and in `path`). The
 frame duration, `dx`, `dy`, `at`, `signal`, `sound` and `masks` take
 constants only.
+
+An expression counts in floats, which hold whole numbers exactly up to
+2²⁴ (16 777 216); a larger one comes out rounded. A param holds a whole
+number of 32 bits: `set` and `add` round the value and stop at the limits
+of 32 bits instead of overflowing. What lies in the pack is of 16 bits,
+−32768..32767: a param's starting value, a table's numbers, the params a
+layout gives. `set` and `add` take a constant up to ±2²⁴ as well (beyond
+16 bits the assembler keeps it as an expression).
 
 Numbers shared by the whole game are written in the text as names, and the
 packer turns them into numbers. A mask, wherever one is expected (`masks`,
@@ -352,8 +366,11 @@ label flying
   ahead is `front`, a ceiling is above, water is `inside`), no farther than
   `within N` points. When it touches, the first event comes; when it stops
   touching (the floor has run out), the second. Each comes at its exact
-  moment: the engine finds it between two looks by bisection, puts the actor
-  there and sends the event, and the matrix decides the rest.
+  moment. The engine checks contacts not all the time but at separate
+  moments: at the bounds of the script's steps and at each frame's "now".
+  When a contact began or ended between two such checks, the engine finds
+  its moment by bisection, puts the actor there and sends the event, and
+  the matrix decides the rest.
   A mask entirely inside something solid (inside, with no side within
   `within`) touches it from every side: a step that carried it through an
   edge (because it was fast, or the edge is thin) is a contact too, from its
@@ -391,9 +408,10 @@ label flying
 >   `dgx_ge_terrain_ray()` from the previous place to the new one in the
 >   contact function or in the game's code.
 
-The ball in a Prince of Persia room is made this way: it bounces, settles,
-rolls with a constant deceleration and stops at the computed moment, falls
-off an edge, and bounces off a wall.
+A test ball is made this way. Prince of Persia has no ball: it is thrown
+into a room of the game only to try contacts with the terrain. It bounces,
+settles, rolls with a constant deceleration and stops at the computed
+moment, falls off an edge, and bounces off a wall.
 
 ### Sense: `sense`
 
@@ -454,12 +472,12 @@ script flee
   `its.cell` (the game's number of the cell, for `tell cell`).
 
 Who can be found is the game's decision: the actor's terrain has a `sense`
-hook, and the answers to it come from `dgx_ge_sense_bodies` (the body
+callback, and the answers to it come from `dgx_ge_sense_bodies` (the body
 registry: bodies for which the game has named an actor with
 `dgx_ge_collisions_actor`; the kind is known for animations opened through
 `dgx_ge_kind`) and `dgx_ge_sense_cells` (the grid: cells that are not
 empty). The game joins the two and gives a cell its own number. Without the
-hook `sense` finds nobody. The search happens at the moment of the step, by
+callback `sense` finds nobody. The search happens at the moment of the step, by
 where the bodies stand in the registry.
 
 ### Steering: `steer`
@@ -488,9 +506,11 @@ script flee
 | `steer wander <speed>, <force>, <spread> angle <param>` | along an angle (degrees, 0 forward, 90 down) that shifts every step by a random amount within ± spread (the game's dice) |
 
 - **Force** is how many points a second the velocity may change by in one
-  `steer`; it is not an acceleration: with a step every 83 ms, a turning
-  rate of 700 points/s² is a force of 58. A large force turns at once, a
-  small one makes a smooth arc.
+  `steer`, that is in one step, not in a second. So the same force changes
+  the velocity faster when the steps are frequent. For example: a step every
+  83 ms, and the velocity must change by no more than 700 points/s in a
+  second; in a step that is 700 × 0.083 ≈ 58, and that is the force. A large
+  force turns at once, a small one makes a smooth arc.
 - The velocity holds until the next step; `steer` zeroes the acceleration
   and cancels a `path`. Between steps the movement is straight, and contacts
   are looked for as usual.
@@ -576,13 +596,24 @@ transition would happen at the end of the round, on `goto run` at 240.
   the new script's frame shows up in the same display frame.
 - **A stopped actor** (`hold`) answers any event at once, even one answered
   with `branch` or `end`: it has nothing left to wait for.
+- **An event from the actor's own step.** The game may answer what a step
+  says (a signal, a param changed) with a `now` event to the same actor,
+  right in its `say`. The new script begins at the moment of that step, at
+  once after the `say`; what was left of the step is not made.
+- **An event from the past.** A `now` event stamped earlier than the
+  moment the actor has already been moved to (a step of another actor,
+  made late in a long call; a game that starts a script a tick back) takes
+  the motion back to its moment: the new script begins there, its frames
+  and its place alike. Steps the actor made after that moment are not
+  undone.
 - **The matrix row changes only on entering a script:** at the start, by an
   event, or by a `goto` to another script. A label is not a script: a
   `goto` to a label leaves the actor in the same row.
 - **A script without `goto` or `hold` at its end** runs on into the next
   script in the text, but the matrix row stays the same. That is almost
   always a mistake, and the editor warns about it. End every script with
-  `goto` or `hold`.
+  `goto` or `hold`. The last script has nothing to run on into: an empty
+  one is an error of the build.
 
 ---
 
@@ -697,7 +728,7 @@ script throwdagger
   `DGX_GE_ANIM_CARRIED`), in the script and with the params it had when it
   was stowed. If the hand is busy or there is no such thing, nothing
   happens.
-- `stow <point>` puts what is in the hand into a pocket (an 8-byte record:
+- `stow <point>` puts what is in the hand into a pocket (a 12-byte record:
   kind, script, params, how many). Only identical things stack: a poisoned
   dagger will not go in with plain ones. If it does not fit, it stays in the
   hand.
@@ -796,8 +827,20 @@ script drink
   about (the palette of the world when the character is drunk).
 - In expressions `now` is the moment of the step in seconds of the game's
   clock: `set drunk now + 10` means "drunk until such-and-such a second".
+  A param holds such a moment as long as the clock runs: the clock counts
+  milliseconds in 32 bits and comes round after 49 days 17 hours. `now` is
+  exact at every whole second, so `goto sober if now >= drunk` is met at
+  its very second; between seconds it is a float, off by up to 2 ms in the
+  first 10 hours of the clock, 4 ms in the first day, 31 ms in ten days, a
+  quarter of a second near the end.
+  Keep moments in whole seconds: `now * 1000` is exact only for the first
+  4 h 39 min (2²⁴ ms) and no longer fits in 32 bits after 24 days.
+- A moment in a param is a number to the engine: a load moves on the times
+  the saved chunks hold (dgx_ge_save.h), not params. A game that keeps
+  moments in params goes on after a load with its clock where the save
+  left it.
 - Params are kept when scripts change.
-- `add` stops at the limits of 16 bits instead of overflowing.
+- `set` and `add` stop at the limits of 32 bits instead of overflowing.
 - The game reads them by the numbers from the pack header:
   `actor.params[MYGAME_HERO_PARAM_HP]`.
 

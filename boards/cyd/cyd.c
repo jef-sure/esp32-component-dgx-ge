@@ -65,6 +65,31 @@ uint32_t board_pad_buttons(void)
     return 0;
 }
 
+/* no keyboard on the display: no touch */
+const bool board_keyboard_able = false;
+
+bool board_keyboard_open(dgx_screen_t *display, const uint8_t *layout, size_t size, dgx_font_t *font, dgx_ge_rect_t field, dgx_ge_rect_t *band)
+{
+    return false;
+}
+
+void board_keyboard_close(void)
+{
+}
+
+int board_keyboard_typed(uint32_t *typed, int max)
+{
+    return 0;
+}
+
+/* no buttons of its own: nothing a game could press */
+const bool board_buttons_able = false;
+
+uint32_t board_buttons(void)
+{
+    return 0;
+}
+
 /* no sound: sound is I2S only, and the CYD has none (its DAC on GPIO26 is not used) */
 const uint32_t board_sound_rate   = 0;
 const uint8_t  board_sound_volume = 0;
@@ -73,14 +98,6 @@ bool board_sound_start(struct dgx_ge_mixer *mixer)
 {
     (void)mixer;
     return false;
-}
-
-void board_sound_lock(void)
-{
-}
-
-void board_sound_unlock(void)
-{
 }
 
 bool board_display_init(board_t *cyd)

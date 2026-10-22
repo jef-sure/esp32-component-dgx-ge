@@ -266,7 +266,7 @@ static bool between_rows(const dgx_ge_widget_t *w, int ly)
 static void press(dgx_ge_widgets_t *t, int i, int x, int y)
 {
     dgx_ge_widget_t *w = &t->widgets[i];
-    t->pressed = (int8_t)i, t->press_x = (int16_t)x, t->press_y = (int16_t)y, t->dragged = false;
+    t->pressed = (int8_t)i, t->press_x = t->move_x = (int16_t)x, t->press_y = t->move_y = (int16_t)y, t->dragged = false;
     t->between = between_rows(w, y - w->y);
     if (!swiped(w) && !t->between) point_to_value(t, w, x - w->x, y - w->y);
     t->press_value = w->value;
@@ -286,6 +286,13 @@ bool dgx_ge_widgets_pointer(dgx_ge_widgets_t *t, const dgx_ge_pointer_t *p)
     dgx_ge_widget_t *w = &t->widgets[t->pressed];
     if (p->down) {
         const int dx = p->x - t->press_x, dy = p->y - t->press_y, ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+        t->move_x = (int16_t)p->x, t->move_y = (int16_t)p->y;
+        if (w->kind == DGX_GE_WIDGET_BUTTON && (w->flags & DGX_GE_WIDGET_DRAG)) {
+            /* dragged up or down half its width: changed at every move from then on (a scroll bar's knob following) */
+            if (!t->dragged && 2 * ay >= w->w) t->dragged = true;
+            if (t->dragged) tell(w, DGX_GE_WIDGET_CHANGED);
+            return true;
+        }
         if (swiped(w) && !t->dragged && 2 * ay >= w->h && ay > ax) {
             /* up or down first, half its height: the list under it is swiped instead, from where the pointer went down */
             const int l = list_at(t, t->press_x, t->press_y);

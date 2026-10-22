@@ -1,0 +1,54 @@
+# The one actor of hello: it stands, walks while an arrow is held, hops at a tap or a button.
+# What it does is here, as data; the game only tells it what happened (its events) and hears
+# what it says (a sound to play, a signal that it has hopped).
+event walk, stop, hop
+
+script stand
+    frame BOT_STAND 1000ms
+    goto stand
+
+# a stride: two pictures, 2 points forward each (back when it faces left: dx is forward)
+script walk
+label stride
+    frame BOT_WALK_1 100ms
+    dx 2
+    frame BOT_WALK_2 100ms
+    dx 2
+    branch                   # a stop is taken here, between strides, not in the middle of one
+    goto stride
+
+# a hop: up 21 points and down again, by steps that add up to nothing, so it always lands where it began
+script hop
+    sound 0                  # the pack's first sound, HOP (hello_assets.py)
+    signal 1                 # the game counts the hops
+    frame BOT_HOP 35ms
+    dy -6
+    frame BOT_HOP 35ms
+    dy -5
+    frame BOT_HOP 35ms
+    dy -4
+    frame BOT_HOP 35ms
+    dy -3
+    frame BOT_HOP 35ms
+    dy -2
+    frame BOT_HOP 35ms
+    dy -1
+    frame BOT_HOP 35ms
+    dy 1
+    frame BOT_HOP 35ms
+    dy 2
+    frame BOT_HOP 35ms
+    dy 3
+    frame BOT_HOP 35ms
+    dy 4
+    frame BOT_HOP 35ms
+    dy 5
+    frame BOT_HOP 35ms
+    dy 6
+    goto stand
+
+group ground: stand, walk
+
+on walk: stand -> walk now
+on stop: walk -> stand branch
+on hop: ground -> hop now

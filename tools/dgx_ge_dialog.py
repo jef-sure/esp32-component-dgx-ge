@@ -24,7 +24,9 @@ The language, a statement a line, '#' to the end of a line is a comment:
                                     (3s, 500ms); none: it waits for a button
         say game "{left} minute left" "{left} minutes left" 2s   a line of a number: {left}, a param of
                                     the one saying it, is shown as its number; two strings: msgid and
-                                    msgid_plural, the form the language gives that number (its .po)
+                                    msgid_plural, the form the language gives that number (its .po).
+                                    Up to four {names} in a line: a translation shows the same names,
+                                    in any order (the form goes by the msgid's first)
         choose kid 10s -> silent    no answer in so long: on from that label (none: it waits)
         choose kid                  the answers of a role (the player's), one a line below,
             "A friend." -> friend   the msgid and where it leads;
@@ -35,6 +37,9 @@ The language, a statement a line, '#' to the end of a line is a comment:
             "Sound" control SWITCH sound   a control (a kind: its first param is its value) of a
                                     param of the one choosing; activate, more, less go to it (the
                                     pack's events of those names); without -> the choice stays
+            "Name" field name -> back      a field of the game (Pack.add_field): its text shown at the
+                                    right of the line; activate edits it (typed, a keyboard on the
+                                    display or of wires); with -> on from there when it is done
         tell guard calm             an event for the one playing a role (the pack's events)
         give kid WINE 1 to guard    so many of a kind from the pockets of one into the other's
         goto start                  on from a label
@@ -48,6 +53,7 @@ msgid itself.
 
 import re
 import struct
+import unicodedata
 from collections import namedtuple
 
 from dgx_ge_anim import AnimError, Expr
@@ -59,6 +65,7 @@ OP = {"SAY": 1, "CHOOSE": 2, "TELL": 3, "GIVE": 4, "GOTO": 5, "END": 6, "STYLE":
 TALK_NUMBERS = 4  # so many numbers a line shows at most (dgx_ge_dialog.h)
 GAME_ROLE = 0xFF  # the game itself, no actor
 NO_KIND = 0xFFFF
+FIELD = 0xFFFE  # the kind of a control that is a field of the game (DGX_GE_DIALOG_FIELD): its param, the field's number
 STAYS = 0xFFFF  # an answer that leads nowhere: its control changed, the choice stays
 UI_EVENTS = ("activate", "more", "less")  # the events of the interface a control is told
 
@@ -89,7 +96,24 @@ def _ms(text, where):
     return ms
 
 
-def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=None, images=None, timers=None, constants=None):
+def _numbers_by_name(order, where):
+    """
+    What a translation of a line of numbers is stored as: its {names} must be those of the line (order: its msgid's);
+    in the line's order it stays as it is (the engine shows the next number at each {name}), else each {name} becomes
+    {i}, its place in that order (the engine shows that number), so a language may put them in its own order.
+    """
+    def shape(text):
+        shown = re.findall(r"\{(\w+)\}", text)
+        for name in shown:
+            if name not in order:
+                raise DialogError(f"{where}: '{text}' shows {{{name}}}, a number the line has not")
+        if all(name == order[min(k, len(order) - 1)] for k, name in enumerate(shown)):
+            return text
+        return re.sub(r"\{(\w+)\}", lambda m: "{%d}" % order.index(m.group(1)), text)
+    return shape
+
+
+def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=None, images=None, timers=None, constants=None, fields=None):
     """
     The blob of a dialog: Dialog(blob, name, roles, labels).
     strings: a Strings of the pack (msgid in a context to a number).
@@ -99,7 +123,8 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
     styles: the styles of the pack, by name (a list given on: a new name is added);
     images: names of the pictures of the pack to their numbers, for portraits;
     timers: the names of the pack's timers, for timer(NAME) in conditions (a list given on: a new name is added);
-    constants: the game's names of numbers (Pack.add_constants), for conditions: board & BOARD_PAD.
+    constants: the game's names of numbers (Pack.add_constants), for conditions: board & BOARD_PAD;
+    fields: the names of the game's text fields to their numbers (Pack.add_field), for answers with a field.
     """
     images = images or {}
     kinds = kinds or {}
@@ -123,7 +148,8 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
             raise DialogError(f"{where}: no role '{r}'")
         return roles.index(r)
 
-    for number, raw in enumerate(text.splitlines(), 1):
+    # in NFC, as the fonts have their letters and the .po its msgids (read_po): a text saved decomposed (NFD, macOS) draws so too
+    for number, raw in enumerate(unicodedata.normalize("NFC", text).splitlines(), 1):
         where = f"line {number}"
         line = raw
         # a comment: '#' outside a string
@@ -144,11 +170,12 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
         indent = len(line) - len(line.lstrip(" "))
         body = line.strip()
         if choosing is not None and indent > choosing[1] and body.startswith('"'):
-            # an answer of the choose above: "msgid" [if expr] [control KIND param] [-> label]
+            # an answer of the choose above: "msgid" [if expr] [control KIND param | field NAME] [-> label]
             msgid, rest = _string(body, where)
-            m = re.fullmatch(r"\s*(?:if\s+(.+?))?\s*(?:control\s+(\w+)\s+(\w+))?\s*(?:->\s*(\w+))?\s*", rest)
-            if not m or not (m.group(2) or m.group(4)):
-                raise DialogError(f'{where}: "<msgid>" [if <expression>] [control <kind> <param>] [-> <label>]: a control or a label at least')
+            m = re.fullmatch(r"\s*(?:if\s+(.+?))?\s*(?:control\s+(\w+)\s+(\w+)|field\s+(\w+))?\s*(?:->\s*(\w+))?\s*", rest)
+            if not m or not (m.group(2) or m.group(4) or m.group(5)):
+                raise DialogError(f'{where}: "<msgid>" [if <expression>] [control <kind> <param> | field <name>] [-> <label>]: '
+                                  'a control, a field or a label at least')
             if choosing[2] == GAME_ROLE:
                 kind_name = game_kind
             else:
@@ -161,6 +188,10 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
                 if m.group(3) not in own:
                     raise DialogError(f"{where}: no param '{m.group(3)}' of {kind_name or 'the one choosing'}")
                 control, param, controls = kinds[m.group(2)], own[m.group(3)][0], True
+            if m.group(4):
+                if m.group(4) not in (fields or {}):
+                    raise DialogError(f"{where}: no field '{m.group(4)}' (Pack.add_field)")
+                control, param = FIELD, fields[m.group(4)]
             expr = b"\0"
             if m.group(1):
                 try:
@@ -172,8 +203,8 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
                 raise DialogError(f"{where}: 255 answers at most")
             at = len(code)
             code += struct.pack("<HHHB", strings.id(name, msgid), STAYS, control, param)
-            if m.group(4):
-                fixups.append((at + 2, m.group(4), where))
+            if m.group(5):
+                fixups.append((at + 2, m.group(5), where))
             code += expr
             continue
         choosing = None
@@ -251,7 +282,8 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
                 for shown in order:
                     if shown not in own:
                         raise DialogError(f"{where}: no param '{shown}' of {kind_name or 'the one saying it'}")
-                first, forms = strings.id_plural(name, msgid, plural) if plural is not None else (strings.id(name, msgid), 1)
+                shape = _numbers_by_name(order, where)
+                first, forms = strings.id_plural(name, msgid, plural, shape) if plural is not None else (strings.id(name, msgid, shape), 1)
                 code += struct.pack("<BBBHHBB", OP["SAY_NS"], r, 1 if word == "say!" else 0, first, ms, forms, len(order))
                 code += bytes(own[shown][0] for shown in order)
                 continue
@@ -261,7 +293,8 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
             shown = shows.pop()
             if shown not in own:
                 raise DialogError(f"{where}: no param '{shown}' of {kind_name or 'the one saying it'}")
-            first, forms = strings.id_plural(name, msgid, plural) if plural is not None else (strings.id(name, msgid), 1)
+            shape = _numbers_by_name([shown], where)
+            first, forms = strings.id_plural(name, msgid, plural, shape) if plural is not None else (strings.id(name, msgid, shape), 1)
             code += struct.pack("<BBBHHBB", OP["SAY_N"], r, 1 if word == "say!" else 0, first, ms, forms, own[shown][0])
         elif word == "choose":
             m = re.fullmatch(r"(\w+)(?:\s+(\S+)\s*->\s*(\w+))?", rest)
@@ -349,12 +382,18 @@ class Strings:
         self.index = {}   # string -> its number
         self.used = []    # (context, msgid, msgid_plural or None) in the order met: the template of translations
 
-    def id(self, context, msgid):
+    def id(self, context, msgid, shape=None):
+        """A string: its number. shape: what the language's text is stored as (a line of numbers: by their names)."""
         if (context, msgid, None) not in self.used:
             self.used.append((context, msgid, None))
         text = self.translations.get((context, msgid)) or msgid
         if isinstance(text, list):
             raise ValueError(f"{context}: '{msgid}' is translated as a string of a number (msgid_plural)")
+        # a line of no numbers shows its {names} as they are written: a translation may not show one the line has not
+        unknown = shape is None and next((n for n in re.findall(r"\{(\w+)\}", text) if n not in re.findall(r"\{(\w+)\}", msgid)), None)
+        if unknown:
+            raise DialogError(f"{context}: '{text}' shows {{{unknown}}}, a number the line '{msgid}' has not")
+        text = shape(text) if shape else text
         if text not in self.index:
             self.index[text] = len(self.texts)
             self.texts.append(text)
@@ -366,8 +405,8 @@ class Strings:
         m = re.search(r"Plural-Forms:\s*nplurals\s*=\s*(\d+)\s*;\s*plural\s*=\s*([^;\n]+)", header)
         return (int(m.group(1)), m.group(2).strip()) if m else (2, "n != 1")
 
-    def id_plural(self, context, msgid, plural):
-        """A string of a number: the number of its first form and how many there are (in a row)."""
+    def id_plural(self, context, msgid, plural, shape=None):
+        """A string of a number: the number of its first form and how many there are (in a row); shape as id's."""
         if (context, msgid, plural) not in self.used:
             self.used.append((context, msgid, plural))
         count, _ = self.forms()
@@ -376,6 +415,7 @@ class Strings:
             text = [msgid] + [plural] * (count - 1)  # not translated: the first form for one, the other for the rest
         if len(text) != count:
             raise ValueError(f"{context}: '{msgid}' has {len(text)} forms, the language {count}")
+        text = [shape(t) for t in text] if shape else text
         first = len(self.texts)
         for t in text:
             self.texts.append(t)
@@ -411,7 +451,8 @@ class Strings:
         """The template of translations: every msgid in its context, msgstr empty (msgid_plural: msgstr[0], [1])."""
         def q(s):
             return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
-        out = ""
+        # the header: the text is UTF-8 (msginit and the editors of translations take the charset from it)
+        out = 'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\n'
         for c, m, plural in self.used:
             if plural is None:
                 out += f"msgctxt {q(c)}\nmsgid {q(m)}\nmsgstr \"\"\n\n"
@@ -423,7 +464,8 @@ class Strings:
 def read_po(path):
     """
     A gettext .po file: {(msgctxt, msgid): msgstr} of the entries translated; a string of a number (msgid_plural):
-    the list of its forms (msgstr[0], [1], ...); the header (msgid ""): under ("", "").
+    the list of its forms (msgstr[0], [1], ...); the header (msgid ""): under ("", ""). Its text in NFC (a letter and
+    its accent as one character, as fonts have them), a BOM at its start skipped.
     """
     entries, entry, field = {}, {}, None
 
@@ -440,7 +482,9 @@ def read_po(path):
         elif entry.get("msgstr") and (entry["msgid"] or "msgctxt" not in entry):
             entries[key] = entry["msgstr"]
 
-    for raw in open(path, encoding="utf-8"):
+    with open(path, encoding="utf-8-sig") as f:
+        lines = unicodedata.normalize("NFC", f.read()).split("\n")
+    for raw in lines:
         line = raw.strip()
         if not line or line.startswith("#"):
             if not line and entry:

@@ -22,7 +22,7 @@ extern "C" {
  * its sheath, daggers in the belt, a potion. A character's animation says how
  * many places it has (pockets N), a thing's kind how many of it go into one
  * place (stack N; none: one). A thing in a pocket does nothing, so it is a
- * record of 8 bytes, not an actor: its kind, the script it was in, its params
+ * record of 12 bytes, not an actor: its kind, the script it was in, its params
  * then, how many; the same (kind, params) stack, a poisoned dagger does not
  * lie with the plain ones (the script is of no matter in a pocket: a dagger
  * picked up lying is one thrown, the stack keeps the script it has).
@@ -69,7 +69,7 @@ typedef struct dgx_ge_pocket {
     uint16_t kind;   /* its animation: a blob of the pack */
     uint8_t  script; /* the script it was in */
     uint8_t  count;  /* how many: a stack; 0 a free place */
-    int16_t  params[DGX_GE_POCKET_PARAMS];
+    int32_t  params[DGX_GE_POCKET_PARAMS];
 } dgx_ge_pocket_t;
 
 typedef struct dgx_ge_pockets {

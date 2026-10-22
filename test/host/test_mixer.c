@@ -1,8 +1,12 @@
 /*
  * The sounds of a pack and the mixer: 8 bits as given, IMA ADPCM as decoded apart from the engine (make_test_pack.py),
  * stereo as the middle and the side, a rate of its own (each sample held), a sound going round, voices summed and
- * kept within 16 bits, stop, the oldest voice giving way, the volume of all, pan, the game's output.
+ * kept within 16 bits, stop, the oldest voice giving way, the volume of all, pan, the game's output; the platform's
+ * lock taken by every call, a task filling while the game plays and stops.
  */
+#include <pthread.h>
+#include <sched.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "check.h"
@@ -12,6 +16,33 @@
 #include "test_sounds.h"
 
 static uint8_t file[4 << 20];
+
+/* A lock that counts: taken once a call, never twice, always given back. */
+static int  takes;
+static bool taken;
+
+static void count_lock(bool take)
+{
+    CHECK(taken != take);
+    taken = take, takes += take;
+}
+
+/* The board's way: a task of its own filling, the game playing and stopping meanwhile; a real lock between them. */
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static atomic_bool     filled;
+
+static void mutex_lock(bool take)
+{
+    if (take) pthread_mutex_lock(&mutex);
+    else pthread_mutex_unlock(&mutex);
+}
+
+static void *sound_task(void *mixer)
+{
+    int16_t out[32];
+    while (!filled) dgx_ge_mixer_fill(mixer, out, 32), sched_yield(); /* the board's write waits, its lock free */
+    return NULL;
+}
 
 int main(int argc, char **argv)
 {
@@ -139,6 +170,35 @@ int main(int argc, char **argv)
     CHECK(dgx_ge_mixer_busy(&m));
     dgx_ge_sound_stop(&game, TEST_SOUND_HUM);
     CHECK(!dgx_ge_mixer_busy(&m));
+
+    /* the platform's lock: taken by every call, the output's too, once; a freed mixer keeps it and gives silence */
+    m.lock = count_lock;
+    dgx_ge_sound_play(&game, TEST_SOUND_HUM);
+    CHECK(takes == 1 && !taken);
+    dgx_ge_sound_stop(&game, TEST_SOUND_HUM);
+    CHECK(takes == 2);
+    dgx_ge_mixer_play(&m, TEST_SOUND_TONE, 255, 0), dgx_ge_mixer_stop(&m, -1), dgx_ge_mixer_volume(&m, 255);
+    CHECK(!dgx_ge_mixer_busy(&m) && takes == 6);
+    dgx_ge_mixer_play(&m, TEST_SOUND_HUM, 255, 0);
+    dgx_ge_mixer_fill(&m, out, 4);
+    CHECK(takes == 8 && out[0] != 0);
+    dgx_ge_mixer_free(&m);
+    CHECK(takes == 9 && !taken && m.lock == count_lock && !m.voices);
+    out[0] = out[1] = 1;
+    dgx_ge_mixer_fill(&m, out, 2);
+    CHECK(takes == 10 && out[0] == 0 && out[1] == 0 && dgx_ge_mixer_play(&m, TEST_SOUND_HUM, 255, 0) == -1);
+
+    /* a task filling while the game plays and stops through its output: every voice whole whenever it is read */
+    CHECK(dgx_ge_mixer_init(&m, &sounds, 2, 8000, 1) && !m.lock);
+    m.lock = mutex_lock;
+    pthread_t task;
+    CHECK(pthread_create(&task, NULL, sound_task, &m) == 0);
+    for (int i = 0; i < 20000; ++i) {
+        dgx_ge_sound_play(&game, i & 1 ? TEST_SOUND_HUM : TEST_SOUND_WIDE);
+        if (!(i & 7)) dgx_ge_sound_stop(&game, -1);
+    }
+    filled = true;
+    pthread_join(task, NULL);
     dgx_ge_mixer_free(&m);
 
     /* not a blob of sounds, or one cut short: refused */

@@ -66,18 +66,20 @@ static int place_of(const dgx_ge_world_t *w, int32_t handle)
 
 int32_t dgx_ge_world_add(dgx_ge_world_t *w, const dgx_ge_object_t *object)
 {
-    /* the oldest place free or not kept */
+    /* a free place, the oldest first; none: the oldest not kept */
     int place = -1;
-    for (int i = 0; i < w->capacity && place < 0; ++i) {
-        const int at = (w->next + i) % w->capacity;
-        if (!w->serials[at] || !w->objects[at].keep) place = at;
-    }
+    for (int i = 0; i < w->capacity && place < 0; ++i)
+        if (!w->serials[(w->next + i) % w->capacity]) place = (w->next + i) % w->capacity;
+    const bool hole = place >= 0 && place != w->next;
+    for (int i = 0; i < w->capacity && place < 0; ++i)
+        if (!w->objects[(w->next + i) % w->capacity].keep) place = (w->next + i) % w->capacity;
     if (place < 0) return -1;
     forget(w, place);
     w->serial       = (uint16_t)(w->serial % SERIALS + 1);
     w->objects[place] = *object;
     w->serials[place] = w->serial;
-    w->next           = (place + 1) % w->capacity;
+    /* past it the ring goes on; a place freed among the records leaves it where it was: the oldest stay next */
+    if (!hole) w->next = (place + 1) % w->capacity;
     return place | (int32_t)w->serial << 16;
 }
 
@@ -122,7 +124,13 @@ bool dgx_ge_world_boxes(dgx_ge_world_t *w, dgx_ge_kinds_t *kinds, int count, int
     if (!w->boxes) return false;
     w->box_count = count;
     for (int i = 0; i < count; ++i)
-        if (!(w->boxes[i] = dgx_ge_pockets_create(kinds, places, 0))) return false;
+        if (!(w->boxes[i] = dgx_ge_pockets_create(kinds, places, 0))) {
+            /* all or none: no box missing among them, and they may be asked for again */
+            for (int k = 0; k < i; ++k) dgx_ge_pockets_destroy(&w->boxes[k]);
+            free(w->boxes);
+            w->boxes = NULL, w->box_count = 0;
+            return false;
+        }
     return true;
 }
 
@@ -143,7 +151,30 @@ int dgx_ge_world_new_box(dgx_ge_world_t *w)
             return b;
         }
     }
+    /* none free: the oldest record not kept that holds one gives it up, forgotten whole (not left without its things) */
+    for (int i = 0; i < w->capacity; ++i) {
+        const int at = (w->next + i) % w->capacity, b = w->objects[at].box;
+        if (!w->serials[at] || w->objects[at].keep || !b || b > w->box_count) continue;
+        forget(w, at);
+        dgx_ge_pockets_clear(w->boxes[b - 1]);
+        return b;
+    }
     return 0;
+}
+
+int32_t dgx_ge_world_add_holding(dgx_ge_world_t *w, const dgx_ge_object_t *object, dgx_ge_pockets_t *pockets, uint32_t now_ms)
+{
+    bool holds = false;
+    for (int i = 0; pockets && i < pockets->capacity && !holds; ++i) holds = pockets->places[i].count > 0;
+    dgx_ge_object_t o = *object;
+    o.box             = holds ? (uint8_t)dgx_ge_world_new_box(w) : 0;
+    if (holds && !o.box) return -1;
+    const int32_t handle = dgx_ge_world_add(w, &o);
+    if (handle < 0 || !o.box) return handle; /* the box not taken stays free */
+    dgx_ge_pockets_t *box = w->boxes[o.box - 1];
+    for (int i = 0; i < pockets->capacity; ++i)
+        if (pockets->places[i].count) dgx_ge_pockets_move(pockets, i, pockets->places[i].count, box, -1, now_ms);
+    return handle;
 }
 
 /* Two records of things lying that make one stack: the same kind, state and params, and no box. */
@@ -284,7 +315,7 @@ void dgx_ge_object_actor(const dgx_ge_object_t *o, const dgx_ge_anim_t *anim, dg
     for (int i = 0; i < DGX_GE_WORLD_PARAMS && i < anim->params && i < DGX_GE_ANIM_PARAMS; ++i) a->params[i] = a->entered_params[i] = o->params[i];
 }
 
-#define RECORD_BYTES (2 + 2 + 2 + 1 + 1 + 1 + 1 + 4 + 4 + 4 + 2 * DGX_GE_WORLD_PARAMS)
+#define RECORD_BYTES(l) (2 + 2 + 2 + 1 + 1 + 1 + 1 + 4 + 4 + 4 + DGX_GE_LOAD_PARAM_BYTES(l) * DGX_GE_WORLD_PARAMS)
 
 void dgx_ge_world_save(const dgx_ge_world_t *w, dgx_ge_save_t *s)
 {
@@ -305,7 +336,7 @@ void dgx_ge_world_save(const dgx_ge_world_t *w, dgx_ge_save_t *s)
         dgx_ge_save_i32(s, o->x);
         dgx_ge_save_i32(s, o->y);
         dgx_ge_save_u32(s, o->since_ms);
-        for (int k = 0; k < DGX_GE_WORLD_PARAMS; ++k) dgx_ge_save_i16(s, o->params[k]);
+        for (int k = 0; k < DGX_GE_WORLD_PARAMS; ++k) dgx_ge_save_i32(s, o->params[k]);
     }
     dgx_ge_save_u8(s, (uint8_t)w->box_count);
     for (int i = 0; i < w->box_count; ++i) dgx_ge_pockets_write(w->boxes[i], s);
@@ -320,7 +351,7 @@ static bool load(const dgx_ge_world_t *w, dgx_ge_world_t *into, dgx_ge_load_t *l
     const uint16_t serial = dgx_ge_load_u16(l);
     const int params = dgx_ge_load_u8(l);
     if (l->failed || capacity != w->capacity || next >= capacity || params != DGX_GE_WORLD_PARAMS) return false;
-    if (dgx_ge_load_left(l) < (size_t)capacity * RECORD_BYTES + 1) return false;
+    if (dgx_ge_load_left(l) < (size_t)capacity * RECORD_BYTES(l) + 1) return false;
     for (int i = 0; i < w->capacity; ++i) {
         dgx_ge_object_t o = {0};
         const uint16_t  serial_of = dgx_ge_load_u16(l);
@@ -335,7 +366,7 @@ static bool load(const dgx_ge_world_t *w, dgx_ge_world_t *into, dgx_ge_load_t *l
         o.x     = dgx_ge_load_i32(l);
         o.y     = dgx_ge_load_i32(l);
         o.since_ms = dgx_ge_load_u32(l) + later_ms;
-        for (int k = 0; k < DGX_GE_WORLD_PARAMS; ++k) o.params[k] = dgx_ge_load_i16(l);
+        for (int k = 0; k < DGX_GE_WORLD_PARAMS; ++k) o.params[k] = dgx_ge_load_param(l);
         if (o.box > w->box_count) return false; /* box n is boxes[n - 1]: one of the world's or none */
         if (into) into->serials[i] = serial_of, into->objects[i] = o;
     }

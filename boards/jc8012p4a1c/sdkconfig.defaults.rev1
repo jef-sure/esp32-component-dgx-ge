@@ -1,0 +1,6 @@
+# The JC8012P4A1C with an ESP32-P4 below revision 3 (the board's package has examples for one), after
+# sdkconfig.defaults. Not tried on such a board: built only. Its PSRAM goes at 200 MHz at most, and at that a moving
+# picture may leave the display short now and then (a frame flashes light blue, DGX docs/dsi-display).
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+CONFIG_SPIRAM_SPEED_200M=y

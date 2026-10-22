@@ -106,6 +106,25 @@ for name, text in (("two params shown", 'dialog t\nroles kid KID\n    say kid "{
         failed.append(f"{name} was not taken as wrong")
     except DialogError:
         pass
+# a line of several numbers translated: the same names in the line's order stay as they are; in another order each
+# {name} is stored as {i}, its place in the msgid's order (the engine shows that number), its forms too; a name the
+# line has not, refused (a line of one number too)
+PS = "dialog p\ngame SETTINGS\n    say game \"Sound {sound}, volume {volume}.\"\n    say game \"{volume} loud\" \"{volume} louder\"\n    end\n"
+tr = Strings({("", ""): "Plural-Forms: nplurals=3; plural=n%10==1 ? 0 : n<5 ? 1 : 2;\n",
+              ("p", "Sound {sound}, volume {volume}."): "Громкость {volume}, звук {sound}.",
+              ("p", "{volume} loud"): ["{volume} громко", "{volume} громче", "{volume} громче всех"]})
+assemble_dialog(PS, tr, KINDS, PARAMS)
+check(tr.texts == ["Громкость {1}, звук {0}.", "{volume} громко", "{volume} громче", "{volume} громче всех"], f"numbers by name {tr.texts}")
+same = Strings({("p", "Sound {sound}, volume {volume}."): "Звук {sound}, громкость {volume}."})
+assemble_dialog(PS, same, KINDS, PARAMS)
+check(same.texts[0] == "Звук {sound}, громкость {volume}.", f"numbers in order {same.texts}")
+for name, translation in (("a number the line has not", {("p", "Sound {sound}, volume {volume}."): "Звук {sound}, громкость {volum}."}),
+                          ("a number of one the line has not", {("p", "{volume} loud"): ["{volum} громко", "{volume} громче"]})):
+    try:
+        assemble_dialog(PS, Strings(translation), KINDS, PARAMS)
+        failed.append(f"{name} was not refused")
+    except DialogError:
+        pass
 # a choose: answers with conditions of the kind's params and of pockets; important lines
 c = assemble_dialog('dialog c\nroles kid KID\nlabel top\n    say! kid "!"\n    choose kid\n        "x" if hp > 1 -> top\n'
                     '        "y" if count(KNIFE) > 0 -> top\n        "z" -> top\n    end\n', Strings(), KINDS, PARAMS)
@@ -193,6 +212,55 @@ for what, args in (("a name not of C", ("the text", {"points": 12})), ("made and
     try:
         lp.add_font(args[0], **args[1])
         failed.append(f"a font {what} was not refused")
+    except ValueError:
+        pass
+# fields of the game: an answer with one is a control of the kind 0xFFFE, its param the field's number; a field the game
+# has not, or a control and a field at once, refused
+FIELDS = {"name": 0, "motto": 1}
+f = assemble_dialog(PAGE + '        "x" field motto -> a\n        "y" field name\n', Strings(), KINDS, PARAMS, fields=FIELDS)
+answers = f.blob[f.blob.index(bytes([2, 0xFF, 2])) + 7:]  # CHOOSE game, two answers, no time, silence nowhere: then each answer
+check(struct.unpack_from("<HB", answers, 4) == (0xFFFE, 1) and struct.unpack_from("<HB", answers, 4 + 8) == (0xFFFE, 0),
+      f"answers with fields {answers[:16].hex()}")
+for what, text in (("a field the game has not", PAGE + '        "x" field nope\n'),
+                   ("a control and a field at once", PAGE + '        "x" control SWITCH sound field name\n'),
+                   ("a field without its name", PAGE + '        "x" field\n')):
+    try:
+        assemble_dialog(text, Strings(), KINDS, PARAMS, fields=FIELDS)
+        failed.append(f"{what} was not refused")
+    except DialogError:
+        pass
+# Pack.add_field: its number and size in the header; what can be typed into it (a keyboard's labels, else its characters
+# with shift; letters) and the caret among the letters of the pack; refused: a size past 2..255, a name twice, not a layout
+with tempfile.TemporaryDirectory() as tmp:
+    kb = os.path.join(tmp, "kb.json")
+    with open(kb, "w") as out:
+        out.write('{"format": "dgx-di-keyboard", "version": 1, "pages": [{"rows": [[{"char": "q", "upper": "Q"}, {"char": "ж"}, '
+                  '{"char": " ", "label": "␣"}, {"action": "erase"}, {"page": 1, "label": "12"}]]}]}')
+    fp = Pack("F")
+    check(fp.add_field("name", 16, keyboard=kb) == 0 and fp.add_field("pin", 5, letters="0123456789") == 1, "the numbers of fields")
+    head = fp.header("F")
+    check("#define F_FIELD_NAME 0" in head and "#define F_FIELD_NAME_SIZE 16" in head and "#define F_FIELD_PIN_SIZE 5" in head and
+          "#define F_FIELD_COUNT 2" in head, "the fields in the header")
+    # what can be typed is not what the pack prints: only a font typed has it, by a file of its own beside the letters
+    check(fp.letters() == "" and fp.typed_letters() == "".join(sorted(set("qQж␣12_0123456789"))), f"the letters of fields {fp.typed_letters()!r}")
+    fp.add_font("menu", points=12, typed=True)
+    fp.add_font("pen", dgx="font0ss")
+    os.makedirs(os.path.join(tmp, "assets"))
+    fp.write_fonts(os.path.join(tmp, "assets", "f.fonts"), os.path.join(tmp, "assets", "f.letters"))
+    told = open(os.path.join(tmp, "assets", "f.fonts")).read().splitlines()[1:]
+    check(told == ["need menu", "size 12pt", "text f.letters", "text f.typed", "need pen", "dgx font0ss", "text f.letters"], f"a font typed {told}")
+    check(open(os.path.join(tmp, "assets", "f.typed")).read() == fp.typed_letters() + "\n", "the file of what can be typed")
+    with open(os.path.join(tmp, "pad.json"), "w") as out:
+        out.write('{"format": "dgx-di-pad"}')
+    for what, args in (("of a byte", ("one", 1)), ("of 256 bytes", ("big", 256)), ("named twice", ("name", 8)), ("not named so C takes it", ("a b", 8))):
+        try:
+            fp.add_field(*args)
+            failed.append(f"a field {what} was not refused")
+        except ValueError:
+            pass
+    try:
+        fp.add_field("odd", 8, keyboard=os.path.join(tmp, "pad.json"))
+        failed.append("a field of a layout not a keyboard's was not refused")
     except ValueError:
         pass
 print("test_dialog_rules.py: ok" if not failed else "test_dialog_rules.py: " + "\n".join(failed))

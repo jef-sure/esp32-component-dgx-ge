@@ -43,6 +43,9 @@ enum {
     DGX_GE_WIDGET_SWIPE   = 1u << 5, /* a slider moved by the pointer's travel from where it went down (its width the whole
                                         range), not put where it is: a wide strip, easy to find, beside a small slider; a
                                         tap on it (no way gone) tells it activated, its value as it was */
+    DGX_GE_WIDGET_DRAG    = 1u << 6, /* a button dragged up or down as well as tapped (a scroll bar): gone half its width
+                                        that way, it is told changed at every move, the pointer where it is now
+                                        (move_x, move_y of the tree), and no tap when let go */
 };
 
 enum { DGX_GE_WIDGET_CHANGED, DGX_GE_WIDGET_ACTIVATED, DGX_GE_WIDGET_FOCUS }; /* what a callback is told */
@@ -80,6 +83,7 @@ typedef struct {
     int16_t          press_x, press_y;     /* where the pointer went down */
     int16_t          press_value;          /* the value of the one pressed then */
     bool             dragged;              /* swiped since (a list up or down half a row, a slider a step): no tap when let go */
+    int16_t          move_x, move_y;       /* where the pointer is now, while one is pressed */
     bool             between;              /* a list pressed between its rows: no row taken */
 } dgx_ge_widgets_t;
 

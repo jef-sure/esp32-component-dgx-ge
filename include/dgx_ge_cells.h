@@ -50,7 +50,7 @@ typedef struct {
     uint8_t  script, pending, pending_when;
     uint16_t pc;
     uint32_t due_ms;
-    int16_t  own[DGX_GE_CELL_OWN];
+    int32_t  own[DGX_GE_CELL_OWN];
 } dgx_ge_life_t;
 
 typedef struct {
@@ -85,7 +85,7 @@ void dgx_ge_cells_clear(dgx_ge_cells_t *cells);
  * gate stays up: the link that opened it says). False when no life was
  * there or could begin.
  */
-bool dgx_ge_cells_event(dgx_ge_cells_t *cells, uint16_t cell, uint16_t kind, int event, int own, int16_t value, uint32_t now_ms);
+bool dgx_ge_cells_event(dgx_ge_cells_t *cells, uint16_t cell, uint16_t kind, int event, int own, int32_t value, uint32_t now_ms);
 
 /*
  * A timer gone off (dgx_ge_timers_play): one of a cell, its event to the life
@@ -111,7 +111,7 @@ bool dgx_ge_cells_load(dgx_ge_cells_t *cells, struct dgx_ge_load *l, uint32_t la
 bool dgx_ge_cells_load_check(const dgx_ge_cells_t *cells, const struct dgx_ge_load *l);
 
 /* An own param of the life of a cell given a value (what the game knows and its script reads at its next step); false: not living. */
-bool dgx_ge_cells_set(dgx_ge_cells_t *cells, uint16_t cell, int own, int16_t value);
+bool dgx_ge_cells_set(dgx_ge_cells_t *cells, uint16_t cell, int own, int32_t value);
 
 /* Is a cell living? */
 bool dgx_ge_cells_living(const dgx_ge_cells_t *cells, uint16_t cell);

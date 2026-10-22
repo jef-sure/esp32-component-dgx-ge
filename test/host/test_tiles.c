@@ -103,6 +103,49 @@ static bool same_as_laid(const dgx_ge_scene_t *s, const dgx_ge_grid_t *g, dgx_ge
     return true;
 }
 
+/* What a body touches, by cell and side: how many points, their middle (dgx_ge_grid_touching, or worked out by hand). */
+#define TOUCH_COLS 16
+#define TOUCH_ROWS 10
+typedef struct {
+    int points[TOUCH_ROWS][TOUCH_COLS][DGX_GE_TOUCH_SIDES], cx[TOUCH_ROWS][TOUCH_COLS][DGX_GE_TOUCH_SIDES], cy[TOUCH_ROWS][TOUCH_COLS][DGX_GE_TOUCH_SIDES];
+    int count;
+} touches_t;
+
+static void touch_into(const dgx_ge_touch_t *t, void *ctx)
+{
+    touches_t *k = ctx;
+    int        s = 0;
+    while (!(t->from >> s & 1)) ++s;
+    k->points[t->row][t->col][s] += t->area.points, k->cx[t->row][t->col][s] = t->area.cx, k->cy[t->row][t->col][s] = t->area.cy;
+    ++k->count;
+}
+
+/* By hand: every plate of the grid against every other, a mask at a time (the plates of cells are x 0..7, y 4..5 of each). */
+static void touches_by_hand(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, int reach, touches_t *k)
+{
+    dgx_ge_mask_t masks[16];
+    dgx_ge_rect_t plates[TOUCH_COLS * TOUCH_ROWS];
+    int           n = 0, at[TOUCH_COLS * TOUCH_ROWS];
+    for (int row = 0; row < g->rows; ++row)
+        for (int col = 0; col < g->cols; ++col)
+            if (g->cells[row * g->cols + col]) at[n] = row * TOUCH_COLS + col, plates[n++] = dgx_ge_rect(col * 8, row * 8 + 4, 8, 2);
+    const int count = dgx_ge_pack_masks(body->pack, body->image, masks, 16);
+    for (int m = 0; m < count; ++m) {
+        if (!(body->active >> masks[m].index & 1)) continue;
+        const dgx_ge_rect_t place = dgx_ge_mask_place(&masks[m], body->x, body->y, body->flip);
+        for (int i = 0; i < n; ++i) {
+            dgx_ge_area_t  areas[DGX_GE_TOUCH_SIDES];
+            const unsigned bits = dgx_ge_mask_touch_rect_among(&masks[m], place, body->flip, plates[i], reach, plates, n, areas);
+            for (int s = 0; s < DGX_GE_TOUCH_SIDES; ++s)
+                if (bits >> s & 1) {
+                    const int row = at[i] / TOUCH_COLS, col = at[i] % TOUCH_COLS;
+                    k->points[row][col][s] += areas[s].points, k->cx[row][col][s] = areas[s].cx, k->cy[row][col][s] = areas[s].cy;
+                    ++k->count;
+                }
+        }
+    }
+}
+
 int main(void)
 {
     size_t   size = 0;
@@ -319,6 +362,17 @@ int main(void)
     CHECK(dgx_ge_grid_push_out(&bodies, &four, 0, -1, &px, &py) && px == 0 && py == 8 - 2); /* up out of the strip 8 high from its row 2 */
     CHECK(dgx_ge_grid_push_out(&bodies, &four, 3, 1, &px, &py) && px == -2 && py == -1);  /* a slant: 2 back along x, the y with it, whole points */
     CHECK(!dgx_ge_grid_push_out(&bodies, &four, 0, 0, &px, &py) && px == 0 && py == 0);  /* no way given: no hint */
+    /* out of one body into another: on, out of every one; points (8,4) (10,4) (8,5) (9,5) in the right plate going right, 3 back are in the left one */
+    four = (dgx_ge_body_t){&pack, TEST_IMG_FOUR, 8, 5, false, 1u << 1};
+    CHECK(dgx_ge_grid_push_out(&seam, &four, 1, 0, &px, &py) && px == -11 && py == 0);
+    dgx_ge_body_t out = four;
+    out.x += px;
+    in_count = 0;
+    CHECK(dgx_ge_grid_overlap(&seam, &out, inside_of, NULL) == 0);
+    /* plates on and on beyond the grid: no way out, no hint */
+    seam.outside = plate_outside;
+    CHECK(!dgx_ge_grid_push_out(&seam, &four, 1, 0, &px, &py) && px == 0 && py == 0);
+    seam.outside = NULL;
 
     /* the terrain of the grid: a ray down onto the floor of cell 3, 0 */
     const dgx_ge_terrain_t terrain = {.touches = dgx_ge_grid_touches, .ctx = &grid};
@@ -644,6 +698,36 @@ int main(void)
         dgx_ge_scene_destroy(&tight);
         dgx_ge_scene_destroy(&whole);
         dgx_ge_scene_destroy(&rs);
+    }
+    /*
+     * A body over many cells (72 x 40, cells of 8) on plates here and there: what it touches is what it touches among
+     * every plate, by hand, however many there are about it (more than are gathered at once: still one solid).
+     */
+    {
+        uint16_t      many[TOUCH_COLS * TOUCH_ROWS];
+        dgx_ge_grid_t lot = {.tileset = &tiles, .cells = many, .cols = TOUCH_COLS, .rows = TOUCH_ROWS};
+        srand(7);
+        int differ = 0, crowded = 0;
+        for (int round = 0; round < 400; ++round) {
+            for (int i = 0; i < TOUCH_COLS * TOUCH_ROWS; ++i) many[i] = rand() % 3 ? TEST_TILES_TILE_PLATE : 0;
+            const dgx_ge_body_t slab  = {&pack, TEST_IMG_SLAB, rand() % 72 - 8, rand() % 60 - 8, rand() % 2 != 0, 1u << 1};
+            const int           reach = rand() % 3;
+            static touches_t    found, by_hand;
+            memset(&found, 0, sizeof(found)), memset(&by_hand, 0, sizeof(by_hand));
+            dgx_ge_grid_touching(&lot, &slab, 1, reach, touch_into, &found);
+            touches_by_hand(&lot, &slab, reach, &by_hand);
+            differ += memcmp(&found, &by_hand, sizeof(found)) != 0;
+            /* the plates of the cells about it (and around them: a body may reach into the next cell): more than 32, more than are gathered */
+            dgx_ge_mask_t masks[16];
+            dgx_ge_pack_masks(&pack, TEST_IMG_SLAB, masks, 16);
+            const dgx_ge_rect_t r = dgx_ge_mask_place(&masks[0], slab.x, slab.y, slab.flip);
+            int                 about = 0;
+            for (int row = (r.y - reach + 64) / 8 - 9; row <= (r.y + r.h - 1 + reach + 64) / 8 - 7; ++row)
+                for (int col = (r.x - reach + 64) / 8 - 9; col <= (r.x + r.w - 1 + reach + 64) / 8 - 7; ++col)
+                    about += row >= 0 && col >= 0 && row < TOUCH_ROWS && col < TOUCH_COLS && many[row * TOUCH_COLS + col];
+            crowded += about > 32;
+        }
+        CHECK(differ == 0 && crowded > 200);
     }
     dgx_ge_scene_destroy(&scene);
     dgx_ge_frame_destroy(&frame);

@@ -43,7 +43,8 @@ int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, co
     for (int sy = both.y; sy < both.y + both.h; ++sy)
         for (int sx = both.x; sx < both.x + both.w; ++sx)
             if (has(a, ra, a_flip, sx, sy) && has(b, rb, b_flip, sx, sy)) {
-                ++count[(floor_div(sy, tile) - ty0) * GRID + floor_div(sx, tile) - tx0];
+                uint16_t *in = &count[(floor_div(sy, tile) - ty0) * GRID + floor_div(sx, tile) - tx0];
+                if (*in < 0xFFFF) ++*in; /* a tile of more points than that counts as full */
                 any = true;
             }
     if (!any) return 0;
@@ -51,14 +52,16 @@ int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, co
     /* neighbouring tiles where they meet make one area */
     uint8_t seen[GRID * GRID], stack[GRID * GRID];
     memset(seen, 0, sizeof(seen));
-    int n = 0;
+    int      n    = 0;
+    uint32_t last = 0; /* the points of the last area, every one: an area says 0xFFFF at most */
     for (int cell = 0; cell < GRID * GRID; ++cell) {
         if (!count[cell] || seen[cell]) continue;
         /* too many areas: the rest is joined to the last */
         const bool    join  = n == DGX_GE_AREAS_MAX;
         const int     slot  = join ? n - 1 : n++;
-        dgx_ge_area_t area  = join ? areas[slot] : (dgx_ge_area_t){0};
-        int32_t       sum_x = (int32_t)area.cx * area.points, sum_y = (int32_t)area.cy * area.points;
+        dgx_ge_area_t area   = join ? areas[slot] : (dgx_ge_area_t){0};
+        uint32_t      points = join ? last : 0;
+        int64_t       sum_x = (int64_t)area.cx * points, sum_y = (int64_t)area.cy * points;
         int           top   = 0;
         stack[top++]        = (uint8_t)cell;
         seen[cell]          = 1;
@@ -66,10 +69,10 @@ int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, co
             const int c = stack[--top], cx = c % GRID, cy = c / GRID;
             /* the tile cut to the overlap */
             const dgx_ge_rect_t t = dgx_ge_rect_intersect(dgx_ge_rect((tx0 + cx) * tile, (ty0 + cy) * tile, tile, tile), both);
-            area.box              = area.points ? dgx_ge_rect_union(area.box, t) : t;
-            area.points += count[c];
-            sum_x += (int32_t)(t.x * 2 + t.w - 1) * count[c] / 2;
-            sum_y += (int32_t)(t.y * 2 + t.h - 1) * count[c] / 2;
+            area.box              = points ? dgx_ge_rect_union(area.box, t) : t;
+            points += count[c];
+            sum_x += (int64_t)(t.x * 2 + t.w - 1) * count[c] / 2;
+            sum_y += (int64_t)(t.y * 2 + t.h - 1) * count[c] / 2;
             static const int8_t step[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
             for (int k = 0; k < 4; ++k) {
                 const int nx = cx + step[k][0], ny = cy + step[k][1], next = ny * GRID + nx;
@@ -78,9 +81,11 @@ int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, co
                 stack[top++] = (uint8_t)next;
             }
         }
-        area.cx     = (int16_t)(sum_x / area.points);
-        area.cy     = (int16_t)(sum_y / area.points);
+        area.cx     = (int16_t)(sum_x / points);
+        area.cy     = (int16_t)(sum_y / points);
+        area.points = (uint16_t)(points > 0xFFFF ? 0xFFFF : points);
         areas[slot] = area;
+        last        = points;
     }
     return n;
 }
@@ -160,8 +165,9 @@ static bool within_any(const dgx_ge_rect_t *solids, int count, int x, int y)
     return false;
 }
 
-unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
-                                      int count, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
+/* The touch of a solid among others: given as rectangles (solids, count), or told by a function (inside, ctx). */
+static inline unsigned touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
+                                  int count, dgx_ge_solid_fn inside, void *ctx, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
 {
     gather_t g[DGX_GE_TOUCH_SIDES] = {{0}};
     if (reach < 0) reach = 0;
@@ -173,11 +179,23 @@ unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t plac
             const bool in_x = x >= solid.x && x < solid.x + solid.w, in_y = y >= solid.y && y < solid.y + solid.h;
             if (in_x && in_y) gather(&g[0], x, y);
             else if (!in_x && !in_y) continue;
-            else if (within_any(solids, count, x, y)) continue;        /* inside another solid: not beside this one */
+            else if (inside ? inside(x, y, ctx) : within_any(solids, count, x, y)) continue; /* inside another solid: not beside this one */
             else if (in_x) gather(&g[y < solid.y ? 1 : 2], x, y); /* the solid below the point, or above it */
             else gather(&g[x < solid.x ? 4 : 3], x, y);          /* the solid to the right of the point, or to its left */
         }
     return gathered(g, areas);
+}
+
+unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
+                                      int count, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
+{
+    return touch_rect(m, place, flip, solid, reach, solids, count, NULL, NULL, areas);
+}
+
+unsigned dgx_ge_mask_touch_rect_where(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, dgx_ge_solid_fn inside,
+                                      void *ctx, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
+{
+    return touch_rect(m, place, flip, solid, reach, NULL, 0, inside, ctx, areas);
 }
 
 unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])

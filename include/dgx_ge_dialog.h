@@ -34,6 +34,14 @@ extern "C" {
  * them it is worked by its events alone. An answer without a label leads
  * nowhere: its control changed, the choice stays.
  *
+ * Fields: an answer may carry a field of the game instead (the kind
+ * DGX_GE_DIALOG_FIELD, its param the field's number: the packer's
+ * <PREFIX>_FIELD_<name>), a text the game keeps (dgx_ge_field_t, given with
+ * the cast). Activate on it begins editing: the talk stands on that answer
+ * and takes no events of its own until the one showing it says the editing is
+ * done (dgx_ge_talk_field_done: the text typed into the field, or as it was);
+ * then on to its label, if it has one.
+ *
  * Strings are numbers: the packer chose the language (msgid in the context of
  * the dialog's name, translated or as it is) and put its strings into the
  * blob "DGSS" (dgx_ge_strings_*).
@@ -64,7 +72,8 @@ extern "C" {
  *           the one saying it; its forms are so many strings in a row, the
  *           language's rule chooses (dgx_ge_strings_form); {name} in it shows the number
  *   SAY_NS  as SAY, then forms u8, count u8 (up to DGX_GE_TALK_NUMBERS), params u8 each: a line of
- *           several numbers, its {names} in order, the form by the first
+ *           several numbers, its {names} in order, the form by the first; a translation that
+ *           shows them in another order has {i} instead, the number of param i
  *   CHOOSE  role u8, count u8, ms u16 (0: no limit), label u16 (where silence leads);
  *           each answer: string u16, label u16 (0xFFFF: it stays), control kind u16 (0xFFFF none),
  *           param u8, expr (its length 0: none)
@@ -79,6 +88,7 @@ extern "C" {
 #define DGX_GE_DIALOG_ROLES   8
 #define DGX_GE_ROLE_GAME      0xFF
 #define DGX_GE_DIALOG_PAUSE   1u /* flags: the game stands while it is open */
+#define DGX_GE_DIALOG_FIELD   0xFFFEu /* the kind of a control that is a field of the game (its param: the field's number) */
 
 typedef struct {
     const uint8_t *code;
@@ -128,8 +138,11 @@ int dgx_ge_strings_form(const dgx_ge_strings_t *strings, int n, int forms);
  */
 const char *dgx_ge_strings_number(const dgx_ge_strings_t *strings, int first, int forms, int n, char *out, size_t size);
 
-/* The same with several numbers: each {name} shows the next of them (the last again past their count), the form of the first. */
-const char *dgx_ge_strings_numbers(const dgx_ge_strings_t *strings, int first, int forms, const int16_t *n, int count, char *out, size_t size);
+/*
+ * The same with several numbers: each {name} shows the next of them (the last again past their count), {i} (digits:
+ * the packer's, of a translation that puts them in another order) the one of that place; the form of the first.
+ */
+const char *dgx_ge_strings_numbers(const dgx_ge_strings_t *strings, int first, int forms, const int32_t *n, int count, char *out, size_t size);
 
 /* So many numbers a line may show at most. */
 #define DGX_GE_TALK_NUMBERS 4
@@ -146,11 +159,22 @@ typedef enum {
 
 struct dgx_ge_kinds;
 
-/* Who plays a talk: the actors of its roles (one a role, NULL nobody), the game's actor (its settings), the kinds of controls. */
+/* A text field of the game: its text (UTF-8, ending in 0) and the bytes it holds, the 0 too. */
 typedef struct {
-    dgx_ge_actor_t *const *roles; /* NULL: nobody */
-    dgx_ge_actor_t        *game;  /* NULL: none (conditions of the game read 0, controls change nothing) */
-    struct dgx_ge_kinds   *kinds; /* the animations of controls; NULL: no controls */
+    char   *text;
+    uint8_t size;
+} dgx_ge_field_t;
+
+/*
+ * Who plays a talk: the actors of its roles (one a role, NULL nobody), the game's actor (its settings), the kinds of
+ * controls, the game's text fields (by the packer's numbers, <PREFIX>_FIELD_<name>).
+ */
+typedef struct {
+    dgx_ge_actor_t *const *roles;  /* NULL: nobody */
+    dgx_ge_actor_t        *game;   /* NULL: none (conditions of the game read 0, controls change nothing) */
+    struct dgx_ge_kinds   *kinds;  /* the animations of controls; NULL: no controls */
+    const dgx_ge_field_t  *fields; /* NULL: none (an answer with a field is shown, never edited) */
+    uint8_t                field_count;
 } dgx_ge_cast_t;
 
 typedef enum {
@@ -164,16 +188,19 @@ typedef struct {
     dgx_ge_actor_t        *actors[DGX_GE_DIALOG_ROLES]; /* who plays each role; NULL nobody */
     dgx_ge_actor_t        *game;                        /* the game's actor, NULL none */
     struct dgx_ge_kinds   *kinds;                       /* of the controls */
+    const dgx_ge_field_t  *fields;                      /* the game's text fields, NULL none */
+    uint8_t                field_count;
+    bool                   editing; /* the field of the answer chosen is edited: the talk takes no events (dgx_ge_talk_field_done) */
     uint16_t               pc;    /* the step after the one shown */
     uint16_t               at;    /* the step shown: its say or choose */
     uint8_t                state; /* dgx_ge_talk_state_t */
     uint8_t                role;  /* who says it, who chooses */
     bool                   important;
     uint16_t               string; /* the line said (a line of a number: its first form) */
-    uint8_t                forms;  /* a line of a number: so many forms, 0 none */
-    int16_t                number; /* its number, as it was when it was said */
-    int16_t                more[DGX_GE_TALK_NUMBERS - 1]; /* a line of several numbers: the others */
+    int32_t                number; /* its number, as it was when it was said */
+    int32_t                more[DGX_GE_TALK_NUMBERS - 1]; /* a line of several numbers: the others */
     uint8_t                count;  /* how many numbers the line shows */
+    uint8_t                forms;  /* a line of a number: so many forms, 0 none */
     uint16_t               style;  /* the style of the pack its lines are shown in now */
     uint8_t                pick;   /* the answer chosen, of those shown */
     uint8_t                shown;  /* how many answers are shown */
@@ -183,7 +210,8 @@ typedef struct {
     uint32_t               now_ms; /* the moment of the last event, the talk's own time */
     uint32_t               ahead_ms; /* how far that is ahead of the world's (a dialog that pauses: the world stands, the talk
                                         goes on); tell, give and conditions land at now_ms - ahead_ms. The game's; 0 at start */
-    uint8_t                changes; /* counted up whenever a control changed a value: for the one showing it */
+    uint8_t                changes; /* counted up whenever a control or a field changed a value: for the one showing it, the game */
+    uint8_t                choices; /* counted up whenever a choice is shown, again too (its answers as the conditions are then): for the one showing it */
     dgx_ge_anim_say_fn     say;    /* what the actors told say, as the game hears them; NULL nothing */
     void                  *ctx;
 } dgx_ge_talk_t;
@@ -218,6 +246,15 @@ bool dgx_ge_talk_control(const dgx_ge_talk_t *talk, int shown, int *image);
 
 /* The control of an answer shown: its value now and its range (the kind's params 1..3: least, most, step); false when it has none, or no range. */
 bool dgx_ge_talk_control_range(const dgx_ge_talk_t *talk, int shown, int *value, int *least, int *most, int *step);
+
+/* The field of an answer shown (the game's); NULL when it has none, or the game gave no such field. */
+const dgx_ge_field_t *dgx_ge_talk_field(const dgx_ge_talk_t *talk, int shown);
+
+/*
+ * The editing of the field of the answer chosen is over (the one showing it typed into the field, or left it as it
+ * was): changed, the talk's changes counted up; then on to the answer's label, if it has one, else the choice stays.
+ */
+void dgx_ge_talk_field_done(dgx_ge_talk_t *talk, bool changed);
 
 #ifdef __cplusplus
 }

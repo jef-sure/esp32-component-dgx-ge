@@ -31,7 +31,10 @@ extern "C" {
  * The view keeps two fields of text (the line, the answers) and lays them in
  * the style of the talk as it goes; it gives the talk its time (seen whole:
  * an important line scrolled to its end) and puts the frame, the text and
- * the bar into a layer of the scene.
+ * the bar into a layer of the scene. The answers are a line each, a long one
+ * wrapped into more: the bar is under all of its lines, the lines seen follow
+ * it until it is seen whole, a tap on any of them is that answer, its control
+ * or field at the right of its first line.
  *
  * A style, 48 bytes: frame u8 (0 none, 1 fill, 2 picture), appear u8 (0 at
  * once, 1 letter by letter; bit 7: a soft pen — with a handwritten font the
@@ -54,6 +57,10 @@ extern "C" {
 
 #ifndef DGX_GE_TALK_VIEW_CONTROLS
 #define DGX_GE_TALK_VIEW_CONTROLS 6 /* controls shown at once, a picture each: lines of answers seen */
+#endif
+#define DGX_GE_TALK_VIEW_FIELDS 2 /* lines with a field shown at once, a box of text each (made while fields are seen) */
+#ifndef DGX_GE_FIELD_BYTES
+#define DGX_GE_FIELD_BYTES 32 /* a field edited holds so many bytes at most, its 0 too (of a larger one, so much is typed) */
 #endif
 
 typedef struct {
@@ -83,6 +90,20 @@ void dgx_ge_style_default(dgx_ge_style_t *style);
  */
 void dgx_ge_style_of(const uint8_t *styles, size_t size, int number, dgx_ge_style_t *style);
 
+/*
+ * The fields of the answers seen (the game's texts, dgx_ge_talk_field): a box of text each, at the right of its line, the
+ * line it shows (-1 none); the one edited, its text as typed, edit_len bytes, then the caret '_' while it blinks on.
+ * Made when a field is first seen: a game without fields keeps none of it.
+ */
+typedef struct {
+    dgx_ge_textbox_t *boxes[DGX_GE_TALK_VIEW_FIELDS];
+    int8_t            rows[DGX_GE_TALK_VIEW_FIELDS];
+    char              edit[DGX_GE_FIELD_BYTES + 1];
+    uint8_t           edit_len;
+    bool              caret;
+    uint32_t          blink_ms; /* when the caret last came or went */
+} dgx_ge_talk_fields_t;
+
 typedef struct {
     const uint8_t       *styles; /* the blob of styles of the pack, NULL none: the default */
     size_t               styles_size;
@@ -91,11 +112,12 @@ typedef struct {
     int                  font_count;
     dgx_ge_style_t       style;
     int                  style_number; /* -1 none yet */
-    uint8_t              colors[5];    /* fill, border, text, bar, name: indices of the frame */
-    dgx_ge_text_style_t  text_style, answer_style;
+    uint8_t              colors[6];    /* fill, border, text, bar, name, the track of the scroll bar (a field's border): indices of the frame */
+    dgx_ge_text_style_t  text_style, answer_style, field_style;
     dgx_ge_textbox_t     line, answers, name; /* the line said, the answers (on the canvas of the line), the name of the one saying it */
-    char                 said[96];            /* a line of a number as it is shown (the others are read where they lie) */
-    int16_t              said_number;         /* its number: another (the same line said again) is laid anew */
+    char                *all;                 /* the answers, a line each, as they are laid (as long as they are), NULL none */
+    char                *said;                /* a line of numbers as it is shown, as long as it is (the others are read where they lie), NULL none */
+    uint32_t             said_number;         /* its number: another (the same line said again) is laid anew */
     uint8_t              ink[DGX_GE_TEXT_INK]; /* a soft pen: the amounts of ink 1.. as indices of the frame */
     int                  name_string;          /* the name shown, -1 none */
     /*
@@ -104,7 +126,7 @@ typedef struct {
      * view draws as it does. The talk and the moment, for the callbacks while the pointer is told.
      */
     dgx_ge_widgets_t     widgets;
-    dgx_ge_widget_t      widget_store[2 * DGX_GE_TALK_VIEW_CONTROLS + 3]; /* the line, the list, a control each and a row to swipe a slider */
+    dgx_ge_widget_t      widget_store[2 * DGX_GE_TALK_VIEW_CONTROLS + 4]; /* the line, the list, a control each and a row to swipe a slider, the scroll bar */
     dgx_ge_talk_t       *talk;
     uint32_t             now_ms;
     bool                 pixels;               /* laid in pixels of the display (its layer is one in pixels): the frame's scale its unit */
@@ -121,10 +143,13 @@ typedef struct {
     const uint8_t *const *maps;
     int16_t               control_ids[DGX_GE_TALK_VIEW_CONTROLS];
     dgx_image_t           control_images[DGX_GE_TALK_VIEW_CONTROLS];
-    uint8_t               changes; /* the talk's, when they were taken */
+    uint8_t               changes, choices; /* the talk's, when they were taken */
     dgx_image_t          *frame_pieces; /* a frame of a picture: its nine pictures (taken with the style), NULL none */
+    dgx_image_t           arrows[2];    /* the scroll bar's arrows, up and down: 1 bit, made for the style's unit (NULL data none) */
     int16_t               face_id;      /* the portrait shown, -1 none */
     dgx_image_t           face;
+    dgx_ge_talk_fields_t *fields;  /* the fields of the answers seen, NULL none seen yet (made then, given back with the style) */
+    bool                  editing; /* one of them edited */
 } dgx_ge_talk_view_t;
 
 /* A view of the styles of a pack (its blob STYLES, NULL none) drawing into a frame, with the game's fonts. */
@@ -157,14 +182,35 @@ bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const 
 /*
  * An event of the interface for the talk as it is shown: a button pressed
  * while a line appears letter by letter shows all of it (the next one goes
- * on); else the talk's.
+ * on); else the talk's. Nothing while the view has not played the step the
+ * talk is at (it has just begun, or gone on since): no line or choice is
+ * passed unseen.
  */
 void dgx_ge_talk_view_event(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, dgx_ge_ui_t event, uint32_t now_ms);
 
 /* The pointer as it is now (pixels of the display): a tap on the line goes on, on an answer picks and takes it, on a control works it; true when taken. */
 bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const dgx_ge_pointer_t *pointer, uint32_t now_ms);
 
-/* The talk into a layer of the scene: its frame, the name of the one speaking, the text, the bar under the answer chosen, the pictures of controls at the right of their lines. Nothing when it is over. */
+/*
+ * The field of the answer chosen edited (activate on it began it): what is typed into it, a code point at a time, as a
+ * keyboard gives them (DGX-DI's on the display, or one of wires): a character goes at the end, as long as the field
+ * holds it (whole, UTF-8); U+0008 erases the last character; U+000A (or activate) is done: the text into the game's
+ * field, then on as the answer leads (dgx_ge_talk_field_done); U+001B (or back) leaves the field as it was. A tap on the
+ * display away from the field is done too. Nothing while nothing is edited.
+ */
+void dgx_ge_talk_view_type(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, uint32_t code, uint32_t now_ms);
+
+/*
+ * A field edited now, and where it is, in pixels of the display: for a keyboard on the display to stand away from it
+ * (and the game to open one, and close it when this is false again).
+ */
+bool dgx_ge_talk_view_editing(const dgx_ge_talk_view_t *view, const dgx_ge_talk_t *talk, dgx_ge_rect_t *field);
+
+/*
+ * The talk into a layer of the scene: its frame, the name of the one speaking, the text, the bar under the answer
+ * chosen, the pictures of controls at the right of their lines, the fields there (a frame, their text, the caret of the
+ * one edited). Nothing when it is over.
+ */
 void dgx_ge_talk_view_show(const dgx_ge_talk_view_t *view, const dgx_ge_talk_t *talk, dgx_ge_scene_t *scene, uint8_t layer);
 
 #ifdef __cplusplus

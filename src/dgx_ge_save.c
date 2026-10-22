@@ -100,8 +100,8 @@ bool dgx_ge_load_open(dgx_ge_load_t *l, const void *data, size_t size, uint32_t 
     const uint8_t *d = data;
     if (!d || size < HEADER_BYTES || memcmp(d, "DGSV", 4) != 0) return false;
     const unsigned version = d[4] | d[5] << 8;
-    if (version != DGX_GE_SAVE_VERSION || u32_at(d + 10) != data_id) return false; /* version 1 named no data: whose it is, nobody knows */
-    l->data = d, l->size = size;
+    if (version < 2 || version > DGX_GE_SAVE_VERSION || u32_at(d + 10) != data_id) return false; /* version 1 named no data: whose it is, nobody knows */
+    l->data = d, l->size = size, l->version = (uint16_t)version;
     if (saved_ms) *saved_ms = u32_at(d + 6);
     return true;
 }
@@ -163,6 +163,11 @@ int16_t dgx_ge_load_i16(dgx_ge_load_t *l)
 int32_t dgx_ge_load_i32(dgx_ge_load_t *l)
 {
     return (int32_t)dgx_ge_load_u32(l);
+}
+
+int32_t dgx_ge_load_param(dgx_ge_load_t *l)
+{
+    return l->version < 3 ? dgx_ge_load_i16(l) : dgx_ge_load_i32(l);
 }
 
 void dgx_ge_load_bytes(dgx_ge_load_t *l, void *bytes, size_t n)

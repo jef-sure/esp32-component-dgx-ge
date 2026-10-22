@@ -1,0 +1,10 @@
+# CYD (ESP32-2432S028R): an ESP32 with a 320x240 ILI9341 on SPI, 4 MB flash. What the board needs of a game's
+# sdkconfig, before the game's own file: SDKCONFIG_DEFAULTS="<this>;<the game's>" (a later file over an earlier).
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# DGX: the panel, its bus and the virtual screens the engine draws into
+CONFIG_DGX_ENABLE_SPI=y
+CONFIG_DGX_ENABLE_SPI_ILI_9341=y
+CONFIG_DGX_ENABLE_VSCREEN=y

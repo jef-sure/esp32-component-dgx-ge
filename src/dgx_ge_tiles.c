@@ -739,7 +739,7 @@ typedef struct {
     const dgx_ge_grid_t   *g;
     int                    way_x, way_y; /* the push out: the way it came, and how far back along it, a scalar of the way */
     float                  t;
-    const dgx_ge_rect_t   *solids; /* every solid about the body, for touches among them (NULL: each on its own) */
+    const dgx_ge_rect_t   *solids; /* every solid about the body, for touches among them (NULL: too many, asked of the grid point by point) */
     int                    solid_count;
 } walk_t;
 
@@ -764,14 +764,36 @@ int dgx_ge_grid_overlap(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, dgx_g
     return w.found;
 }
 
+/* Is a point inside a body of a tile holding the mask of a walk (one of those about it: a body reaches into the next cell at most)? */
+typedef struct {
+    int  x, y;
+    bool in;
+} point_in_t;
+
+static void point_in(int col, int row, int tile, dgx_ge_rect_t solid, unsigned held, void *ctx)
+{
+    (void)col, (void)row, (void)tile, (void)held;
+    point_in_t *p = ctx;
+    if (p->x >= solid.x && p->x < solid.x + solid.w && p->y >= solid.y && p->y < solid.y + solid.h) p->in = true;
+}
+
+static bool in_a_body(int x, int y, void *ctx)
+{
+    const walk_t *w = ctx;
+    point_in_t    p = {x, y, false};
+    each_solid(w->g, dgx_ge_rect(x, y, 1, 1), 1u << w->mask, point_in, &p);
+    return p.in;
+}
+
 static void touch_solid(int col, int row, int tile, dgx_ge_rect_t solid, unsigned held, void *ctx)
 {
     walk_t *w = ctx;
     for (int i = 0; i < w->n; ++i) {
         if (!(w->body->active >> w->masks[i].index & 1) || (w->mask >= 0 && w->masks[i].index != w->mask) || !(held >> w->masks[i].index & 1)) continue;
-        dgx_ge_area_t  areas[DGX_GE_TOUCH_SIDES];
-        const unsigned bits = dgx_ge_mask_touch_rect_among(&w->masks[i], dgx_ge_mask_place(&w->masks[i], w->body->x, w->body->y, w->body->flip),
-                                                           w->body->flip, solid, w->reach, w->solids, w->solid_count, areas);
+        dgx_ge_area_t       areas[DGX_GE_TOUCH_SIDES];
+        const dgx_ge_rect_t place = dgx_ge_mask_place(&w->masks[i], w->body->x, w->body->y, w->body->flip);
+        const unsigned      bits  = w->solids ? dgx_ge_mask_touch_rect_among(&w->masks[i], place, w->body->flip, solid, w->reach, w->solids, w->solid_count, areas)
+                                              : dgx_ge_mask_touch_rect_where(&w->masks[i], place, w->body->flip, solid, w->reach, in_a_body, w, areas);
         if (!bits) continue;
         uint16_t kind = 0;
         uint8_t  sides;
@@ -828,7 +850,7 @@ int dgx_ge_grid_touching(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, int 
     solids_t            s     = {.count = 0, .over = 0};
     each_solid(g, about, 1u << mask, gather_solid, &s);
     if (s.over) {
-        /* more solids about than are kept at once: each on its own, as a crowd of small bodies is no slab */
+        /* more solids about than are kept at once: each in turn, whether a point is inside another asked of the grid there */
         each_solid(g, about, 1u << mask, touch_solid, &w);
         return w.found;
     }
@@ -876,19 +898,24 @@ bool dgx_ge_grid_push_out(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, int
     if (dgx_ge_rect_empty(all)) return false;
     each_solid(g, all, body->active, push_solid, &w);
     if (!w.found) return false;
-    /* back along the way by the farthest any body asks, whole points, never short of it; a step more where the rounding left a point in */
+    /*
+     * Back along the way by the farthest any body asks, whole points, never short of it; there in another (or the
+     * rounding left a point in): on, as far as that one asks (half a step at least), till it is in none.
+     */
     dgx_ge_body_t moved = *body;
-    for (int more = 0; more < 4; ++more) {
-        const float t = w.t + (float)more * 0.5f;
+    float         t     = w.t;
+    for (int tries = 0; tries < 16; ++tries) {
         *dx = -(int)ceilf((float)way_x * t - 1e-4f), *dy = -(int)ceilf((float)way_y * t - 1e-4f);
         if (way_x < 0) *dx = (int)ceilf((float)-way_x * t - 1e-4f);
         if (way_y < 0) *dy = (int)ceilf((float)-way_y * t - 1e-4f);
         moved.x = body->x + *dx, moved.y = body->y + *dy;
         walk_t again = {.body = &moved, .masks = masks, .n = n, .mask = -1, .g = g, .way_x = way_x, .way_y = way_y};
         each_solid(g, masks_box(&moved, masks, n, -1), body->active, push_solid, &again);
-        if (!again.found) break;
+        if (!again.found) return true;
+        t += again.t > 0.5f ? again.t : 0.5f;
     }
-    return true;
+    *dx = *dy = 0; /* no way out found */
+    return false;
 }
 
 bool dgx_ge_grid_touches(const dgx_ge_actor_t *actor, int32_t x, int32_t y, dgx_ge_contact_t *contact, void *ctx)

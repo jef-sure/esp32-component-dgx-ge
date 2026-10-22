@@ -361,8 +361,9 @@ unsigned dgx_ge_grid_touch_sides(const dgx_ge_grid_t *g, const dgx_ge_body_t *bo
  * A hint: the shortest way back along the line it came by (way_x, way_y: its
  * motion, any scale, not both 0) that takes its active masks out of every
  * body of the tiles: a vector, whole points, into dx, dy. The game applies
- * it, or not: nothing here moves anything. False when it is in none (dx, dy
- * 0), or no way is given.
+ * it, or not: nothing here moves anything. False when it is in none, no way
+ * is given, or no way out is found within 16 bodies one behind another (dx,
+ * dy 0).
  */
 bool dgx_ge_grid_push_out(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, int way_x, int way_y, int *dx, int *dy);
 

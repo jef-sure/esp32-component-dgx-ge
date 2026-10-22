@@ -28,8 +28,12 @@ extern "C" {
  * numbers it can check itself: counts, indices, kinds), then taken; refused,
  * the module is as it was. dgx_ge_*_load_check reads and checks alone, so
  * that a game may check every chunk before it changes anything.
+ *
+ * Version 3 keeps params (of records of the world, pockets, lives of cells)
+ * in 32 bits, as they are; a save of version 2 kept them in 16 and is read
+ * as it was made (dgx_ge_load_param).
  */
-#define DGX_GE_SAVE_VERSION 2
+#define DGX_GE_SAVE_VERSION 3
 
 typedef struct dgx_ge_save {
     uint8_t *data;
@@ -59,9 +63,10 @@ typedef struct dgx_ge_load {
     size_t         size;
     size_t         at, end; /* the chunk being read: where in it, where it ends */
     bool           failed;  /* read past the end of a chunk: the values were 0 */
+    uint16_t       version; /* of the save being read */
 } dgx_ge_load_t;
 
-/* Open a saved game: false when it is not one, of another version or of other data (another fingerprint); the clock of the game at the save. */
+/* Open a saved game: false when it is not one, of a version not read (before 2, after this one) or of other data (another fingerprint); the clock of the game at the save. */
 bool dgx_ge_load_open(dgx_ge_load_t *l, const void *data, size_t size, uint32_t data_id, uint32_t *saved_ms);
 
 /* Go to a chunk by its tag (the first of that tag); false when there is none. Values are read from where it begins. */
@@ -72,6 +77,9 @@ uint32_t dgx_ge_load_u32(dgx_ge_load_t *l);
 int16_t  dgx_ge_load_i16(dgx_ge_load_t *l);
 int32_t  dgx_ge_load_i32(dgx_ge_load_t *l);
 void     dgx_ge_load_bytes(dgx_ge_load_t *l, void *bytes, size_t n);
+/* A param (written dgx_ge_save_i32): 32 bits; of a save of version 2, 16. Its bytes in the save being read: */
+int32_t dgx_ge_load_param(dgx_ge_load_t *l);
+#define DGX_GE_LOAD_PARAM_BYTES(l) ((l)->version < 3 ? 2u : 4u)
 /* Bytes left in the chunk. */
 size_t dgx_ge_load_left(const dgx_ge_load_t *l);
 

@@ -458,6 +458,54 @@ int main(void)
                 dgx_ge_frame_destroy(&fs), dgx_ge_frame_destroy(&fb);
                 dgx_screen_destroy(&straight), dgx_screen_destroy(&banded);
             }
+        /*
+         * A part of the display covered (a keyboard drawing there itself): nothing of the frame goes into it, to the
+         * pixel, at every scale, straight and through the band (an overlay elsewhere), smoothed or not, upside down
+         * too; the rest as without it. Uncovered, it is drawn anew as the frame has it.
+         */
+        for (int n = 1; n <= 4; ++n)
+            for (int way = 0; way < 4; ++way) {
+                dgx_screen_t   *plain = dgx_vscreen_init(n * W, n * H, 16, DgxScreenRGB), *hidden = dgx_vscreen_init(n * W, n * H, 16, DgxScreenRGB);
+                dgx_ge_frame_t *fp = dgx_ge_frame_create(plain, 0, 0, W, H), *fh = dgx_ge_frame_create(hidden, 0, 0, W, H);
+                CHECK(fp && fh && dgx_ge_frame_scale(fp, n) && dgx_ge_frame_scale(fh, n));
+                for (dgx_ge_frame_t *f = fp; f; f = f == fp ? fh : NULL) {
+                    dgx_ge_frame_set_palette(f, 0, 3, (const uint8_t[][3]){{0, 0, 0}, {255, 255, 255}, {255, 0, 0}});
+                    memcpy(f->canvas.pixels, dots, sizeof dots);
+                    if (way == 1) dgx_ge_frame_smooth(f, DGX_GE_SMOOTH_ON);
+                    if (way == 2) { /* an overlay beside the cover and one across its edge: through the band */
+                        dgx_ge_frame_overlays_begin(f);
+                        CHECK(dgx_ge_frame_overlay(f, &(dgx_ge_item_t){.flags = DGX_GE_ITEM_FILL, .clip = dgx_ge_rect(1, 1, 3, 2), .color = 2}));
+                        CHECK(dgx_ge_frame_overlay(f, &(dgx_ge_item_t){.flags = DGX_GE_ITEM_FILL, .clip = dgx_ge_rect(n * W / 2 - 1, n * H / 2, 4, 3), .color = 2}));
+                        dgx_ge_frame_overlays_end(f);
+                    }
+                    if (way == 3) dgx_ge_frame_upside_down(f, true); /* no orient of the display's: rows one by one */
+                }
+                /* odd edges: not on the points of the frame */
+                const dgx_ge_rect_t cover = dgx_ge_rect(n * W / 2 - 3, n * H / 2 - 1, n * 3 + 2, n * 2 + 1);
+                dgx_fill_rectangle(hidden, cover.x, cover.y, cover.w, cover.h, 0x1234);
+                dgx_ge_frame_cover(fh, cover);
+                dgx_ge_frame_present(fp), dgx_ge_frame_present(fh);
+                int differ = 0, sent_in = 0;
+                for (int y = 0; y < n * H; ++y)
+                    for (int x = 0; x < n * W; ++x) {
+                        const bool in = x >= cover.x && x < cover.x + cover.w && y >= cover.y && y < cover.y + cover.h;
+                        if (in && dgx_get_pixel(hidden, x, y) != 0x1234) ++sent_in;
+                        if (!in && dgx_get_pixel(plain, x, y) != dgx_get_pixel(hidden, x, y)) ++differ;
+                    }
+                CHECK(sent_in == 0 && differ == 0);
+                if (sent_in || differ) printf("covered, x%d, way %d: %d pixels sent into it, %d differ round it\n", n, way, sent_in, differ);
+                CHECK(!dgx_ge_frame_scroll(fh, 1, 0)); /* the display does not move its picture: all drawn again */
+                memcpy(fh->canvas.pixels, dots, sizeof dots), fh->dirty_count = 0;
+                dgx_ge_frame_cover(fh, dgx_ge_rect(0, 0, 0, 0)); /* uncovered: what was under it drawn as the frame has it */
+                CHECK(fh->dirty_count == 1);
+                dgx_ge_frame_present(fh);
+                differ = 0;
+                for (int y = 0; y < n * H; ++y)
+                    for (int x = 0; x < n * W; ++x) differ += dgx_get_pixel(plain, x, y) != dgx_get_pixel(hidden, x, y);
+                CHECK(differ == 0);
+                dgx_ge_frame_destroy(&fp), dgx_ge_frame_destroy(&fh);
+                dgx_screen_destroy(&plain), dgx_screen_destroy(&hidden);
+            }
         dgx_screen_destroy(&big);
     }
 
@@ -528,6 +576,25 @@ int main(void)
         CHECK(frame->pixels_sent == before);
         dgx_ge_scene_destroy(&keep);
     }
+    {
+        /*
+         * More than 4095 pieces (a layer of tiles of 16 on 1280 x 800: 81 x 51 cells): drawn in order still, the last
+         * of the set above the rest of its layer, an actor above the set of its layer, a later layer above the actor.
+         */
+        static const uint8_t seven[15] = {7};
+        dgx_ge_scene_t      *big       = dgx_ge_scene_create(frame, 2, 81 * 51, 8);
+        CHECK(big && !dgx_ge_scene_create(frame, 2, 65535, 1)); /* 65535 at most, set and actors */
+        if (big) {
+            for (int i = 0; i < 81 * 51 - 2; ++i) dgx_ge_scene_add(big, &(dgx_ge_item_t){.image = &sq, .map = i & 1 ? red : blue, .x = 20, .y = 5});
+            CHECK(dgx_ge_scene_add(big, &(dgx_ge_item_t){.image = &sq, .map = seven, .x = 20, .y = 5}) == 81 * 51 - 2);
+            CHECK(dgx_ge_scene_add(big, &(dgx_ge_item_t){.image = &sq, .map = blue, .x = 24, .y = 5, .layer = 1}) == 81 * 51 - 1);
+            dgx_ge_scene_actors_begin(big);
+            CHECK(dgx_ge_scene_actor(big, &(dgx_ge_item_t){.image = &sq, .map = red, .x = 22, .y = 5}));
+            dgx_ge_scene_render(big);
+            CHECK(at(frame, 20, 4) == 7 && at(frame, 22, 4) == 5 && at(frame, 24, 4) == 6 && at(frame, 27, 4) == 6);
+        }
+        dgx_ge_scene_destroy(&big);
+    }
     dgx_ge_scene_destroy(&scene);
     dgx_ge_frame_destroy(&frame);
     dgx_screen_destroy(&display);
@@ -575,6 +642,20 @@ int main(void)
         dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &dot, .color = 1, .scale = 2, .flags = DGX_GE_ITEM_REPEAT, .clip = dgx_ge_rect(0, 10, 11, 2)}, 0, 10,
                          dgx_ge_rect(0, 10, 11, 2), dgx_ge_rect(0, 10, 11, 2));
         CHECK(PX(0, 10) == 1 && PX(1, 11) == 1 && PX(2, 10) == 9 && PX(4, 10) == 1 && PX(8, 11) == 1 && PX(9, 10) == 1 && PX(10, 10) == 9 && PX(11, 10) == 9);
+        /* repeated, of an origin not at its top-left (1, 3 of a brick 4 x 4): the clip covered to its right and bottom edges, mirrored too */
+        static const uint8_t brick_bits[] = {0xF0, 0xF0, 0xF0, 0xF0};
+        const dgx_image_t    brick = {4, 4, 1, 3, 1, brick_bits};
+        for (int k = 0; k < 4; ++k) {
+            const bool flip = k & 1;
+            const int  n = k < 2 ? 1 : 2, h = k < 2 ? 7 : 9;
+            memset(px, 9, 16 * 12);
+            dgx_ge_item_draw(s8, &(dgx_ge_item_t){.image = &brick, .color = 1, .scale = (uint8_t)n, .flags = DGX_GE_ITEM_REPEAT | (flip ? DGX_GE_BLIT_FLIP_X : 0)},
+                             flip ? 2 * n : n, 3 * n, dgx_ge_rect(0, 0, 13, h), dgx_ge_rect(0, 0, 13, h));
+            bool covered = true;
+            for (int y = 0; y < 12; ++y)
+                for (int x = 0; x < 16; ++x) covered = covered && (PX(x, y) == 1) == (x < 13 && y < h);
+            CHECK(covered);
+        }
         /* scale 0 and 1: as DGX draws it */
         static uint8_t by_dgx[16 * 12];
         memset(px, 9, 16 * 12);

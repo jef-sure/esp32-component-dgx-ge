@@ -266,8 +266,7 @@ static void struck(dgx_ge_crowd_t *c, int by, int mask, int on, int on_mask)
     if (a->kind == DGX_GE_CROWD_FREE || b->kind == DGX_GE_CROWD_FREE || a->gone || b->gone || !dgx_ge_actor_hit(&a->actor, mask, on_mask, &hit)) return;
     const uint8_t p = kind_at(c, b->entry)[5];
     if (hit.damage && p != NO_PARAM && p < b->actor.anim->params) {
-        const int32_t v     = b->actor.params[p] - hit.damage;
-        b->actor.params[p] = (int16_t)(v < INT16_MIN ? INT16_MIN : v > INT16_MAX ? INT16_MAX : v);
+        b->actor.params[p] = dgx_ge_param((int64_t)b->actor.params[p] - hit.damage);
     }
     if (hit.event >= 0) dgx_ge_actor_event(&b->actor, hit.event, c->now_ms, said, c);
     if (hit.recoil >= 0) dgx_ge_actor_event(&a->actor, hit.recoil, c->now_ms, said, c);

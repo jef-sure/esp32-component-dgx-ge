@@ -98,7 +98,9 @@ int main(int argc, char **argv)
     for (int i = 0; i < c.places; ++i)
         if (c.members[i].kind != DGX_GE_CROWD_FREE) CHECK(dgx_ge_collisions_actor_of(c.bodies, i) == &c.members[i].actor);
 
-    /* on until it has eaten: a sheep hit (damage 2 off its hp, event eaten) lies dead, the wolf fed (recoil ate) */
+    /* on until it has eaten: a sheep hit (damage 2 off its hp, event eaten) lies dead, the wolf fed (recoil ate); hp past 16 bits */
+    for (int i = 0; i < c.places; ++i)
+        if (c.members[i].kind == TEST_BLOB_SHEEP) c.members[i].actor.params[TEST_SHEEP_PARAM_HP] = 40002;
     bool seen_dead = false;
     int  t         = 350;
     while (t < 60000 && c.members[w].actor.params[TEST_WOLF_PARAM_FOOD] == 0) {
@@ -107,7 +109,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < c.places; ++i) {
             const dgx_ge_member_t *m = &c.members[i];
             if (m->kind == TEST_BLOB_SHEEP && m->actor.script == TEST_SHEEP_SCRIPT_DEAD) {
-                CHECK(m->actor.params[TEST_SHEEP_PARAM_HP] == 3);
+                CHECK(m->actor.params[TEST_SHEEP_PARAM_HP] == 40000);
                 seen_dead = true;
             }
         }
@@ -173,7 +175,7 @@ int main(int argc, char **argv)
         grid.tileset = &tiles;
         CHECK(open_crowd(&c, &pack, TEST_BLOB_BLIND) && dgx_ge_crowd_start(&c, &pack, &kinds, &grid, 0));
         const int  eye = first_of(&c, TEST_BLOB_LOOKOUT);
-        const int16_t *p = c.members[eye].actor.params;
+        const int32_t *p = c.members[eye].actor.params;
         dgx_ge_crowd_play(&c, 150, NULL, NULL);
         CHECK(p[TEST_LOOKOUT_PARAM_D] == 50 && p[TEST_LOOKOUT_PARAM_FAR] == 50 && p[TEST_LOOKOUT_PARAM_HEDGE] == -1); /* the open: seen; no cell */
         CHECK(p[TEST_LOOKOUT_PARAM_REACH] == 40 && p[TEST_LOOKOUT_PARAM_NEAR] == -1); /* its nose reaches 40 at its second step: not yet */

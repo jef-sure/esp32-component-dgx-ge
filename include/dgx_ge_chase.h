@@ -20,7 +20,7 @@ extern "C" {
  *   never).
  * The game says whether it is ready by its own state (PoP: alive, its sword
  * drawn), moves the one that follows into the hero's scene (an actor all the
- * while: ~176 bytes) and gives the one that calms down back to the world (a
+ * while: ~200 bytes) and gives the one that calms down back to the world (a
  * record where it stands).
  *
  * The blob "DGCH", little-endian: "DGCH", version u16, count u16; 18 bytes a

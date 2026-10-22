@@ -82,7 +82,7 @@ typedef struct {
     uint32_t       *order; /* set and actors in the order they are drawn, see dgx_ge_scene.c */
 } dgx_ge_scene_t;
 
-/* A scene of layers, all moving with the window and in the order given, that holds so many pieces of the set and actors. */
+/* A scene of layers, all moving with the window and in the order given, that holds so many pieces of the set and actors (65535 at most in all). */
 dgx_ge_scene_t *dgx_ge_scene_create(dgx_ge_frame_t *frame, int layers, int set_capacity, int actor_capacity);
 void            dgx_ge_scene_destroy(dgx_ge_scene_t **scene);
 
@@ -110,7 +110,10 @@ static inline void dgx_ge_scene_layer_pixels(dgx_ge_scene_t *scene, int layer, b
 /* The open space the actors of a layer are seen in (DGX_GE_ITEM_OPEN_SPACE): fn and what it looks at, kept by the game; NULL none. */
 void dgx_ge_scene_space(dgx_ge_scene_t *scene, int layer, dgx_ge_space_fn fn, const void *space);
 
-/* Where the window of the scene is: the point at the top-left of the frame. */
+/*
+ * Where the window of the scene is: the point at the top-left of the frame. It moves as the scene is drawn next: what
+ * changes before that is drawn where it is, given before the window or after it.
+ */
 void dgx_ge_scene_window(dgx_ge_scene_t *scene, int x, int y);
 /*
  * Moved a little, with every layer of factor 256 (or in pixels of the display), the frame scrolls instead

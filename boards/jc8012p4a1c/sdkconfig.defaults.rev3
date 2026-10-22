@@ -1,0 +1,5 @@
+# The JC8012P4A1C with an ESP32-P4 of revision 3 (mine, 3.2), after sdkconfig.defaults: ESP-IDF's default build is for
+# it. The display reads 160 MB/s from PSRAM within a row: at 200 MHz a moving picture leaves it short now and then (a
+# frame flashes light blue); 250 MHz, which only a chip of revision 3 has, leaves it enough (DGX docs/dsi-display).
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400=y
+CONFIG_SPIRAM_SPEED_250M=y

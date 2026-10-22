@@ -24,11 +24,12 @@ extern "C" {
  * game may not move an object of the world behind its script's back; it
  * sends it events, and the script it goes into is a new point.
  *
- * The records are a ring: when it is full, a new one takes the place of the
- * oldest. A record kept (its script says keep: a sword laid down, a whole
- * pot, not its shards) is passed over: the oldest of the rest goes; when all are
- * kept, the new one does not go in. A record of DGX_GE_WORLD_PARAMS params
- * costs 24 bytes with two.
+ * The records are a ring: a new one goes into a free place; when there is
+ * none, it takes the place of the oldest. A record kept (its script says
+ * keep: a sword laid down, a whole pot, not its shards) is passed over: the
+ * oldest of the rest goes; when all are kept, the new one does not go in. A
+ * record put into a place freed among the others counts as old as that place
+ * in the ring. A record of DGX_GE_WORLD_PARAMS params (4 bytes each) costs 28 bytes with two.
  */
 #ifndef DGX_GE_WORLD_PARAMS
 #define DGX_GE_WORLD_PARAMS 2
@@ -44,7 +45,7 @@ typedef struct {
     uint8_t  box;      /* what it holds (a heap, a chest): its box + 1 (dgx_ge_world_boxes), 0 none */
     int32_t  x, y;   /* where it entered, 1/256 of a point of the scene */
     uint32_t since_ms; /* when, on the clock of the game */
-    int16_t  params[DGX_GE_WORLD_PARAMS]; /* its params then; the rest start as declared */
+    int32_t  params[DGX_GE_WORLD_PARAMS]; /* its params then; the rest start as declared */
 } dgx_ge_object_t;
 
 typedef struct dgx_ge_world dgx_ge_world_t;
@@ -59,7 +60,7 @@ void            dgx_ge_world_destroy(dgx_ge_world_t **world);
 /* Every record gone. */
 void dgx_ge_world_clear(dgx_ge_world_t *world);
 
-/* A new object; returns its handle. When the ring is full the oldest record not kept is lost to it; all kept: -1, it is not added. */
+/* A new object; returns its handle. In a free place; none, the oldest record not kept is lost to it; all kept: -1, it is not added. */
 int32_t dgx_ge_world_add(dgx_ge_world_t *world, const dgx_ge_object_t *object);
 
 /* The record of a handle; false when it is gone (removed, or lost to a newer one). */
@@ -92,15 +93,27 @@ void dgx_ge_object_of(dgx_ge_object_t *object, const dgx_ge_actor_t *actor);
 /*
  * Boxes: what objects hold inside, a heap of things on the floor, a chest.
  * So many, of so many places each, pockets without hands, of the kinds of a
- * pack; an object holds one (its box). False when there is no memory.
+ * pack; an object holds one (its box). False when there is no memory: none
+ * is made then.
  */
 bool dgx_ge_world_boxes(dgx_ge_world_t *world, struct dgx_ge_kinds *kinds, int count, int places);
 
 /* The box of an object, NULL none. */
 struct dgx_ge_pockets *dgx_ge_world_box(dgx_ge_world_t *world, int32_t handle);
 
-/* A box for a new object: its number + 1 (for dgx_ge_object_t.box), 0 none free. It is the object's once it is added. */
+/*
+ * A box for a new object: its number + 1 (for dgx_ge_object_t.box), empty. It is the object's once it is added. None
+ * free: the oldest record not kept that holds one gives it up and is forgotten, as a record gives way in
+ * dgx_ge_world_add (the world remembers a thing whole or not at all); 0 when every box is held by a kept record.
+ */
 int dgx_ge_world_new_box(dgx_ge_world_t *world);
+
+/*
+ * An object added with what a character holds (an actor leaving the scene): a box for it when the pockets hold
+ * anything (dgx_ge_world_new_box), the object, then all of the pockets that fits moved into the box (no event: as it
+ * is held). Its handle; -1 when there is no box or no place for it, the world and the pockets as they were.
+ */
+int32_t dgx_ge_world_add_holding(dgx_ge_world_t *world, const dgx_ge_object_t *object, struct dgx_ge_pockets *pockets, uint32_t now_ms);
 
 /*
  * Laying a thing down: so many of it, where one stands. The same things

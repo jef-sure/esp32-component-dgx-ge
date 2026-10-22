@@ -212,5 +212,14 @@ int main(void)
     dgx_ge_textbox_set(&box, many, &plain, false, 0);
     CHECK(box.lines == 300 && box.cut && !box.scrolling);
     dgx_ge_textbox_free(&box);
+
+    /* a box nothing was laid in yet (zeroed, freed, or made and never set): a button, time, a scroll change nothing, draw nothing */
+    memset(&box, 0, sizeof box);
+    CHECK(!dgx_ge_textbox_appear_all(&box) && !dgx_ge_textbox_play(&box, 100) && !dgx_ge_textbox_scroll(&box, 1) && !dgx_ge_textbox_appearing(&box));
+    dgx_ge_textbox_appear(&box, 20, 0);
+    CHECK(!dgx_ge_textbox_appear_all(&box) && !dgx_ge_textbox_play(&box, 100));
+    CHECK(dgx_ge_textbox_init(&box, 60, 26, 0));
+    CHECK(!dgx_ge_textbox_appear_all(&box) && !dgx_ge_textbox_play(&box, 100) && points(&box) == 0);
+    dgx_ge_textbox_free(&box);
     CHECK_DONE();
 }

@@ -17,7 +17,7 @@ static float its_value(unsigned k)
 {
     const dgx_ge_its_t *w = dgx_ge_expr_its;
     if (!w) return 0;
-    if (k < ITS_VX) return w->params && (int)k < w->count ? w->params[k] : 0;
+    if (k < ITS_VX) return w->params && (int)k < w->count ? (float)w->params[k] : 0;
     switch (k) {
     case ITS_VX: return w->vx;
     case ITS_VY: return w->vy;
@@ -61,7 +61,7 @@ float dgx_ge_expr_eval(const uint8_t *p, const dgx_ge_expr_ctx_t *c)
             break;
         case E_PARAM:
             PUSHES(0);
-            stack[depth++] = p[i] < c->param_count ? c->params[p[i]] : 0;
+            stack[depth++] = p[i] < c->param_count ? (float)c->params[p[i]] : 0;
             ++i;
             break;
         case E_T: PUSHES(0); stack[depth++] = c->t; break;
@@ -69,7 +69,11 @@ float dgx_ge_expr_eval(const uint8_t *p, const dgx_ge_expr_ctx_t *c)
         case E_VY: PUSHES(0); stack[depth++] = c->vy; break;
         case E_X: PUSHES(0); stack[depth++] = c->x; break;
         case E_Y: PUSHES(0); stack[depth++] = c->y; break;
-        case E_NOW: PUSHES(0); stack[depth++] = (float)c->now_ms / 1000.0f; break;
+        case E_NOW:
+            /* the whole seconds exact (a moment kept in a param is met at its second), the rest within half a step of a float */
+            PUSHES(0);
+            stack[depth++] = (float)(c->now_ms / 1000) + (float)(c->now_ms % 1000) / 1000.0f;
+            break;
         case E_FIELD: {
             PUSHES(3);
             const uint32_t word  = p[i] < c->word_count && c->words ? c->words[p[i]] : 0;

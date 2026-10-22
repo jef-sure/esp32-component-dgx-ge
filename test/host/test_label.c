@@ -53,6 +53,14 @@ int main(void)
     memset(long_text, 'x', sizeof long_text - 1), long_text[sizeof long_text - 1] = 0;
     dgx_ge_label_set(&score, long_text);
     CHECK(strlen(score.text) == DGX_GE_LABEL_TEXT - 1);
+    /* Cyrillic, two bytes a letter: cut between letters, never in one; the same again: nothing laid, nothing marked */
+    char cyrillic[81] = "";
+    for (int i = 0; i < 40; ++i) strcat(cyrillic, "\xd0\xb6"); /* ж */
+    dgx_ge_label_set(&score, cyrillic);
+    CHECK(strlen(score.text) == 30 && !strncmp(score.text, cyrillic, 30));
+    dgx_ge_frame_present(frame);
+    dgx_ge_label_set(&score, cyrillic);
+    CHECK(frame->dirty_count == 0);
 
     dgx_ge_label_free(&score);
     dgx_ge_scene_destroy(&scene);

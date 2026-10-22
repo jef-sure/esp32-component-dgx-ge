@@ -4,8 +4,8 @@ The layout of a field of text exactly as the engine makes it
 lines (a word wider than a line by characters, '\\n' breaks), the largest
 scale of the font that fits but not below the style's least; still too
 much: an important text scrolls, another is cut, its last line seen ending
-in "...". The font as dgx_ge_font.py reads it. Bytes of UTF-8 throughout, as
-the engine counts them.
+in "...". The font as DGX's font2c/dgx_fonts.py reads it (json). Bytes of
+UTF-8 throughout, as the engine counts them.
 """
 
 LINE_BYTES = 160

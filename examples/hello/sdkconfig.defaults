@@ -1,0 +1,4 @@
+# The game's own part of the sdkconfig, after the board's (CMakeLists.txt gives the list): the loop steps by vTaskDelay
+# in milliseconds, so a tick a millisecond.
+CONFIG_FREERTOS_HZ=1000
+CONFIG_COMPILER_OPTIMIZATION_PERF=y

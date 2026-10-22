@@ -25,18 +25,21 @@ extern "C" {
  * time it took is kept in thousandths, so no step is ever lost or gained.
  *
  * Cutting corners (corner, points; 0 never: a ghost): a turn asked for no
- * farther than so many points before the middle of a cell, or past it, is
- * taken at once where that side is open there: it goes the new way already,
- * and what it is off the middle across it (off) goes as far toward it as it
- * goes on — a corner cut on the slant, as the arcade's Pac-Man. Turning
- * before the middle is coming to that cell: the game hears it (arrive) then.
+ * farther than so many points before the middle of a cell, or past it (a
+ * cell at most), is taken at once where that side is open there: it goes the
+ * new way already, and what it is off the middle across it (off) goes as far
+ * toward it as it goes on — a corner cut on the slant, as the arcade's
+ * Pac-Man. Turning before the middle is coming to that cell: the game hears
+ * it (arrive) then. A turn asked while it is still off the middle is taken
+ * at the next middle; turned back in a cut and then off it, it goes to the
+ * middle it is off first.
  * Sides are DGX_GE_SIDE_* (dgx_ge_graph.h: left 0, right 1, up 2, down 3).
  */
 #define DGX_GE_WALK_STILL (-1)
 
 typedef struct dgx_ge_walker {
     int16_t  col, row;  /* the cell whose middle it passed last (or stands at) */
-    int32_t  pos;       /* 1/256 of a point from that middle, the way it goes */
+    int32_t  pos;       /* 1/256 of a point from that middle, the way it goes (below 0: short of it, out of a corner) */
     int8_t   dir;       /* the side it goes to, DGX_GE_WALK_STILL standing */
     int8_t   want;      /* the side asked for, -1 none */
     uint8_t  kind;      /* the game's: who it is (for open) */

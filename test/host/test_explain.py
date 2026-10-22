@@ -170,5 +170,11 @@ with tempfile.TemporaryDirectory() as tmp:
     told = out.getvalue()
     if not ("## WOLF" in told and "## SHEEP" in told and "`eaten`" in told and "JAWS" in told and told.index("WOLF (hunt: hit)") < told.index("## WOLF")):
         failed.append(f"the command line: {told[:300]}")
+# --help: what the command line takes, not an unknown option
+out = io.StringIO()
+with contextlib.redirect_stdout(out):
+    explain_main(["--help"])
+if "--lang" not in out.getvalue():
+    failed.append(f"--help: {out.getvalue()[:200]}")
 print("test_explain.py: ok" if not failed else "test_explain.py: " + "\n".join(failed))
 sys.exit(1 if failed else 0)

@@ -97,10 +97,27 @@ bool dgx_ge_mixer_init(dgx_ge_mixer_t *mixer, const dgx_ge_sounds_t *sounds, int
     return true;
 }
 
+/* The platform's lock round every call: its task fills while the game plays. */
+static void take(const dgx_ge_mixer_t *mixer)
+{
+    if (mixer->lock) mixer->lock(true);
+}
+
+static void give(const dgx_ge_mixer_t *mixer)
+{
+    if (mixer->lock) mixer->lock(false);
+}
+
 void dgx_ge_mixer_free(dgx_ge_mixer_t *mixer)
 {
+    /* the lock and the channels kept: a task still filling gets silence, as many samples as before */
+    take(mixer);
+    void (*lock)(bool)     = mixer->lock;
+    const uint8_t channels = mixer->channels;
     free(mixer->voices);
     memset(mixer, 0, sizeof(*mixer));
+    mixer->lock = lock, mixer->channels = channels;
+    give(mixer);
 }
 
 /* The next sample of a stream of an ADPCM sound: its nibble number n. */
@@ -145,7 +162,7 @@ static void restart(dgx_ge_voice_t *v, const uint8_t *start)
     take_frame(v);
 }
 
-int dgx_ge_mixer_play(dgx_ge_mixer_t *mixer, int sound, uint8_t volume, int8_t pan)
+static int play(dgx_ge_mixer_t *mixer, int sound, uint8_t volume, int8_t pan)
 {
     const uint8_t *e = entry(mixer->sounds, sound);
     if (!e || !mixer->voices) return -1;
@@ -169,22 +186,36 @@ int dgx_ge_mixer_play(dgx_ge_mixer_t *mixer, int sound, uint8_t volume, int8_t p
     return at;
 }
 
+int dgx_ge_mixer_play(dgx_ge_mixer_t *mixer, int sound, uint8_t volume, int8_t pan)
+{
+    take(mixer);
+    const int at = play(mixer, sound, volume, pan);
+    give(mixer);
+    return at;
+}
+
 void dgx_ge_mixer_stop(dgx_ge_mixer_t *mixer, int sound)
 {
+    take(mixer);
     for (int i = 0; mixer->voices && i < mixer->voice_count; ++i)
         if (sound < 0 || mixer->voices[i].sound == sound) mixer->voices[i].data = NULL;
+    give(mixer);
 }
 
 void dgx_ge_mixer_volume(dgx_ge_mixer_t *mixer, uint8_t volume)
 {
+    take(mixer);
     mixer->volume = volume;
+    give(mixer);
 }
 
 bool dgx_ge_mixer_busy(const dgx_ge_mixer_t *mixer)
 {
-    for (int i = 0; mixer->voices && i < mixer->voice_count; ++i)
-        if (mixer->voices[i].data) return true;
-    return false;
+    bool busy = false;
+    take(mixer);
+    for (int i = 0; mixer->voices && i < mixer->voice_count && !busy; ++i) busy = mixer->voices[i].data != NULL;
+    give(mixer);
+    return busy;
 }
 
 /* A sample by a volume of 0..255, 255 the sample itself. */
@@ -195,6 +226,7 @@ static int32_t scaled(int32_t s, int volume)
 
 void dgx_ge_mixer_fill(dgx_ge_mixer_t *mixer, int16_t *out, int frames)
 {
+    take(mixer);
     const int ch = mixer->channels;
     for (int f = 0; f < frames; ++f) {
         int32_t sum[2] = {0, 0};
@@ -237,6 +269,7 @@ void dgx_ge_mixer_fill(dgx_ge_mixer_t *mixer, int16_t *out, int frames)
             out[f * ch + c] = (int16_t)(s < -32768 ? -32768 : s > 32767 ? 32767 : s);
         }
     }
+    give(mixer);
 }
 
 static void output_play(void *ctx, int sound)

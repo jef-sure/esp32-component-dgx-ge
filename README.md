@@ -11,10 +11,11 @@ engine, with its traps, doors, guards and fights described as data, and far
 less C of its own than the original had. Neither that game nor anything of
 it comes with the engine; it is only what the engine was checked on.
 
-This is version 0.1.0. Since the first one it has learned to read whole
-games from my sprite editor's files (scenes, the graph of scenes, links,
-the game's own data), to let DGX make its fonts for each board, and to
-start on three boards I keep on my desk. Its interfaces will still change.
+It is young: what each version brought is in [CHANGES.md](CHANGES.md).
+Lately it has learned to read whole games from my sprite editor's files
+(scenes, the graph of scenes, links, the game's own data), to let DGX make
+its fonts for each board, and to start on three boards I keep on my desk.
+Its interfaces will still change.
 
 ## What is in it
 
@@ -41,7 +42,8 @@ start on three boards I keep on my desk. Its interfaces will still change.
   when the game uses it: a pointer, gestures and an on-screen pad become the
   engine's input.
 - **A sound mixer** of 8-bit and IMA ADPCM samples, mono or stereo; the
-  platform sends what it mixes.
+  platform sends what it mixes, from a task of its own if it likes, with
+  its lock given to the mixer, so the game never takes one.
 - **Python tools** (`tools/`) that turn pictures, scripts, dialogs and
   sounds into one pack and a C header for it, also straight from a file of
   my sprite editor: its sets, animations, tiles, scenes, graph and game.
@@ -49,21 +51,38 @@ start on three boards I keep on my desk. Its interfaces will still change.
 The engine itself knows no board: the game sets up its own display, touch
 and sound and gives the engine a DGX screen. For the boards games have run
 on (the CYD; the Guition JC8012P4A1C, 10", and JC1060P470, 7") `boards/`
-has ready set-up code, which the library does not build: a game takes one
-board into its own build (`boards/<board>.cmake`), or copies its file into
-`main/` and changes it.
-The engine is plain C and builds on a host as well, which is how it is
-tested.
+has ready set-up code, a directory a board, which the library does not
+build: a game takes one board into its own build
+(`boards/<board>/board.cmake`) with the ESP-IDF settings it needs
+(`boards/<board>/sdkconfig.defaults`, and on an ESP32-P4 one for its chip's
+revision), or copies them into its project and changes them.
+
+One of the boards is the computer itself, `boards/host`: the game's own
+`main.c` in a window of SDL2, the display of a board shown in it, the mouse
+a finger, the keys buttons, SDL's sound, NVS in files. A Makefile of the
+game includes `boards/host/host.mk` and `make` builds it (DGX 0.8.0 or
+newer). The example `examples/hello` builds both ways, for the computer and
+for the boards. All of it, from what to install to how the computer stands
+in for a board and what it cannot show (speed, memory), is in
+[docs/host-en.md](docs/host-en.md) ([по-русски](docs/host-ru.md)). The engine itself is
+plain C and is tested on a host too.
 
 ## Getting started
 
-You need ESP-IDF 5.3 or newer. The engine is in the ESP Component Registry;
-add it to the project's `main`, and DGX 0.7.2 or newer comes along by
+You need ESP-IDF 5.3 or newer; I build the engine, the boards and the game
+it was checked on with 6.0. The engine is in the ESP Component Registry;
+add it to the project's `main`, and DGX 0.8 comes along by
 itself:
 
 ```sh
 idf.py add-dependency "jef-sure/dgx-ge^0.1.1"
 ```
+
+DGX builds only what the project's `sdkconfig` turns on: the engine's
+frame needs its virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`), and the
+display its bus and driver; without them the link stops at their missing
+functions. Each board's `.cmake` names its own, and the PSRAM a board with
+a large display needs for its frame buffers.
 
 The component manager puts it into `managed_components/jef-sure__dgx-ge`
 and makes `main` require it, so `main/CMakeLists.txt` needs no `REQUIRES`
@@ -116,7 +135,11 @@ In English and in Russian:
   how the engine is built and how a game is made on it, for someone who has
   never made one;
 - [docs/animation-en.md](docs/animation-en.md) ([по-русски](docs/animation-ru.md)):
-  the language of the animation scripts.
+  the language of the animation scripts;
+- [docs/workflow-en.md](docs/workflow-en.md) ([по-русски](docs/workflow-ru.md)):
+  the way of a game from its data, whatever made them, to the board;
+- [docs/host-en.md](docs/host-en.md) ([по-русски](docs/host-ru.md)):
+  a game built and run on the computer.
 
 The API itself is described in the headers, `include/*.h`.
 

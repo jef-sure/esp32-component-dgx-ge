@@ -41,6 +41,7 @@ class Graph:
     def __init__(self, name):
         self.name = name
         self.maps = []        # (name, data blob name, rules text, the number it is named by)
+        self.paths = {}       # map name -> the file of its rules, for their errors
         self.scenes = []      # [map index, number in the map, kind, sides, event of coming in, events of leaving by the sides]
         self.exits = []       # (from, of map, to, name, entry, transition)
         self.entries = []     # (scene, name, x, y, left, arrive event name, the first link it fires)
@@ -54,16 +55,18 @@ class Graph:
             raise ValueError(f"graph {self.name}: 255 names at most")
         return names.index(name)
 
-    def map(self, name, data=None, rules=None, number=0):
+    def map(self, name, data=None, rules=None, number=0, path=None):
         """
         A map (a cloud of scenes that share data): the blob of its data, the text of its rules (None: none), the number
-        the game names it by (0 none).
+        the game names it by (0 none); path: the file of the rules, for their errors.
         """
         if any(m[0] == name for m in self.maps):
             raise ValueError(f"graph {self.name}: map {name} twice")
         if not 0 <= number <= 0xFFFF:
             raise ValueError(f"graph {self.name}: map {name} numbered {number}")
         self.maps.append((name, data, rules, number))
+        if path:
+            self.paths[name] = path
         return len(self.maps) - 1
 
     def _map_index(self, name):
@@ -82,17 +85,24 @@ class Graph:
         self.scenes.append([self._map_index(map_name), index, KINDS.get(kind, kind), [NONE] * 4, on_enter, [None] * 4])
         return len(self.scenes) - 1
 
+    def _side(self, side):
+        if side not in SIDES:
+            raise ValueError(f"graph {self.name}: no side {side} ({', '.join(SIDES)})")
+        return SIDES[side]
+
     def side(self, a, side, b):
         """From scene a by a side to scene b (one way)."""
-        self.scenes[a][3][SIDES[side]] = b
+        self.scenes[a][3][self._side(side)] = b
 
     def leave(self, a, side, event):
         """The event a's map's rules are told as one leaves scene a by a side (with no scene beside: an edge out)."""
-        self.scenes[a][5][SIDES[side]] = event
+        self.scenes[a][5][self._side(side)] = event
 
     def exit(self, frm, name, to, entry, transition="cut"):
         """An exit by a name: of a scene (a number), or of a map (its name), to a scene, its entry, by a transition."""
         of_map = isinstance(frm, str)
+        if transition not in TRANSITIONS:
+            raise ValueError(f"graph {self.name}: exit {name}: no transition {transition} ({', '.join(TRANSITIONS)})")
         self.exits.append((self._map_index(frm) if of_map else frm, of_map, to, self._name(self.exit_names, name),
                            self._name(self.entry_names, entry), TRANSITIONS[transition]))
 
@@ -119,6 +129,19 @@ class Graph:
                 raise ValueError(f"graph {self.name}: an exit of no scene")
         if self.begin is None:
             raise ValueError(f"graph {self.name}: no start")
+        # what the references name is there: the scene beside a side, the entry an exit or the start comes in by (to a
+        # room: a show plays from its start)
+        for i, (_, _, _, sides, _, _) in enumerate(self.scenes):
+            for side, to in zip(SIDES, sides):
+                if to != NONE and not 0 <= to < len(self.scenes):
+                    raise ValueError(f"graph {self.name}: scene {i}: by the {side} to scene {to}, which is not")
+        if any(not 0 <= scene < len(self.scenes) for scene, *_ in self.entries):
+            raise ValueError(f"graph {self.name}: an entry of no scene")
+        entries = {(scene, name) for scene, name, *_ in self.entries}
+        for what, scene, entry in [(f"exit {self.exit_names[name]}", to, entry) for _, _, to, name, entry, _ in self.exits] + \
+                                  [("the start", *self.begin)]:
+            if self.scenes[scene][2] == KINDS["room"] and (scene, entry) not in entries:
+                raise ValueError(f"graph {self.name}: {what} comes in by entry {self.entry_names[entry]}, which its scene {scene} has not")
         out = struct.pack("<IHHHHBBHBB", MAGIC, VERSION, len(self.scenes), len(self.exits), len(self.entries), len(self.maps), 0,
                           self.begin[0], self.begin[1], 0)
         for name, data, rules, number in self.maps:

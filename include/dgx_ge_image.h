@@ -58,7 +58,8 @@ void dgx_ge_canvas_fill(const dgx_ge_canvas_t *canvas, dgx_ge_rect_t r, uint8_t 
 /*
  * Repeated: its picture laid again and again over its clip, the first with
  * its origin at x, y, the next a picture's width on, a height down (the edge
- * of a frame, a floor of tiles of one picture). Its clip is where it lies.
+ * of a frame, a floor of tiles of one picture), each about its origin as one
+ * picture alone (mirrored round it too). Its clip is where it lies.
  */
 #define DGX_GE_ITEM_REPEAT 0x10u
 /*

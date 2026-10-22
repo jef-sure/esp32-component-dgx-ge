@@ -24,7 +24,7 @@ extern "C" {
 typedef struct {
     dgx_ge_rect_t box;    /* the tiles of the area, cut to the overlap, points of the scene */
     int16_t       cx, cy; /* its middle, weighed by how many points meet in each tile */
-    uint16_t      points; /* how many points meet */
+    uint16_t      points; /* how many points meet (0xFFFF: so many or more) */
 } dgx_ge_area_t;
 
 /* areas given at most for one pair of masks; more are joined to the last */
@@ -96,6 +96,11 @@ unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, boo
  */
 unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach,
                                       const dgx_ge_rect_t *solids, int count, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES]);
+
+/* The same, the other solids told by a function: is a point inside one of them (the bodies of a grid, however many)? */
+typedef bool (*dgx_ge_solid_fn)(int x, int y, void *ctx);
+unsigned dgx_ge_mask_touch_rect_where(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach,
+                                      dgx_ge_solid_fn inside, void *ctx, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES]);
 
 /* The same against another mask placed: a point of a touches b where b has the point, or one up to reach points away on that side. */
 unsigned dgx_ge_mask_touch_mask(const dgx_ge_mask_t *a, dgx_ge_rect_t pa, bool fa, const dgx_ge_mask_t *b, dgx_ge_rect_t pb, bool fb, int reach,

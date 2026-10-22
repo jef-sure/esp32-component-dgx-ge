@@ -73,12 +73,13 @@ void dgx_ge_item_draw(dgx_screen_t *into, const dgx_ge_item_t *item, int x, int 
         else dgx_image_blit(into, x, y, item->image, &how);
         return;
     }
-    /* repeated: from the first picture that reaches into what is drawn, a step its size */
-    const int w = item->image->width * n, h = item->image->height * n;
+    /* repeated: from the first picture that reaches into what is drawn, a step its size; a picture lies off its origin by the box of one there */
+    const dgx_ge_rect_t one = dgx_ge_image_box_scaled(item->image, 0, 0, item->flags & DGX_GE_BLIT_FLIP_X, n);
+    const int           w = one.w, h = one.h;
     if (w < 1 || h < 1) return;
-    const int x0 = x + floor_div(clip.x - x, w) * w, y0 = y + floor_div(clip.y - y, h) * h;
-    for (int ty = y0 > y ? y0 : y; ty < clip.y + clip.h; ty += h)
-        for (int tx = x0 > x ? x0 : x; tx < clip.x + clip.w; tx += w) {
+    const int x0 = x + floor_div(clip.x - x - one.x, w) * w, y0 = y + floor_div(clip.y - y - one.y, h) * h;
+    for (int ty = y0 > y ? y0 : y; ty + one.y < clip.y + clip.h; ty += h)
+        for (int tx = x0 > x ? x0 : x; tx + one.x < clip.x + clip.w; tx += w) {
             if (n > 1) blit_scaled(into, tx, ty, item->image, item, clip, n);
             else dgx_image_blit(into, tx, ty, item->image, &how);
         }

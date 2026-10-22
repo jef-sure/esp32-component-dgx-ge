@@ -115,7 +115,7 @@ int main(int argc, char **argv)
 
     /* masks: by index, from the origin; a picture without masks has none */
     dgx_ge_mask_t m[4];
-    CHECK(pack.masks == 6); /* three here, and the crowd's wolf (body, jaws) and sheep (body) */
+    CHECK(pack.masks == 7); /* three here, the crowd's wolf (body, jaws) and sheep (body), and the slab of the tiles' test */
     CHECK(dgx_ge_pack_masks(&pack, TEST_IMG_FOUR, m, 4) == 2);
     CHECK(m[0].index == 1 && m[0].x == 0 && m[0].y == -1 && m[0].width == 3 && m[0].height == 2 && m[0].bits[0] == 0xA0 && m[0].bits[1] == 0xC0);
     CHECK(m[1].index == 2 && m[1].x == 3 && m[1].width == 2 && m[1].bits[0] == 0xC0);

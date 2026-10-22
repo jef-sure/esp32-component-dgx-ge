@@ -1,0 +1,21 @@
+# Guition JC8012P4A1C: an ESP32-P4 with a 10.1-inch 800x1280 JD9365 on MIPI-DSI, 16 MB flash, 32 MB PSRAM. What the
+# board needs of a game's sdkconfig, with the file of its chip's revision after this one and the game's own last:
+# SDKCONFIG_DEFAULTS="<this>;<this>.rev3;<the game's>" (a later file over an earlier). The board comes with a chip of
+# revision 3 (mine, 3.2: sdkconfig.defaults.rev3) or below 3 (sdkconfig.defaults.rev1); a build for one does not start
+# on the other.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# DGX: the panel, its bus and the virtual screens the engine draws into
+CONFIG_DGX_ENABLE_DSI=y
+CONFIG_DGX_ENABLE_JD9365=y
+CONFIG_DGX_ENABLE_VSCREEN=y
+
+# The frame buffers the display is sent from live in PSRAM (its speed: the file of the revision)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_CACHE_L2_CACHE_256KB=y
+
+# the flash of the JC8012P4A1C is a Boya chip: its own driver, as ESP-IDF advises at start ("Detected boya flash chip but using generic driver")
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y

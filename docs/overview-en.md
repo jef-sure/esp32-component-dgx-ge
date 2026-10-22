@@ -253,7 +253,7 @@ picture.
 **Nothing is copied needlessly.** Pictures, animations and all the game's
 data are read straight from flash, where they lie. Anything that is not
 doing anything is kept as a small record rather than as an actor: a thing
-in a pocket is 8 bytes, a flying bullet 16, an object in a room nobody is
+in a pocket is 12 bytes, a flying bullet 16, an object in a room nobody is
 looking at is a record of when and where it entered its script. Only what
 is living on the scene right now becomes an actor, which is about two
 hundred bytes.
@@ -310,6 +310,16 @@ Along with the pack you get a C header in which everything has a number:
 `MYGAME_IMG_HERO_STAND`, `MYGAME_HERO_SCRIPT_RUN`,
 `MYGAME_HERO_EVENT_JUMP`. The code refers to resources only by these
 numbers, so the compiler catches a typo in a name.
+
+The prefix (`MYGAME`) is written in capitals, digits and `_`, starting with
+a capital: it begins every name in the header, and the build looks for the
+pack's params by it. Other names are turned into header names as they are
+added: letters and digits stay, anything else becomes `_`, everything is
+upper case (`stand-1` gives `MYGAME_IMG_STAND_1`). Two names that come out
+the same, such as `stand-1` and `stand_1`, are an error, and so is a blob
+named like one the packer adds by itself (`STRINGS`, `GAME`, `TIMERS`,
+`STYLES`, `CHASE`, `SOUNDS`). `write` writes the pack and its header
+together: if either cannot be written, both old files stay as they were.
 
 On the board:
 
@@ -403,7 +413,10 @@ draws and sends on its own.
   consoles: `DGX_GE_SMOOTH_ON` is Scale2x (Scale3x at ×3, Scale2x twice at
   ×4), `DGX_GE_SMOOTH_SFX` their SFX variants, which keep thin slanted lines
   whole but cost more. The colors stay the same. DGX does the work, the
-  same way with overlays and without.
+  same way with overlays and without. A smoothed point looks at its
+  neighbours, so a changed place goes to the display with a margin of one
+  point around it (two with SFX or at ×4); unsmoothed, nothing extra is
+  sent.
 - **Overlays in display pixels.** On a large display, text and dialogs are
   drawn at the real resolution over the enlarged frame, not as big squares.
   This takes hardly any extra memory. Pictures in them (controls, a
@@ -420,6 +433,10 @@ draws and sends on its own.
 - **Scrolling** (`dgx_ge_frame_scroll`). When the scene's window has moved,
   the frame's pixels are moved in memory, and the display, if it can, moves
   the picture by itself. Only the strips that came into view are drawn.
+  An overlay that stands still is sent again where it is and where the
+  display's move carried it. A change of the scene may come before the
+  window moves or after it in the same frame: either way it is drawn where
+  it is.
 
 ### 2.5. The scene
 
@@ -431,6 +448,11 @@ draws nothing itself.
 dgx_ge_scene_t *scene = dgx_ge_scene_create(frame, 4, 300, 16);  /* layers, set pieces, actors */
 dgx_ge_scene_layer(scene, LAYER_SKY, 0, DGX_GE_ORDER_ADDED);     /* the sky stays put */
 ```
+
+Set pieces and actors together can number up to 65535. A large display
+needs many: a layer of 16-point tiles on 1280×800 is 81×51 = 4131 pieces
+for every piece a cell is drawn with. Each set piece costs 32 bytes on a
+32-bit chip (the item and its place in the order of drawing).
 
 #### An item is anything you can see
 
@@ -460,19 +482,27 @@ dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = im, .map = maps[set],
   compares them with the previous frame itself. An actor that has not moved
   is not redrawn.
 
-The set and the actors of one layer are sorted together, so a piece of the
-set can stand in front of one actor and behind another: the key decides.
+The set and the actors of one layer are sorted together, by the **key**: a
+number of order within the layer, like `z-index` in CSS: a smaller key is
+drawn first, a larger one over it. The layer gives the rough order (the
+backdrop, the heroes, the foreground), the key the exact one within it. So
+a piece of the set can stand in front of one actor and behind another:
+their keys lie on either side of its key.
 
-#### Redrawing, and rebuilding quietly
+#### Redrawing, and rebuilding without redrawing
 
 Nothing is saved from under sprites. A changed place is simply drawn again,
 layer by layer from the bottom up. The frame is in memory anyway, and this
 is cheaper.
 
-If you need to rebuild the whole set but send only a small piece (one tile
-changed), there is a "quiet" mode: between `dgx_ge_scene_set_begin()` and
-`dgx_ge_scene_set_end()` whatever is added marks nothing, and the game says
-itself what changed (`dgx_ge_scene_invalidate`).
+Usually whatever is added to the scene or taken out of it is marked
+changed, and that place is then drawn and sent to the display. Sometimes it
+is simpler to build the whole set again though one tile changed on the
+screen. Then the building goes between `dgx_ge_scene_set_begin()` and
+`dgx_ge_scene_set_end()`: there whatever is added marks nothing, the scene
+does not take the whole screen as changed, and the game says itself which
+place really changed (`dgx_ge_scene_invalidate`). Only that goes to the
+display.
 
 #### The window and parallax
 
@@ -547,7 +577,8 @@ dgx_ge_grid_add(&grid, scene);            /* the pieces of every cell go into th
 When a cell changes, the grid lays out again only what the change reaches
 (`dgx_ge_grid_relay`). For that the game gives it a little memory (`laid`:
 2 bytes a cell). If relaying fails, the game rebuilds the whole set
-"quietly":
+without redrawing the whole screen: the failed relay has already marked the
+place of the changed cell itself.
 
 ```c
 uint16_t laid[20 * 12 + 1];
@@ -577,9 +608,9 @@ did in code is data here:
 A **modifier** is a number in a cell that the game or a script changes: how
 far a gate is raised, which frame the spikes are on.
 
-What data cannot express is drawn by a **hook** of the game: a function the
-engine calls for each cell. A Prince of Persia room needs no hook; it is
-data from end to end.
+What data cannot express is drawn by a **callback** of the game: a
+function the engine calls for each cell (the grid's `draw`). A Prince of
+Persia room needs no callback; it is data from end to end.
 
 Details are in `include/dgx_ge_tiles.h`.
 
@@ -703,6 +734,9 @@ if (hero.params[MYGAME_HERO_PARAM_HP] <= 0) dgx_ge_actor_event(&hero, MYGAME_HER
 
 How many params each actor keeps is worked out by the pack build: as many
 as the greediest animation needs (Part 3, "Try it", `dgx_ge_params_of_pack`).
+A param is a whole number of 32 bits (`int32_t`), 8 bytes of an actor
+with the value it entered its script with; the starting values in the
+pack are of 16 bits.
 
 #### Scripts in plain words
 
@@ -734,12 +768,15 @@ the game.
 
 When there are many bodies, a **registry** keeps them
 (`dgx_ge_collisions_t`). `dgx_ge_collisions_look()` checks only the bodies
-that moved, and only against those they can reach. Who meets whom at all:
+that moved, and only against those they can reach. Which pairs of bodies
+are checked at all:
 
-- bodies of the same **owner** (a hand and the sword in it) never meet;
-- bodies of the same **side** (the hero and the stone he threw) meet by the
-  `own` table, bodies of different sides by the `foreign` table. Both live
-  in the pack:
+- bodies of the same **owner** (a hand and the sword in it) are not checked
+  against each other: in the picture they overlap all the time, and that is
+  no collision;
+- bodies of the same **side** (the hero and the stone he threw) are checked
+  when the pair of masks is in the `own` table, bodies of different sides
+  when it is in the `foreign` table. Both tables live in the pack:
 
 ```
 foreign TIP BODY      # a tip wounds
@@ -758,7 +795,7 @@ Collisions only report; they never move anyone.
   holding and throwing are script commands.
 - **Pockets** (`dgx_ge_pockets.h`) are what a character carries besides its
   hands: a sword in its sheath, daggers in a belt. A thing in a pocket does
-  nothing, so it is not an actor but an 8-byte record. The script takes
+  nothing, so it is not an actor but a 12-byte record. The script takes
   things out and puts them away (`draw hand SWORD`, `stow hand`).
 - **Shots** (`dgx_ge_shots.h`) are bullets and arrows. There are many of
   them and they live briefly, so they are not actors either, but records of
@@ -781,7 +818,13 @@ enemies on the screen.
   but a record of when and where it entered its script. When the hero comes
   back to the room, the game restores the actor and brings it up to "now",
   as if it had been living all along. The records are kept in a ring: when
-  there is no room left, a new one takes the place of the oldest.
+  there is no room left, a new one takes the place of the oldest. What a
+  record holds inside (a heap of things, a chest, the pockets of a guard
+  left behind) lies in one of the world's **boxes**; a character leaving the
+  scene goes into the world with its pockets in one call
+  (`dgx_ge_world_add_holding`). Boxes follow the rule of the ring: with
+  none free, the oldest record not marked to be kept gives its box up and is
+  forgotten whole, so nobody comes back without the things it held.
 - **Living cells** (`dgx_ge_cells.h`) are cells with a life of their own: a
   gate rises and falls, a plate shakes and drops, spikes spring out, a torch
   burns. What exactly they do is an animation script run over the cell.
@@ -823,7 +866,10 @@ ghost picks its way toward its target: `dgx_ge_walk_toward`).
 
 - A **label** (`dgx_ge_label.h`) is a line of text that stays on the screen
   all the time: the score, lives, "READY!". The game changes the text or the
-  number, and the engine redraws only that place.
+  number, and the engine redraws only that place. A label keeps a copy of
+  its text in `DGX_GE_LABEL_TEXT` bytes (32 by default): it holds 31 bytes,
+  that is 31 Latin or 15 Cyrillic letters, and a longer text is cut between
+  letters. Define the macro larger if a label needs more.
 - A **text field** (`dgx_ge_text.h`) is a rectangle into which text is laid
   out by words and lines. If the text does not fit, the font is made smaller
   first. Important text scrolls; unimportant text is cut off with "...". It
@@ -833,7 +879,13 @@ ghost picks its way toward its target: `dgx_ge_walk_toward`).
   `tools/dgx_ge_dialog.py`): who says what, the answers to choose from
   (each may appear only under a condition), what that changes in the world,
   things handed over. Lines are translated with ordinary `.po` files, and
-  the language is chosen when the pack is built. A dialog can **pause the
+  the language is chosen when the pack is built. Texts are read in NFC (a
+  letter and its accent as one character, the way fonts hold them), so a
+  file saved decomposed on a Mac draws the same; a BOM at the start of a
+  `.po` is skipped. A line can show numbers, the params of whoever says it:
+  `"Sound {sound}, volume {volume}."`. A translation uses the same names and
+  may put them in its own order (`"Громкость {volume}, звук {sound}."`); the
+  packer refuses a name the line does not have. A dialog can **pause the
   game** while it is open (a `pause` line; a settings menu): the game asks
   `dgx_ge_talk_pauses` and does not advance the world. The talk itself keeps
   its own time running (timed lines, letters, controls), while events for
@@ -841,8 +893,36 @@ ghost picks its way toward its target: `dgx_ge_walk_toward`).
   (`ahead_ms`).
 - The **talk view** (`dgx_ge_talk_view.h`) is how a dialog looks: its place
   on the screen, border, font, colors, a portrait of the speaker, letters
-  appearing one by one. All of this is a **style**, which is also data in
-  the pack.
+  appearing one by one. Such a set is called a **style**. A style is not
+  code but data: the pack's build script describes it, and a dialog names it
+  with the line `style talk`. For example:
+
+  ```python
+  pack.add_style("talk", place=(8, 6, -16, 47), font="text",
+                 fill=(24, 16, 8), border=(200, 160, 80), text=(255, 240, 200),
+                 appear="letters", letter_ms=35, portrait="left")
+  ```
+
+  All the fields of a style are listed at `Pack.add_style` in
+  `tools/dgx_ge_pack.py`. When there are more answers than lines in the
+  box, a scroll bar with a knob appears on the right; the list is scrolled
+  with a swipe, by dragging the knob, or with a tap on the bar: by an end, a
+  line; above or below the knob, a page. An answer too long for one line
+  wraps onto the next ones: the highlight covers all of them, the list
+  scrolls until the whole answer is in view, and a tap on any of its lines
+  picks it. Lines and answers have no length limit of their own; the view
+  keeps the text it lays out on the heap only while it is shown.
+- An **input field** is a dialog answer that edits a text of the game:
+  `"Name" field name`. The packer declares the field (`Pack.add_field("name",
+  16, keyboard=<layout>.json)`); the text itself belongs to the game, which
+  hands it to the talk (`dgx_ge_field_t` in `dgx_ge_cast_t`). Activate on
+  that line starts editing. Characters come from a keyboard one at a time
+  (`dgx_ge_talk_view_type`): DGX-DI's on-screen keyboard or a real one.
+  U+0008 erases, U+000A is done, U+001B cancels. While the field is edited,
+  a `_` caret blinks after the text. `dgx_ge_talk_view_editing` says where
+  the field is on the screen, so the game can put the keyboard out of its
+  way. Whatever can be typed has to be in the font: mark that font with
+  `Pack.add_font(..., typed=True)` and it gets the layout's letters as well.
 - **Fonts by DGX font requests** (`Pack.add_font`, `dgx_ge_fonts`). The game
   says which fonts it needs ("text, 12 points, monospaced", "DGX's
   handwritten font as it is"); the packer writes this beside the pack as DGX
@@ -853,7 +933,23 @@ ghost picks its way toward its target: `dgx_ge_walk_toward`).
   times larger for a big display; the host makes the same fonts from the
   same file (`dgx_fonts.py build`). The game's font table goes by name: the
   pack header gives `<PREFIX>_FONTS(X)`, and a DGX font is called
-  `dgx_font_<name>()`.
+  `dgx_font_<name>()`. A request is of three kinds:
+
+  ```python
+  # made from a font of the computer: 12 points of the frame, monospaced
+  pack.add_font("text", points=12, mono=True)
+  # the same, from a family or from a font file of your own
+  pack.add_font("title", points=20, family="DejaVu Serif*")
+  pack.add_font("logo", points=20, source="fonts/MyFace.ttf")
+  # a ready DGX font as it is: the handwriting pen
+  pack.add_font("hand", dgx="font0ss")
+  # the game's own pixel font as it is (.c), only digits and a colon
+  pack.add_font("time", file="main/fonts/PxCgaThin8.c", letters="0123456789:", texts=False)
+  ```
+
+  Which faces of the computer may be taken, and from what size, the game's
+  rules file says (`fonts.rules`): its `allow` lines in the order of
+  liking.
 
 ### 2.13. Shows
 
@@ -1021,7 +1117,8 @@ Menus made of **widgets** (`dgx_ge_widgets.h`) work the same way:
   finger.
 
 Widgets are a thin layer for menus and settings: a button, a list, a
-switch, a slider, text, a picture, and boxes for layout.
+switch, a slider, text, a picture, and a container (`DGX_GE_WIDGET_BOX`)
+that sets the widgets inside it in a column or a row.
 
 #### Buttons and the hero
 
@@ -1079,7 +1176,10 @@ if (dgx_ge_load_open(&l, bytes, n, dgx_ge_pack_id(pack), &saved_ms) &&
 ```
 
 On loading, all times are shifted, and the game goes on as if no time had
-passed. Where the bytes go (a file, the board's memory) is up to the game.
+passed. Params are numbers to the engine and are not shifted: a game that
+keeps a moment of `now` in a param goes on with its clock from the saved
+one. A save of an older version, whose params were of 16 bits, is read as
+it was made. Where the bytes go (a file, the board's memory) is up to the game.
 It is best to save at the boundary between scenes: on entering a level, at
 a checkpoint.
 
@@ -1093,27 +1193,94 @@ their sum, as 16-bit samples, is sent over I2S by a task of the board. A
 game with sound hardware of its own (a buzzer, a DAC) has its own `play`
 and `stop`.
 
+The board's task fills the stream while the game plays and stops sounds,
+and keeping the two apart is the mixer's job, not the game's. Whoever fills
+from a task of its own gives the mixer its lock (`lock`, a function that
+takes and gives it back) before the task starts, and every call of the
+mixer takes that lock: play, stop, the volume, filling, and the
+`dgx_ge_mixer_output` adapter as well. The boards in `boards/` do this in
+`board_sound_start`, so a game calls the mixer however it likes and never
+wraps the calls in a lock of its own. A board's sound runs for as long as
+the firmware does, and the mixer has to live as long.
+
 ### 2.17. The board
 
 The engine itself knows nothing about boards. Screens and chips differ a
 great deal, so the game sets up the hardware (display, touch, sound) and
-gives the engine a DGX screen. For the boards games have already run on,
-the engine has ready-made setup code in the `boards/` directory: CYD,
-Guition JC8012P4A1C (10″) and JC1060P470 (7″), one file per board, plus a
-shared header `dgx_ge_board.h`. The engine library does not build them and
-does not depend on their drivers. A game picks one board explicitly, in its
+gives the engine a DGX screen. One of the engine's boards is the computer
+itself, `boards/host`: the game in a window, with no hardware
+([host-en.md](host-en.md)). For the boards games have already run on,
+the engine has ready-made setup code in the `boards/` directory: a
+directory per board (the CYD, `cyd/`; the Guition JC8012P4A1C, 10″,
+`jc8012p4a1c/`; the JC1060P470, 7″, `jc1060p470/`), plus a shared header
+`dgx_ge_board.h`. A board's directory holds everything known about it:
+
+- the board's file (`cyd.c`, `jc8012p4a1c.c`, ...): the display, and the touch and the sound where the board has them (the CYD's file sets up neither);
+- `board.cmake`: what to take into the game's build;
+- `sdkconfig.defaults`: what the board needs of the ESP-IDF settings;
+- on the ESP32-P4 boards, a file per chip revision as well:
+  `sdkconfig.defaults.rev3` and `sdkconfig.defaults.rev1` (below 3).
+
+The engine library does not build the board files and does not depend on
+their drivers. A game picks one board explicitly, in its
 `main/CMakeLists.txt`:
 
 ```cmake
-include(${CMAKE_CURRENT_LIST_DIR}/../managed_components/jef-sure__dgx-ge/boards/cyd.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../managed_components/jef-sure__dgx-ge/boards/cyd/board.cmake)
 idf_component_register(SRCS "main.c" ${BOARD_SRCS}
                        INCLUDE_DIRS "." ${BOARD_INCLUDE_DIRS}
                        PRIV_REQUIRES ${BOARD_REQUIRES})
 ```
 
-The frame's scale, the fonts, the sounds and whatever the game stores stay
-with the game. If the engine's version does not suit you, copy the board's
-file into your `main/` and do it your own way.
+The ESP-IDF settings are put together from files in a list, a later one
+over an earlier: the board's file first, then the one of its chip's
+revision, the game's own file last (the partition table, the optimization,
+the FreeRTOS tick):
+
+```sh
+idf.py -D SDKCONFIG_DEFAULTS="components/dgx-ge/boards/jc8012p4a1c/sdkconfig.defaults;components/dgx-ge/boards/jc8012p4a1c/sdkconfig.defaults.rev3;sdkconfig.defaults" build
+```
+
+A game can name the board's files like this when the engine lies in the
+project itself (`components/dgx-ge`). A game that takes the engine from the
+registry copies them into its own project: ESP-IDF checks that the files of
+the list exist before it downloads the components into
+`managed_components/`, and in a fresh project the build stops ("does not
+exist").
+
+Why the board needs these settings. DGX builds only what the project's
+`sdkconfig` turns on. The engine's
+frame needs DGX's virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`), and the
+board's display needs its bus and driver: `CONFIG_DGX_ENABLE_SPI` and
+`CONFIG_DGX_ENABLE_SPI_ILI_9341` on the CYD, `CONFIG_DGX_ENABLE_DSI` and
+`CONFIG_DGX_ENABLE_JD9365` (10″) or `CONFIG_DGX_ENABLE_JD9165` (7″) on the
+Guition boards. Leave one out and the link fails on the functions it would
+have built. The Guition boards also need PSRAM (`CONFIG_SPIRAM`,
+`CONFIG_SPIRAM_MODE_HEX`): it holds the panel's two frame buffers and the
+band of the scaled frame, and without it the display does not start. Then
+there is the ESP32-P4's revision. An ESP-IDF that knows revision 3 builds
+for 3.1 and later by default, and such a firmware does not start on a chip
+below revision 3 (nor the other way round). A chip below 3 needs
+`CONFIG_ESP32P4_SELECTS_REV_LESS_V3`, and its clocks are lower: 360 MHz for
+the CPU and 200 MHz for PSRAM, while 400 and 250 are revision 3's only. My
+7″ has a chip of revision 1.3 (`sdkconfig.defaults.rev1`), my 10″ one of
+3.2 (`sdkconfig.defaults.rev3`). The JC8012P4A1C is sold with older chips
+too, and its `sdkconfig.defaults.rev1` is for them; it has not been tried
+on such a board, only built. The bootloader prints the revision at start
+(`chip revision`), and so does esptool when it connects. Each board's files
+say all this too.
+
+Boards with a touch screen have DGX-DI's on-screen gamepad and keyboard
+(`board_pad_*`, `board_keyboard_*`). The keyboard draws itself straight onto
+the display, in a band at the bottom or the top, so while it is open the
+game's frame must not draw there: `dgx_ge_frame_cover(frame, band)` covers
+those pixels, and once it is closed the frame redraws them.
+
+The frame's scale, the fonts, the sounds and whatever the game stores are
+not the board file's business: the game sets them. If the ready board file
+does not suit you (other pins, another display, your own sound), copy it
+into your `main/` with the other files of its directory and change them
+there: the engine does not depend on them.
 
 ### 2.18. The whole game loop
 
@@ -1149,35 +1316,37 @@ previous one is ready, and the actors' time is real time.
 
 - A computer with Linux (other systems should work too, but it has been
   tested on Linux).
-- **ESP-IDF 6.0**, the build environment for the ESP32.
+- **ESP-IDF** 5.3 or newer, the build environment for the ESP32. I build
+  the engine, the boards and the game it was checked on with 6.0.
 - **Python 3** and Pillow, to build the pack.
 - For fonts made for a board: a C compiler for the computer, FreeType
   (`libfreetype-dev`, `pkg-config`) and fontconfig. A game without fonts of
   its own does not need these.
+- For a game on the computer: SDL2 for development (`libsdl2-dev`).
 - A board with an ESP32 and a screen DGX supports. You do not need one to
-  start.
+  start: a game can be made on the computer (below).
 
 ### First on the computer, without a board
 
-The engine's core is plain C on top of DGX's virtual screens, so it builds
-for a computer too: the hardware is replaced by ESP-IDF stubs that come with
-DGX. The engine's tests are in its repository, not in the registry's
-package:
+A game can be built for the computer without changing its code: the same
+`main.c`, the same pack, the same fonts, with the computer in place of a
+board. The engine has one more board for that, `boards/host`: a window of
+SDL2 shows a board's display, the mouse is a finger, the keys are buttons,
+the sound goes through SDL, and what the game keeps in NVS lies in files.
+It needs Linux, GNU make 4.3, gcc or clang, SDL2 for development and DGX
+0.8.0 or newer. A Makefile beside the project's `CMakeLists.txt` says what
+the game is made of and includes the engine's `host.mk`; the example
+`examples/hello` builds both ways. The same build runs a game with nobody at
+the computer, for a check before a commit or a picture for the docs.
 
-```sh
-git clone https://github.com/jef-sure/esp32-component-dgx-ge
-make -C esp32-component-dgx-ge/test/host
-```
-
-DGX is taken from a neighboring directory, `esp32-component-dgx`, or from
-the managed components of a project the engine is cloned into; another copy
-can be given with `DGX=<path>`.
-
-Your own game can be built the same way: the picture the board would have
-drawn can be saved to a file or shown in a window. Which DGX files and which
-stubs that takes can be seen in `test/host/Makefile`.
+All of it, from what to install to what goes wrong, is in its own
+document, [host-en.md](host-en.md).
 
 ### Your own project
+
+The whole way, from the data of a game, whatever made them, to the game on
+a board, step by step and with what each step gives, is in its own
+document, [workflow-en.md](workflow-en.md). In short:
 
 1. Add the engine to your ESP-IDF project from the registry:
    `idf.py add-dependency "jef-sure/dgx-ge^0.1.1"`. It lands in
@@ -1188,6 +1357,9 @@ stubs that takes can be seen in `test/host/Makefile`.
    `tools/dgx_ge_pack.py`. Every kind at once, from pictures to dialogs,
    goes into the engine's test pack, `test/host/make_test_pack.py` in the
    repository. It is a test, not a game, but it serves well as a reference.
+   Data an editor or a generator wrote as a document of the format
+   "dgx-ge-sprites" go in with one call, `Pack.add_sprites`
+   (`test/host/test_sprites.py` and `test_scenes.py` show such documents).
 3. In `main/CMakeLists.txt`, after `idf_component_register`, call
    `dgx_ge_params_of_pack`. It learns from the pack header how many params
    each actor has to keep:
@@ -1195,6 +1367,10 @@ stubs that takes can be seen in `test/host/Makefile`.
    ```cmake
    dgx_ge_params_of_pack(assets/mygame_pack.h)
    ```
+
+   Forget the call, and the header stops the build with an error that
+   names it, as soon as an actor of the pack needs more params than the
+   engine keeps by default.
 
 4. Put the pack into the firmware (`EMBED_FILES "assets/mygame.pack"` in
    `main/CMakeLists.txt`). If the game has named its fonts (`Pack.add_font`),
@@ -1204,7 +1380,8 @@ stubs that takes can be seen in `test/host/Makefile`.
    ready-made setup code in `boards/` (section 2.17). For any other board,
    create the DGX bus and screen yourself (the `examples/` of DGX show how
    for different displays) and give the screen to the engine
-   (`dgx_ge_frame_create`).
+   (`dgx_ge_frame_create`). Turn on DGX's virtual screens and the display's
+   bus and driver in `sdkconfig` (section 2.17).
 6. Build and flash: `idf.py build flash monitor`.
 7. Start with one actor on an empty scene. Then add a set, then a second
    actor, then collisions. Every step can be checked on the computer.
@@ -1219,14 +1396,16 @@ stubs that takes can be seen in `test/host/Makefile`.
 | `tools/dgx_ge_graph.py` | the scene graph |
 | `tools/dgx_ge_explain.py` | retells scripts in words |
 | `font2c/dgx_fonts.py` of DGX | fonts: which face the rules will pick (`pick`, `list`), a font as JSON for editors (`json`); the fonts themselves are made by the build from the requests |
-| `tools/dgx_ge_text.py`, `dgx_ge_font.py` | text layout as the engine does it, for the editor |
+| `tools/dgx_ge_text.py` | text layout as the engine does it, for the editor; the font as `dgx_fonts.py json` of DGX reads it |
 | sprite editor | a separate program, to be published later: pictures, masks, animations, the state machine, scenes, dialogs, with a live preview in motion. The pack reads its files through `Pack.add_sprites`: sets, masks, animations, tilesets, styles, dialogs, scenes, the scene graph and the game's data (constants, timers, sounds, shows, crops, chases) |
 
 ### If something goes wrong
 
 - **An error while building the pack**: read it carefully; it names the
-  file, the line and the name. Most often it is a typo or a reference to
-  something that does not exist.
+  file, the line and the name. An animation or a dialog given as a string
+  is named by its name, or by its file when you pass one
+  (`add_anim(name, text, path=...)`, `add_dialog(text, path=...)`). Most
+  often it is a typo or a reference to something that does not exist.
 - **An actor is not visible.** Check, in this order:
   - whether you gave the frame the colors of its set
     (`dgx_ge_frame_add_colors`);
@@ -1254,12 +1433,9 @@ stubs that takes can be seen in `test/host/Makefile`.
   for now only at the boundary between scenes.
 - **A link to an object** (`to: {object: …}` in the editor): for now a
   link's target can only be a cell; the game tells a character its event.
-- **Text input.** An on-screen gamepad and an on-screen keyboard exist in
-  DGX-DI (the on-screen input component): the gamepad gives the game
-  ordinary buttons, the keyboard a stream of characters. The engine does not
-  have an input field to take that stream yet.
-- **Examples shipped with the engine:** none yet. Neither of the two games
-  it was tested on comes with it.
+- **Examples shipped with the engine:** one, `examples/hello`
+  ([host-en.md](host-en.md)). Neither of the two games the engine was tested
+  on comes with it.
 
 ---
 
@@ -1273,7 +1449,7 @@ stubs that takes can be seen in `test/host/Makefile`.
 | **dead zone** | a small tilt of a stick around the center that counts as zero |
 | **event** | a message to an actor: "jump", "stop", "wounded" |
 | **frame** | the game's picture in memory and its sending to the display; also one picture of a script (`frame`) |
-| **hook** | a game function the engine calls where data is not enough |
+| **callback** | a game function the engine calls where data is not enough |
 | **item** | one picture on the scene with everything needed to draw it |
 | **key** | the order within a layer: a smaller key is further away |
 | **layer** | a sheet in the stack; layers are drawn in order |

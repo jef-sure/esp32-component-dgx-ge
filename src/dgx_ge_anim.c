@@ -113,6 +113,12 @@ static const dgx_ge_actor_t *said_by;
 
 static float eval(const dgx_ge_actor_t *a, const uint8_t *p, float t);
 
+/* The value of an expression as a param: rounded, within 32 bits (beyond, the nearest limit; not a number: 0). */
+static int32_t param_of(float v)
+{
+    return v != v ? 0 : v >= 2147483648.0f ? INT32_MAX : v <= -2147483648.0f ? INT32_MIN : (int32_t)lroundf(v);
+}
+
 int dgx_ge_anim_said_params(dgx_ge_actor_t *child)
 {
     if (!said_with || !child || !child->anim) return 0;
@@ -120,9 +126,7 @@ int dgx_ge_anim_said_params(dgx_ge_actor_t *child)
     const uint8_t *p = said_with;
     for (int k = 0; k < said_with_count; ++k, p += 2 + p[1]) {
         if (p[0] >= child->anim->params) continue;
-        const float   v = eval(said_by, p + 1, 0);
-        const int32_t w = (int32_t)lroundf(v);
-        child->params[p[0]] = child->entered_params[p[0]] = (int16_t)(w < INT16_MIN ? INT16_MIN : w > INT16_MAX ? INT16_MAX : w);
+        child->params[p[0]] = child->entered_params[p[0]] = param_of(eval(said_by, p + 1, 0));
         ++n;
     }
     return n;
@@ -228,39 +232,63 @@ static void path_at(const dgx_ge_actor_t *a, uint32_t ms, int32_t *x, int32_t *y
     *vy = (int32_t)lroundf((gy - fy) / h * 256.0f);
 }
 
-/* n / d to the nearest (a half away from zero), d > 0: the motion is counted in steps, cut short it would lag a little at each */
-static int32_t nearest(int64_t n, int64_t d)
+/*
+ * n / d to the nearest, a half up (d > 0, even): the same wherever the units
+ * are counted from, so that a way counted back from a place is the way
+ * counted forward to it.
+ */
+static int64_t nearest(int64_t n, int64_t d)
 {
-    return (int32_t)(n >= 0 ? (n + d / 2) / d : -((-n + d / 2) / d));
+    const int64_t m = n + d / 2;
+    return m / d - (m % d < 0);
 }
 
-/* the way of a uniform acceleration over dt ms, counted in 64 bits: v dt + a dt^2 / 2 */
-static int32_t way(int32_t v, int32_t acc, int32_t dt)
+/*
+ * One axis of a uniform acceleration over dt ms (back when negative),
+ * exactly: the place p and what it has beyond its units (rp, 1/2000000 of a
+ * unit), the velocity v and its rest (rv, 1/1000). Cut into calls of any
+ * length the way adds up to the same, to the last unit: the rests carry what
+ * a call cannot show. A velocity that does not change is what it was set to,
+ * and a place at rest where it was put (the game may set them).
+ */
+static void axis_on(int32_t *p, int32_t *rp, int32_t *v, int32_t *rv, int32_t acc, int32_t dt)
 {
-    return nearest((int64_t)v * dt * 2000 + (int64_t)acc * dt * dt, 2000000);
+    if (!acc) *rv = 0;
+    if (!acc && !*v) {
+        *rp = 0;
+        return;
+    }
+    const int64_t speed = (int64_t)*v * 1000 + *rv; /* 1/1000 of a unit a second */
+    const int64_t way   = *rp + speed * dt * 2 + (int64_t)acc * dt * dt, q = nearest(way, 2000000);
+    *p += (int32_t)q;
+    *rp = (int32_t)(way - q * 2000000);
+    if (!acc) return;
+    const int64_t gain = *rv + (int64_t)acc * dt, w = nearest(gain, 1000);
+    *v += (int32_t)w;
+    *rv = (int32_t)(gain - w * 1000);
 }
 
-/* what an acceleration adds to the velocity over dt ms */
-static int32_t gain(int32_t acc, int32_t dt)
+/* The motion brought to a moment, forward or back (where the motion alone takes it: steps between are not undone). */
+static void move_by(dgx_ge_actor_t *a, uint32_t ms)
 {
-    return nearest((int64_t)acc * dt, 1000);
+    if (a->path) {
+        path_at(a, ms, &a->x, &a->y, &a->vx, &a->vy);
+        a->rest_x = a->rest_y = a->rest_vx = a->rest_vy = 0; /* the formula gives it whole */
+        a->moved_ms = ms;
+        return;
+    }
+    const int32_t dt = (int32_t)(ms - a->moved_ms);
+    int32_t       rx = a->rest_x, ry = a->rest_y, rvx = a->rest_vx, rvy = a->rest_vy;
+    axis_on(&a->x, &rx, &a->vx, &rvx, a->ax, dt);
+    axis_on(&a->y, &ry, &a->vy, &rvy, a->ay, dt);
+    a->rest_x = rx, a->rest_y = ry, a->rest_vx = rvx, a->rest_vy = rvy;
+    a->moved_ms = ms;
 }
 
 /* Bring the motion up to a moment. */
 static void move_to(dgx_ge_actor_t *a, uint32_t ms)
 {
-    const int32_t dt = (int32_t)(ms - a->moved_ms);
-    if (dt <= 0) return;
-    if (a->path) {
-        path_at(a, ms, &a->x, &a->y, &a->vx, &a->vy);
-        a->moved_ms = ms;
-        return;
-    }
-    a->x += way(a->vx, a->ax, dt);
-    a->y += way(a->vy, a->ay, dt);
-    a->vx += gain(a->ax, dt);
-    a->vy += gain(a->ay, dt);
-    a->moved_ms = ms;
+    if ((int32_t)(ms - a->moved_ms) > 0) move_by(a, ms);
 }
 
 /* The slot of what is held at a point (a frame or a thing), -1 none. */
@@ -295,11 +323,11 @@ static bool take_pending(dgx_ge_actor_t *a, bool at_end)
     return true;
 }
 
-/* A param given a value at the moment of the step, kept within 16 bits; the game is told when it has changed. */
-static void set_param(dgx_ge_actor_t *a, int i, int32_t v, dgx_ge_anim_say_fn say, void *ctx)
+/* A param given a value at the moment of the step, kept within 32 bits; the game is told when it has changed. */
+static void set_param(dgx_ge_actor_t *a, int i, int64_t v, dgx_ge_anim_say_fn say, void *ctx)
 {
-    const int16_t was = a->params[i];
-    a->params[i]      = (int16_t)(v < INT16_MIN ? INT16_MIN : v > INT16_MAX ? INT16_MAX : v);
+    const int32_t was = a->params[i];
+    a->params[i]      = dgx_ge_param(v);
     if (say && a->params[i] != was) say(a, DGX_GE_ANIM_PARAM, (uint8_t)i, a->due_ms, ctx);
 }
 
@@ -383,7 +411,7 @@ static void steer(dgx_ge_actor_t *a, unsigned way, unsigned angle, const float *
     float       vx = (float)(sign * a->vx) / 256.0f, vy = (float)a->vy / 256.0f, wx = 0, wy = 0;
     if (way == STEER_WANDER) {
         /* the angle moves by a cast of the dice within the spread, both ways */
-        int       deg    = angle < a->anim->params ? a->params[angle] : 0;
+        int       deg    = angle < a->anim->params ? a->params[angle] % 360 : 0;
         const int spread = v[2] > 0 ? (int)lroundf(v[2]) : 0;
         if (spread && dgx_ge_dice) {
             *dgx_ge_dice = *dgx_ge_dice * 214013u + 2531011u;
@@ -417,7 +445,6 @@ static void steer(dgx_ge_actor_t *a, unsigned way, unsigned angle, const float *
     a->path = 0;
 }
 
-/* Steps up to the next frame, made at the moment due_ms. False when the actor holds. */
 /* The sides a watched mask (contacts[i]) touches anything on, the actor put at x, y: as its terrain says, of those watched (front and back by the way it faces). */
 /*
  * The sides watched that the mask touches here. A mask wholly inside a solid
@@ -452,10 +479,31 @@ static bool nothing_near(dgx_ge_actor_t *a, int i)
     return !near;
 }
 
-static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
+/*
+ * The actors whose steps are being made, the latest first: what one says may
+ * make another step (an event at once), and that one's say may come back to
+ * the first. An event at once for one of them waits for the next command of
+ * its step (dgx_ge_actor_event).
+ */
+typedef struct in_step {
+    const dgx_ge_actor_t *actor;
+    struct in_step       *up;
+} in_step_t;
+static in_step_t *stepping;
+
+static bool in_its_step(const dgx_ge_actor_t *a)
+{
+    for (const in_step_t *s = stepping; s; s = s->up)
+        if (s->actor == a) return true;
+    return false;
+}
+
+static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
 {
     const dgx_ge_anim_t *anim = a->anim;
     for (int n = 0; n < MAX_STEPS_WITHOUT_FRAME; ++n) {
+        /* the game answered what it was told with an event at once: the new script from here, the rest of this step not made */
+        if (a->pending && a->pending_when == DGX_GE_WHEN_NOW) enter(a, a->pending - 1);
         if (a->pc >= anim->code_size) break;
         const uint8_t *p    = anim->code + a->pc;
         const uint32_t left = anim->code_size - a->pc;
@@ -491,7 +539,7 @@ static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
         case OP_SET:
         case OP_ADD: {
             if (left < 4 || p[1] >= anim->params) goto broken;
-            const int32_t v = (int16_t)u16_at(p + 2) + (p[0] == OP_ADD ? a->params[p[1]] : 0);
+            const int64_t v = (int16_t)u16_at(p + 2) + (p[0] == OP_ADD ? (int64_t)a->params[p[1]] : 0);
             a->pc += 4;
             set_param(a, p[1], v, say, ctx);
             break;
@@ -533,8 +581,7 @@ static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
         case OP_SET_X:
         case OP_ADD_X: {
             if (left < 3 || p[1] >= anim->params || 2u + 1 + p[2] > left) goto broken;
-            const float   value = eval(a, p + 2, 0);
-            const int32_t v = (int32_t)lroundf(value) + (p[0] == OP_ADD_X ? a->params[p[1]] : 0);
+            const int64_t v = (int64_t)param_of(eval(a, p + 2, 0)) + (p[0] == OP_ADD_X ? a->params[p[1]] : 0);
             a->pc += 2 + 1 + p[2];
             set_param(a, p[1], v, say, ctx);
             break;
@@ -696,7 +743,7 @@ static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             if (left < 3 || 3u + p[2] >= left || 3u + p[2] + 1 + p[3 + p[2]] > left) goto broken;
             const uint8_t *cell = p + 2, *value = cell + 1 + cell[0];
             said_args[0]         = (int32_t)lroundf(eval(a, cell, 0));
-            said_args[1]         = (int32_t)lroundf(eval(a, value, 0));
+            said_args[1]         = param_of(eval(a, value, 0)); /* for an own param of the cell's life */
             a->pc += (uint16_t)(2 + 1 + cell[0] + 1 + value[0]);
             if (say && p[1] != 0xFF) say(a, DGX_GE_ANIM_CELL, p[1], a->due_ms, ctx);
             break;
@@ -740,7 +787,7 @@ static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
                     dgx_ge_expr_its = &w;
                     const float v   = eval(a, p + at + 1, 0);
                     dgx_ge_expr_its = was;
-                    if (p[at] < anim->params) set_param(a, p[at], (int32_t)lroundf(v), say, ctx);
+                    if (p[at] < anim->params) set_param(a, p[at], param_of(v), say, ctx);
                 }
             }
             a->pc += (uint16_t)end;
@@ -799,6 +846,16 @@ broken:
     /* a script that runs past its code or never shows a frame stops where it is */
     a->holding = true;
     return false;
+}
+
+/* Steps up to the next frame, made at the moment due_ms. False when the actor holds. */
+static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
+{
+    in_step_t me = {a, stepping};
+    stepping     = &me;
+    const bool shows = make_steps(a, say, ctx);
+    stepping     = me.up;
+    return shows;
 }
 
 void dgx_ge_actor_start(dgx_ge_actor_t *actor, const dgx_ge_anim_t *anim, int script, int x, int y, uint32_t now_ms)
@@ -967,29 +1024,17 @@ void dgx_ge_actor_state_at(const dgx_ge_actor_t *a, uint32_t ms, int32_t *x, int
         path_at(a, ms, x, y, vx, vy);
         return;
     }
+    /*
+     * From where the motion has come to, forward or back: exact both ways, so
+     * a moment between the last look and now is where the actor was then to
+     * the unit, and a point just out of a floor at the look is out of it (a
+     * game putting the actor back there does not put it into the floor).
+     */
     const int32_t dt = (int32_t)(ms - a->moved_ms);
-    if (dt < 0 && (int32_t)(ms - a->looked_ms) >= 0) {
-        /*
-         * Between the last look and now: the move from the look is undone
-         * exactly (the same steps backwards), then made again as far as ms.
-         * Counted back from now with a negative time it would be off by a
-         * step or two of 1/256, and a point just out of a floor at the look
-         * could come out as in it: a game putting the actor back there would
-         * put it into the floor.
-         */
-        const int32_t back = (int32_t)(a->moved_ms - a->looked_ms), on = (int32_t)(ms - a->looked_ms);
-        const int32_t vx0 = a->vx - gain(a->ax, back), vy0 = a->vy - gain(a->ay, back);
-        const int32_t x0 = a->x - way(vx0, a->ax, back), y0 = a->y - way(vy0, a->ay, back);
-        *x  = x0 + way(vx0, a->ax, on);
-        *y  = y0 + way(vy0, a->ay, on);
-        *vx = vx0 + gain(a->ax, on);
-        *vy = vy0 + gain(a->ay, on);
-        return;
-    }
-    *x  = a->x + way(a->vx, a->ax, dt);
-    *y  = a->y + way(a->vy, a->ay, dt);
-    *vx = a->vx + gain(a->ax, dt);
-    *vy = a->vy + gain(a->ay, dt);
+    int32_t       rx = a->rest_x, ry = a->rest_y, rvx = a->rest_vx, rvy = a->rest_vy;
+    *x = a->x, *y = a->y, *vx = a->vx, *vy = a->vy;
+    axis_on(x, &rx, vx, &rvx, a->ax, dt);
+    axis_on(y, &ry, vy, &rvy, a->ay, dt);
 }
 
 void dgx_ge_contact_refine(const dgx_ge_actor_t *a, dgx_ge_contact_t *c)
@@ -1049,6 +1094,7 @@ void dgx_ge_actor_shift(dgx_ge_actor_t *a, int dx, int dy)
 {
     a->x -= dx * 256, a->y -= dy * 256;
     a->path_x -= dx * 256, a->path_y -= dy * 256;
+    a->entered_x -= dx * 256, a->entered_y -= dy * 256; /* where it entered its script is in the same scene */
 }
 
 void dgx_ge_actor_restart(dgx_ge_actor_t *a, uint32_t at_ms, int32_t x, int32_t y, int32_t vx, int32_t vy)
@@ -1057,6 +1103,7 @@ void dgx_ge_actor_restart(dgx_ge_actor_t *a, uint32_t at_ms, int32_t x, int32_t 
     a->y        = y;
     a->vx       = vx;
     a->vy       = vy;
+    a->rest_x = a->rest_y = a->rest_vx = a->rest_vy = 0;
     a->path     = 0;
     a->moved_ms = at_ms;
 }
@@ -1081,7 +1128,22 @@ bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_g
     if (!anim || event < 0 || event >= anim->events) return false;
     const uint8_t *cell = anim->matrix + 2 * ((uint32_t)actor->script * anim->events + (uint32_t)event);
     if (!cell[0] || cell[0] > anim->scripts) return false;
+    if (in_its_step(actor) && cell[1] == DGX_GE_WHEN_NOW) {
+        /* sent from what its own step says: taken at that step's moment, at its next command (make_steps) */
+        actor->pending      = cell[0];
+        actor->pending_when = DGX_GE_WHEN_NOW;
+        return true;
+    }
     if (cell[1] == DGX_GE_WHEN_NOW || actor->holding) {
+        /*
+         * from before the moment the motion has come to (a step of another actor, made late in a long call; a
+         * game starting a script a tick back): the motion is taken back to it, so the new script begins there in
+         * its frames and its place alike (steps made since are not undone)
+         */
+        if ((int32_t)(now_ms - actor->moved_ms) < 0) {
+            move_by(actor, now_ms);
+            if ((int32_t)(now_ms - actor->looked_ms) < 0) actor->looked_ms = now_ms;
+        }
         /*
          * the steps that were due before now are made first, then the actor goes on in the new script from now: a
          * step due at this very moment comes after the event (as a game's tick looks at its buttons, then steps)

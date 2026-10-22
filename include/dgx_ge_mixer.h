@@ -29,9 +29,12 @@ extern "C" {
  * voice free: the oldest one gives way. The game knows sounds only by number
  * through dgx_ge_sound_t (dgx_ge_mixer_output).
  *
- * The game plays and stops; the platform fills its output from a task of its
- * own: the two at once are the platform's to keep apart (a lock round both).
- * RAM: the voices, some 40 bytes each.
+ * The game plays and stops; the platform fills its output, often from a task
+ * of its own. Such a platform gives the mixer its lock (lock, before its task
+ * starts), and every call of the mixer takes it: the game calls the mixer as
+ * it likes, its output too, with no lock of its own (a second take of a lock
+ * that is not recursive would never return).
+ * RAM: 24 bytes on a 32-bit chip, and the voices, some 40 bytes each.
  */
 
 typedef struct {
@@ -76,10 +79,12 @@ typedef struct dgx_ge_mixer {
     uint8_t                volume;   /* of all: 0..255 */
     uint32_t               rate;     /* of the output, samples a second */
     uint32_t               ages;
+    void (*lock)(bool take); /* NULL, or the platform's lock: taken (true) and given back (false) by every call */
 } dgx_ge_mixer_t;
 
-/* A mixer of so many voices (1..255) for an output of rate and channels (1 or 2); false when there is no room. */
+/* A mixer of so many voices (1..255) for an output of rate and channels (1 or 2), no lock; false when there is no room. */
 bool dgx_ge_mixer_init(dgx_ge_mixer_t *mixer, const dgx_ge_sounds_t *sounds, int voices, uint32_t rate, int channels);
+/* Its voices given back; its lock and channels kept: a task still filling gets silence. */
 void dgx_ge_mixer_free(dgx_ge_mixer_t *mixer);
 
 /* A sound from its start at a volume (0..255) and pan (-127..127); its voice, -1 when it has no samples. */

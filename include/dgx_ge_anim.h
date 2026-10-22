@@ -30,7 +30,9 @@ extern "C" {
  * Params: numbers every actor keeps for itself (lives, what it is doing),
  * declared with the scripts, with the values they start with; scripts set and
  * change them, the game reads them by the numbers the pack gives. What they
- * mean is the game's.
+ * mean is the game's. A param is a whole number of 32 bits (a moment of the
+ * clock in seconds holds as long as the clock: dgx_ge_param); the values it
+ * starts with are of 16, as the pack keeps them.
  *
  * The blob ("DGAN"), little-endian, read where it lies:
  *
@@ -45,7 +47,6 @@ extern "C" {
 #define DGX_GE_ANIM_MAGIC   0x4E414744u /* "DGAN" */
 #define DGX_GE_ANIM_VERSION 10u
 
-/* Params an actor has room for, 2 bytes each; a blob that declares more does not open. */
 /* How many points an actor holds things at (carry): a sword and a shield. */
 #ifndef DGX_GE_ANIM_CARRIED
 #define DGX_GE_ANIM_CARRIED 2
@@ -56,9 +57,19 @@ extern "C" {
 #define DGX_GE_ANIM_CONTACTS 2
 #endif
 
+/* Params an actor has room for, 8 bytes each (what it is, what it entered its script with); a blob that declares more does not open. */
 #ifndef DGX_GE_ANIM_PARAMS
 #define DGX_GE_ANIM_PARAMS 4
 #endif
+
+/*
+ * A whole number as a param keeps it: within its 32 bits, the nearest limit
+ * beyond them (add, a hit's damage stop there instead of overflowing).
+ */
+static inline int32_t dgx_ge_param(int64_t v)
+{
+    return v < INT32_MIN ? INT32_MIN : v > INT32_MAX ? INT32_MAX : (int32_t)v;
+}
 
 typedef enum {
     DGX_GE_WHEN_NOW    = 0,
@@ -119,12 +130,19 @@ typedef struct dgx_ge_actor {
     int32_t              x, y;   /* in 1/256 of a pixel of the scene */
     int32_t              vx, vy; /* 1/256 of a pixel a second */
     int32_t              ax, ay; /* 1/256 of a pixel a second a second */
+    /*
+     * What the motion has beyond those units, so that it adds up exactly
+     * however it is cut into calls: of the place in 1/2000000 of a unit, of
+     * the velocity in 1/1000 (while it accelerates); none at rest.
+     */
+    signed int           rest_x : 21, rest_vx : 11;
+    signed int           rest_y : 21, rest_vy : 11;
     /* a path: the place a formula of the time gives, from where and when it began */
     uint16_t             path;   /* where its step is in the code + 1, 0 none */
     int8_t               path_sign; /* forward when it began: 1 or -1 */
     uint32_t             path_ms;
     int32_t              path_x, path_y;
-    int16_t              params[DGX_GE_ANIM_PARAMS]; /* by the numbers the pack gives */
+    int32_t              params[DGX_GE_ANIM_PARAMS]; /* by the numbers the pack gives */
     /*
      * Where it entered the script it is in: when, where, which way it faced,
      * its params then. From there the script makes it what it is now, as far
@@ -133,7 +151,7 @@ typedef struct dgx_ge_actor {
     uint32_t             entered_ms;
     int32_t              entered_x, entered_y;
     bool                 entered_flip;
-    int16_t              entered_params[DGX_GE_ANIM_PARAMS];
+    int32_t              entered_params[DGX_GE_ANIM_PARAMS];
     /* what was let go last (release): the picture, -1 none, and its velocity, points a second (x as the scene goes) */
     struct {
         int16_t image;
@@ -419,6 +437,10 @@ void dgx_ge_actor_start(dgx_ge_actor_t *actor, const dgx_ge_anim_t *anim, int sc
  * An event: the matrix says what follows. Returns false when it means
  * nothing in the script the actor is in; a transition at a branch point or at
  * the end waits for it, and a later event takes the place of one waiting.
+ * One at once sent from the actor's own say (the game answering what its
+ * step tells) is taken at that step's moment, right after the say: the rest
+ * of the step is not made. One from before the moment the actor has been
+ * moved to takes its motion back to it (the steps made since stay made).
  */
 bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx);
 

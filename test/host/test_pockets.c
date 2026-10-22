@@ -48,7 +48,7 @@ int main(int argc, char **argv)
     uint8_t *data = read_file(argc > 1 ? argv[1] : "build/test.pack", &size);
     dgx_ge_pack_t pack;
     CHECK(data && dgx_ge_pack_open(&pack, data, size));
-    CHECK(sizeof(dgx_ge_pocket_t) == 8);
+    CHECK(sizeof(dgx_ge_pocket_t) == 12);
 
     /* kinds: opened once, by the number of the blob; what the header says of them */
     dgx_ge_kinds_t kinds;

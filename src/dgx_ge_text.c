@@ -194,9 +194,10 @@ static int lay(dgx_ge_textbox_t *box, const char *text, dgx_font_t *font, int sc
     return n;
 }
 
-/* The lines shown, drawn anew; the last one shown ends in an ellipsis when the text is cut. */
+/* The lines shown, drawn anew; the last one shown ends in an ellipsis when the text is cut. Nothing laid yet: nothing. */
 static void draw(dgx_ge_textbox_t *box)
 {
+    if (!box->style || !box->canvas) return;
     dgx_font_t *font  = box->style->font;
     const int   line  = dgx_ge_text_line(font, box->scale), above = -font->yOffsetLowest * box->scale;
     memset((uint8_t *)box->image.data, 0, (size_t)box->width * box->bits / 8 * box->height);
@@ -299,7 +300,7 @@ void dgx_ge_textbox_appear(dgx_ge_textbox_t *box, uint8_t letter_ms, uint32_t no
 
 bool dgx_ge_textbox_appear_all(dgx_ge_textbox_t *box)
 {
-    if (box->letters == 0xFFFF) return false;
+    if (box->letters == 0xFFFF || !box->style) return false;
     box->letters = 0xFFFF;
     draw(box);
     return true;
@@ -316,11 +317,12 @@ static int letters_shown(const dgx_ge_textbox_t *box)
 
 bool dgx_ge_textbox_appearing(const dgx_ge_textbox_t *box)
 {
-    return box->letters != 0xFFFF;
+    return box->letters != 0xFFFF && box->style;
 }
 
 bool dgx_ge_textbox_play(dgx_ge_textbox_t *box, uint32_t now_ms)
 {
+    if (!box->style) return false; /* nothing laid yet (a box zeroed, or freed) */
     if (box->letters != 0xFFFF) {
         /* appearing: a letter every letter_ms; all of the lines shown come, it has appeared */
         const uint32_t n = (uint32_t)(now_ms - box->shown_ms) / box->letter_ms;

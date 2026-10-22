@@ -57,6 +57,9 @@ static void at_middle(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g)
     } else if (w->dir >= 0 && !open_side(w, g, w->col, w->row, w->dir)) {
         w->dir = DGX_GE_WALK_STILL;
     }
+    /* off the middle along the way it goes now (it turned back in a corner cut, then off it): ahead of the middle, or behind it */
+    int32_t *off = w->dir < 0 ? NULL : w->dir < 2 ? &w->off_x : &w->off_y;
+    if (off && *off) w->pos = *off * (DX[w->dir] + DY[w->dir]), *off = 0;
 }
 
 void dgx_ge_walk_play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx)
@@ -66,8 +69,9 @@ void dgx_ge_walk_play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t 
             w->at_ms = now_ms; /* standing: time goes, it does not */
             return;
         }
-        /* how long to the next middle: its way left, in thousandths of 1/256 of a point, at speed a ms */
-        const uint64_t left = (uint64_t)(step_of(g, w->dir) - w->pos) * 1000u - w->rest;
+        /* how long to the next middle (behind the middle of its cell: to that one), its way left, in thousandths of 1/256 of a point, at speed a ms */
+        const int32_t  to   = w->pos < 0 ? 0 : step_of(g, w->dir);
+        const uint64_t left = (uint64_t)(to - w->pos) * 1000u - w->rest;
         const uint32_t need = (uint32_t)((left + w->speed - 1) / w->speed);
         const uint32_t have = now_ms - w->at_ms;
         if (have < need) {
@@ -78,14 +82,14 @@ void dgx_ge_walk_play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t 
             w->at_ms = now_ms;
             return;
         }
-        centre(w, step_of(g, w->dir) - w->pos);
+        centre(w, to - w->pos);
         /* the next middle, at its moment: what is past it is kept */
         w->rest  = (uint32_t)((uint64_t)w->speed * need - left);
         w->at_ms += need;
-        int c, r;
-        if (!beside(g, w->col, w->row, w->dir, &c, &r)) c = w->col, r = w->row;
+        int c = w->col, r = w->row;
+        if (to && !beside(g, w->col, w->row, w->dir, &c, &r)) c = w->col, r = w->row;
         w->col = (int16_t)c, w->row = (int16_t)r, w->pos = 0;
-        if (arrive) arrive(w, w->at_ms, ctx);
+        if (to && arrive) arrive(w, w->at_ms, ctx); /* the middle of its own cell: it came there before */
         const int was = w->dir;
         at_middle(w, g);
         if (w->dir != was) w->rest = 0; /* turned or stood: from the middle */
@@ -97,6 +101,13 @@ void dgx_ge_walk_want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side,
     dgx_ge_walk_play(w, g, now_ms, arrive, ctx);
     w->want = (int8_t)side;
     if (side < 0) return;
+    if (w->dir >= 0 && side == back_of(w->dir) && w->pos < 0) {
+        /* behind the middle of its cell: past it the other way, so far */
+        w->pos = -w->pos - (w->rest ? 1 : 0);
+        w->rest = w->rest ? 1000 - w->rest : 0;
+        w->dir = (int8_t)side, w->want = -1;
+        return;
+    }
     if (w->dir >= 0 && side == back_of(w->dir) && w->pos > 0) {
         /* back the way it came, at once: from the next cell's middle, so far the other way */
         int c, r;
@@ -109,9 +120,13 @@ void dgx_ge_walk_want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side,
         }
         return;
     }
-    /* a corner cut: a turn asked near a middle, before it or past it, taken at once where that side is open there */
-    if (w->corner && w->dir >= 0 && side >> 1 != w->dir >> 1) {
-        const int32_t near = w->corner * 256, left = step_of(g, w->dir) - w->pos;
+    /*
+     * A corner cut: a turn asked near a middle, before it or past it, taken at once where that side is open there. Not
+     * while it is off the middle still (a corner cut just before): it waits for the next middle, where it is on it again,
+     * as it is no farther off than a cell of the new way.
+     */
+    if (w->corner && w->dir >= 0 && side >> 1 != w->dir >> 1 && !w->off_x && !w->off_y) {
+        const int32_t step = step_of(g, side), near = w->corner * 256 < step ? w->corner * 256 : step, left = step_of(g, w->dir) - w->pos;
         int           c, r;
         if (w->pos > 0 && left <= near && beside(g, w->col, w->row, w->dir, &c, &r) && open_side(w, g, c, r, side)) {
             /* before the middle of the next cell: there now, so far short of its middle along the old way */

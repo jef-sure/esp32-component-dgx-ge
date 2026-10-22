@@ -102,7 +102,9 @@ goto or hold.
 
 Params are the state of an actor the game keeps in the actor: lives, what it
 is doing. The engine only keeps them and lets scripts set them; what they mean
-is the game's. Values are -32768..32767.
+is the game's. A param holds a whole number of 32 bits; the value it starts
+with is -32768..32767, so is a constant of set or add kept in its step; one
+beyond, up to 2^24 (exact as a float), is kept as an expression.
 """
 
 import math
@@ -785,9 +787,11 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     raise AnimError(f"{where}: {word} <param> <value>, of a param given before")
                 index = params[m.group(1)][0]
                 e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
-                if e.constant() is not None:
-                    code += struct.pack("<BBh", OP[word.upper()], index, whole(e.constant(), -32768, 32767, where))
+                if e.constant() is not None and -32768 <= half_away(e.constant()) <= 32767:
+                    code += struct.pack("<BBh", OP[word.upper()], index, half_away(e.constant()))
                 else:
+                    if e.constant() is not None:
+                        whole(e.constant(), -(1 << 24), 1 << 24, where)  # beyond, a float has it no more exactly
                     code += struct.pack("<BB", OP[word.upper() + "_X"], index) + e.code()
             elif word in ("signal", "sound"):
                 code += struct.pack("<BB", OP[word.upper()], const(rest, 0, 255, where))
@@ -1100,6 +1104,9 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
 
     if not scripts:
         raise AnimError("no script")
+    if script_at[scripts[-1]] == len(code):
+        # an empty script before another runs on into it; the last has nothing to run, the engine opens no such text
+        raise AnimError(f"script {scripts[-1]}: no statements, and it is the last: end it with hold")
     if len(scripts) > 255:
         raise AnimError(f"{len(scripts)} scripts, 255 at most")
     for at, name, where in event_fixups:

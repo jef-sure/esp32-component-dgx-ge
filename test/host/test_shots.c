@@ -30,6 +30,15 @@ static bool wall_touches(const dgx_ge_actor_t *a, int32_t x, int32_t y, dgx_ge_c
     return true;
 }
 
+/* a ledge one point high at y 20 (the top of a floor solid only there: a band of 1, a one-way floor) */
+static bool ledge_touches(const dgx_ge_actor_t *a, int32_t x, int32_t y, dgx_ge_contact_t *c, void *ctx)
+{
+    (void)a, (void)ctx;
+    if (y >> 8 != 20) return false;
+    c->x = x, c->y = y, c->nx = 0, c->ny = -1, c->surface = 7;
+    return true;
+}
+
 static int               hits;
 static dgx_ge_shot_hit_t last;
 
@@ -89,6 +98,21 @@ int main(int argc, char **argv)
     hits = 0;
     dgx_ge_shots_play(s, 300, &wall, bodies, bounds, met, NULL);
     CHECK(hits == 1 && last.handle == -1 && last.x == 10 && last.contact.surface == 9 && last.at_ms >= 224 && last.at_ms <= 226);
+    /* down through a ledge one point high, at any slant and speed: met, never passed */
+    const dgx_ge_terrain_t ledge = {.touches = ledge_touches};
+    srand(5);
+    int passed = 0;
+    for (int k = 0; k < 500; ++k) {
+        dgx_ge_shots_t *one = dgx_ge_shots_create(1);
+        dgx_ge_shots_kind(one, TEST_BLOB_DART, &dart);
+        dgx_ge_shots_fire(one, TEST_BLOB_DART, rand() % 100, rand() % 20, rand() % 801 - 400, 50 + rand() % 400, 0, 5, 9);
+        hits = 0;
+        for (uint32_t t = 0; t <= 2000 && !hits && dgx_ge_shots_kind_of(one, 0); t += 20 + rand() % 70)
+            dgx_ge_shots_play(one, t, &ledge, NULL, dgx_ge_rect(-1000, -1000, 2000, 2000), met, NULL);
+        passed += !hits || last.y != 20;
+        dgx_ge_shots_destroy(&one);
+    }
+    CHECK(passed == 0);
     /* out of the scene: gone, nothing met */
     const int far = dgx_ge_shots_fire(s, TEST_BLOB_DART, 0, -50, 0, -400, 300, 5, 9);
     hits = 0;

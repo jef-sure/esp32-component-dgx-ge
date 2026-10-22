@@ -23,7 +23,9 @@ extern "C" {
  *
  * RAM: the field, a bit a point (an 8-point line 64 points wide: 64 bytes),
  * 4 bytes a line that goes into its height (one, mostly), and the text,
- * DGX_GE_LABEL_TEXT bytes.
+ * DGX_GE_LABEL_TEXT bytes: it holds that less one, a longer text is cut
+ * between letters (32: 31 Latin letters, 15 Cyrillic); define it larger for
+ * longer texts.
  */
 #ifndef DGX_GE_LABEL_TEXT
 #define DGX_GE_LABEL_TEXT 32
@@ -44,7 +46,7 @@ bool dgx_ge_label_init(dgx_ge_label_t *label, dgx_ge_frame_t *frame, dgx_font_t 
                        uint8_t layer, uint8_t color);
 void dgx_ge_label_free(dgx_ge_label_t *label);
 
-/* Its text (cut to DGX_GE_LABEL_TEXT - 1 bytes); laid and marked only when it is another. */
+/* Its text (cut between letters to DGX_GE_LABEL_TEXT - 1 bytes at most); laid and marked only when it is another. */
 void dgx_ge_label_set(dgx_ge_label_t *label, const char *text);
 
 /* Its text a number, in decimal. */
