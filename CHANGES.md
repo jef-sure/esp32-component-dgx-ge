@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## 0.2.0 - 2026-10-22
 
 Fixes after a review of 0.1.1, each with a host test that fails without it.
 

@@ -1291,7 +1291,7 @@ for (;;) {
 [workflow-ru.md](workflow-ru.md). Коротко:
 
 1. Добавьте движок в свой проект ESP-IDF из регистра:
-   `idf.py add-dependency "jef-sure/dgx-ge^0.1.1"`. Он ляжет в
+   `idf.py add-dependency "jef-sure/dgx-ge^0.2.0"`. Он ляжет в
    `managed_components/jef-sure__dgx-ge`, `main` будет требовать его сам,
    а DGX подтянется как его зависимость (`jef-sure/dgx`).
 2. Напишите скрипт сборки пакета на Python (`Pack`, раздел 2.2). Как

@@ -1349,7 +1349,7 @@ a board, step by step and with what each step gives, is in its own
 document, [workflow-en.md](workflow-en.md). In short:
 
 1. Add the engine to your ESP-IDF project from the registry:
-   `idf.py add-dependency "jef-sure/dgx-ge^0.1.1"`. It lands in
+   `idf.py add-dependency "jef-sure/dgx-ge^0.2.0"`. It lands in
    `managed_components/jef-sure__dgx-ge`, `main` requires it by itself, and
    DGX comes along as its dependency (`jef-sure/dgx`).
 2. Write a Python script that builds the pack (`Pack`, section 2.2). How to
