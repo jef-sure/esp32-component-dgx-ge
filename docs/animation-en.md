@@ -886,6 +886,7 @@ one from the prince's.
 
 - The engine's host test, `test/host/test_anim.c`, covers the timeline of
   steps, the now/branch/end transitions, turning and moving, and params.
-- The sprite editor (a separate program, the Animations tab). Its player
+- The sprite editor ([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), a separate program, the
+  Animations tab). Its player
   repeats the engine's `dgx_ge_actor_event()`: you can send events with
   buttons and watch what happens.

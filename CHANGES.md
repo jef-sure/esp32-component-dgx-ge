@@ -37,6 +37,8 @@ Four pieces of glue a maze game had to write in C, now the engine's. A minor ver
   `dgx_ge_collisions_actor()` takes, and `_actor_of()` returns, a non-const
   actor. The crowd sends its hits so too: meetings of one frame now go in
   the order of the bodies' handles.
+- The docs link the sprite editor, now published:
+  [dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), and its description of the document format.
 
 ## 0.2.0 - 2026-10-22
 

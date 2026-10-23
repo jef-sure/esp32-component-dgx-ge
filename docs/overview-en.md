@@ -538,7 +538,7 @@ dgx_ge_scene_pixel_at(scene, layer, x, y, &sx, &sy);                     /* wher
 #### A scene from the editor
 
 A scene does not have to be assembled in code: it can be drawn in the
-sprite editor, with layers, pictures on them, characters, zones, entrances
+sprite editor ([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor)), with layers, pictures on them, characters, zones, entrances
 and tile grids. The packer puts each such scene in as a blob
 `SCENE_<NAME>`, and the names of its objects as constants in the header
 (`<PREFIX>_SCENE_<SCENE>_ZONE_<NAME>` and so on). The game lays it out
@@ -1448,7 +1448,7 @@ document, [workflow-en.md](workflow-en.md). In short:
 | `tools/dgx_ge_explain.py` | retells scripts in words |
 | `font2c/dgx_fonts.py` of DGX | fonts: which face the rules will pick (`pick`, `list`), a font as JSON for editors (`json`); the fonts themselves are made by the build from the requests |
 | `tools/dgx_ge_text.py` | text layout as the engine does it, for the editor; the font as `dgx_fonts.py json` of DGX reads it |
-| sprite editor | a separate program, to be published later: pictures, masks, animations, the state machine, scenes, dialogs, with a live preview in motion. The pack reads its files through `Pack.add_sprites`: sets, masks, animations, tilesets, styles, dialogs, scenes, the scene graph and the game's data (constants, timers, sounds, shows, crops, chases) |
+| sprite editor | a separate program, [dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor): pictures, masks, animations, the state machine, scenes, dialogs, with a live preview in motion. The pack reads its files through `Pack.add_sprites`: sets, masks, animations, tilesets, styles, dialogs, scenes, the scene graph and the game's data (constants, timers, sounds, shows, crops, chases) |
 
 ### If something goes wrong
 

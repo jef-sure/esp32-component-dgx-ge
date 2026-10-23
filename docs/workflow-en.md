@@ -5,8 +5,8 @@
 A game of DGX-GE is two things: data and a little C. The data are pictures
 with their colors, animation scripts, scenes, dialogs and the game's numbers;
 the C is what the data cannot say. The engine does not care where the data
-come from. I made a sprite editor for it, which will be published
-separately, but the engine knows nothing of that editor. It reads one file, the
+come from. I made a sprite editor for it,
+[dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), but the engine knows nothing of that editor. It reads one file, the
 pack, and the game's C reads one header of numbers beside it, and both are
 made by one program, the packer `tools/dgx_ge_pack.py`. Whatever makes the
 data, my editor or another one, a Python script, a generator of levels, a
@@ -230,9 +230,10 @@ number, the order of `add_sound`, so a sound added first is sound 0.
 
 The second way: a tool writes one JSON document, and the packer reads all of
 it with one call, `Pack.add_sprites(<document>)`. The format is named
-`dgx-ge-sprites` (version 1). The sprite editor I am publishing separately
-writes it, and any other editor or generator may write it too. A full
-description of the format comes with that editor; until then the reference is
+`dgx-ge-sprites` (version 1). My sprite editor,
+[dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), writes it, and any other editor or generator may write
+it too. The format is described in full beside that editor,
+[sprite-format.md](https://github.com/jef-sure/dgx-ge-editor/blob/main/sprite-format.md); what the engine goes by is
 the packer itself (`add_sprites` and the methods it calls, with their
 docstrings) and the engine's tests, which write such documents and check what
 the packer makes of them: `test/host/test_sprites.py` (sets, frames, masks,

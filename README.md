@@ -12,7 +12,8 @@ less C of its own than the original had. Neither that game nor anything of
 it comes with the engine; it is only what the engine was checked on.
 
 It is young: what each version brought is in [CHANGES.md](CHANGES.md).
-Lately it has learned to read whole games from my sprite editor's files
+Lately it has learned to read whole games from the files of my sprite editor
+([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor))
 (scenes, the graph of scenes, links, the game's own data), to let DGX make
 its fonts for each board, and to start on three boards I keep on my desk.
 Its interfaces will still change.
@@ -46,7 +47,8 @@ Its interfaces will still change.
   its lock given to the mixer, so the game never takes one.
 - **Python tools** (`tools/`) that turn pictures, scripts, dialogs and
   sounds into one pack and a C header for it, also straight from a file of
-  my sprite editor: its sets, animations, tiles, scenes, graph and game.
+  my sprite editor ([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor)): its sets, animations, tiles,
+  scenes, graph and game.
 
 The engine itself knows no board: the game sets up its own display, touch
 and sound and gives the engine a DGX screen. For the boards games have run
