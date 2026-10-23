@@ -123,12 +123,12 @@ typedef struct {
     /*
      * What answers to a pointer (dgx_ge_widgets.h): the line as a button (a tap goes on), the answers as a list
      * (a tap picks and takes), a control of an answer as a button over its picture (a tap works it); hit only, the
-     * view draws as it does. The talk and the moment, for the callbacks while the pointer is told.
+     * view draws as it does. The talk, for the callbacks while the pointer is told (at its moments, the talk's and
+     * the world's, as the pointer came).
      */
     dgx_ge_widgets_t     widgets;
     dgx_ge_widget_t      widget_store[2 * DGX_GE_TALK_VIEW_CONTROLS + 4]; /* the line, the list, a control each and a row to swipe a slider, the scroll bar */
     dgx_ge_talk_t       *talk;
-    uint32_t             now_ms;
     bool                 pixels;               /* laid in pixels of the display (its layer is one in pixels): the frame's scale its unit */
     const bool          *fonts_made;           /* by font: made for the display's scale (drawn as it is, not times the unit); NULL: none */
     uint8_t              unit;                 /* pixels of the display a point of the style, as the style was taken */
@@ -174,10 +174,14 @@ void dgx_ge_talk_view_pixels(dgx_ge_talk_view_t *view, bool pixels, const bool *
 /*
  * The talk moved on to now as it is shown: its line or answers laid anew
  * when they change (strings in the language of the pack), a long important
- * line scrolled, the talk given its time. False when the view could not lay
- * it (no memory).
+ * line scrolled, the talk given its time. Two moments, as every call that
+ * moves a talk on takes (dgx_ge_dialog.h): now_ms the talk's own time (real
+ * time: its letters, scrolling, lines with a time go on by it), world_ms the
+ * world's (what the talk does to the world lands there; a dialog that pauses
+ * the game: where the world stands). A game that never stops its world gives
+ * the same moment twice. False when the view could not lay it (no memory).
  */
-bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const dgx_ge_strings_t *strings, uint32_t now_ms);
+bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const dgx_ge_strings_t *strings, uint32_t now_ms, uint32_t world_ms);
 
 /*
  * An event of the interface for the talk as it is shown: a button pressed
@@ -186,10 +190,10 @@ bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const 
  * talk is at (it has just begun, or gone on since): no line or choice is
  * passed unseen.
  */
-void dgx_ge_talk_view_event(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, dgx_ge_ui_t event, uint32_t now_ms);
+void dgx_ge_talk_view_event(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, dgx_ge_ui_t event, uint32_t now_ms, uint32_t world_ms);
 
 /* The pointer as it is now (pixels of the display): a tap on the line goes on, on an answer picks and takes it, on a control works it; true when taken. */
-bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const dgx_ge_pointer_t *pointer, uint32_t now_ms);
+bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, const dgx_ge_pointer_t *pointer, uint32_t now_ms, uint32_t world_ms);
 
 /*
  * The field of the answer chosen edited (activate on it began it): what is typed into it, a code point at a time, as a
@@ -198,7 +202,7 @@ bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, con
  * field, then on as the answer leads (dgx_ge_talk_field_done); U+001B (or back) leaves the field as it was. A tap on the
  * display away from the field is done too. Nothing while nothing is edited.
  */
-void dgx_ge_talk_view_type(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, uint32_t code, uint32_t now_ms);
+void dgx_ge_talk_view_type(dgx_ge_talk_view_t *view, dgx_ge_talk_t *talk, uint32_t code, uint32_t now_ms, uint32_t world_ms);
 
 /*
  * A field edited now, and where it is, in pixels of the display: for a keyboard on the display to stand away from it

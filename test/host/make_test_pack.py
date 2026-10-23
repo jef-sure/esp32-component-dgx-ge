@@ -1,4 +1,4 @@
-"""A small pack for test_pack.c: two sets, pictures of every depth, a blob."""
+"""A small pack for test_pack.c: three sets, pictures of every depth, a blob."""
 import os
 import sys
 
@@ -9,6 +9,7 @@ from dgx_ge_graph import Graph  # noqa: E402
 pack = Pack("TEST")
 hero = pack.add_set("HERO", [(255, 0, 0), (0, 255, 0), (0, 0, 255)])
 wide = pack.add_set("WIDE", [(i, i, i) for i in range(1, 201)])
+pack.add_set("TINY", [(1, 2, 3), (4, 5, 6)])  # after a wide one: the colors of all the sets laid one after another (test_glue.c)
 pack.add_image("ONE", hero, 9, 2, [1, 0, 1, 0, 0, 0, 0, 0, 1,  0, 1, 0, 0, 0, 0, 0, 0, 0], 1, (4, 1))
 pack.add_image("FOUR", hero, 3, 2, [1, 0, 3,  2, 2, 0], 4, (0, 1))
 pack.add_image("EIGHT", wide, 2, 1, [200, 7], 8, (-3, 5))
@@ -431,6 +432,17 @@ label only
     end
 label late
     say game "Too late."
+    end
+""")
+# a dialog that stops the game, with a tell before its first line and one after a line with a time: the world stands
+# while it goes on, its line goes by the talk's own time
+pack.add_dialog("""
+dialog rest
+roles hero HERO
+pause
+    tell hero hit             # before the first line: as the talk begins
+    say game "Resting." 1s
+    tell hero hit             # after the line's time
     end
 """)
 # a page of settings: the game's actor (SETTINGS: params only) and controls of its params: a switch (its picture by
@@ -885,6 +897,7 @@ pack.add_mask(slab, 1, 0, 0, 72, 40, [1] * (72 * 40))
 pack.add_anim("TIMING", """
 event go
 param n 0
+param speed 100                       # ms a step of stepper
 
 script creep                          # an eighth of a point a second: 12.5 points in 100 s
     velocity 1 / 8, 0
@@ -920,8 +933,101 @@ script tick                           # a frame of 166 ms for ever: half an hour
     frame ONE 166ms
     goto tick
 
+script stepper                        # a step every speed ms, the speed read as each frame begins (the game changes it)
+    signal 2
+    frame none (speed)ms
+    goto stepper
+
+script bounds                         # a time below 1 is 1 ms, above 65535 is 65535; the picture an expression too, or moved
+    frame (ONE + n) (speed - 1000)ms
+    frame ONE (speed * 1000)ms at 2, -1
+    hold
+
 on go: caller -> gone now
 on go: runner -> gone now
+""")
+
+# events at once from its own say (test_now.c): the game answers signal 1 of s0 with as many as the test asks, each
+# taken in the script the one before led to; every script says its sound as it begins, so the way gone is heard
+pack.add_anim("NOWS", """
+event next, eat, halt, rest, sleep, late, spin
+
+script s0
+    signal 1
+    sound 90                          # the rest of the step: not made once an event at once came
+    frame ONE 100ms
+    branch
+    frame FOUR 100ms
+    hold
+
+script s1
+    sound 1
+    sound 11                          # all of s1 before its frame is made, then the next event in turn
+    frame ONE 100ms
+    branch
+    frame FOUR 100ms
+    hold
+
+script s2
+    sound 2
+    frame ONE 100ms
+    hold
+
+script s3
+    sound 3
+    frame ONE 100ms
+    hold
+
+script s4
+    sound 4
+    frame ONE 100ms
+    hold
+
+script s5
+    sound 5
+    frame ONE 100ms
+    hold
+
+script ate                            # eat means something in s1 only
+    sound 20
+    frame EIGHT 100ms
+    hold
+
+script h1
+    sound 31
+    frame EIGHT 100ms
+    hold
+
+script h2
+    sound 32
+    frame EIGHT 100ms
+    hold
+
+script holder                         # holds at once, no frame: late waits for its end
+    sound 40
+    hold
+
+script after
+    sound 41
+    frame ONE 100ms
+    hold
+
+script spinning                       # never a frame: it stops where it is, the events still waiting passed by
+    goto spinning
+
+on next: s0 -> s1 now
+on next: s1 -> s2 now
+on next: s2 -> s3 now
+on next: s3 -> s4 now
+on next: s4 -> s5 now
+on eat: s1 -> ate now
+on halt: s0 -> h1 branch
+on rest: s0 -> h2 branch
+on halt: s1 -> h1 branch
+on sleep: s0 -> holder now
+on late: holder -> after end
+on spin: s0 -> spinning now
+on next: spinning -> s1 now
 """)
 
 # walked from cell to cell (dgx_ge_walk_bind_t): told the side it goes and standing, each script says so as it begins
@@ -992,6 +1098,41 @@ script back
 
 on struck: stand -> hurt now
 on bounced: stand -> back now
+""")
+# the game's variables (test_game_vars.c): a score, a light, one near the top of 32 bits; a kind that reads and writes
+# them (counting: 10 more, what it is then into a param, the light a step down once it is 30 or more; topping: past the
+# top), a page whose control edits one, an answer shown by one, a line of two
+pack.add_variable("score", 5)
+pack.add_variable("light", 2)
+pack.add_variable("big", 2147483000)
+pack.add_anim("TALLY", """
+event tally, top
+param seen 0
+script rest
+    frame 0 100ms
+    hold
+script counting
+    add game_var.score 10
+    set seen game_var.score
+    goto rest if game_var.score < 30
+    set game_var.light game_var.light - 1
+    goto rest
+script topping
+    add game_var.big 1000
+    goto rest
+on tally: rest -> counting now
+on top: rest -> topping now
+""")
+pack.add_dialog("""
+dialog tally_page
+choose game
+    "Light" control SLIDER game_var.light
+    "Rich" if game_var.score >= 30 -> rich
+    "Back" -> back
+label rich
+    say game "{game_var.score} of {game_var.light}" 1s
+label back
+    end
 """)
 pack.write(sys.argv[1], sys.argv[2])
 

@@ -417,7 +417,7 @@ static dgx_ge_rect_t text_place(const dgx_ge_talk_view_t *v)
     return dgx_ge_rect(x, b.y + v->style.pad[1] + (v->name.canvas ? v->name.height : 0), v->line.width, v->line.height);
 }
 
-bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge_strings_t *strings, uint32_t now_ms)
+bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge_strings_t *strings, uint32_t now_ms, uint32_t world_ms)
 {
     if (t->state == DGX_GE_TALK_OVER) {
         v->state = DGX_GE_TALK_OVER;
@@ -469,7 +469,7 @@ bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge
     if (editing != v->editing) {
         v->editing = editing;
         const dgx_ge_field_t *f = editing ? dgx_ge_talk_field(t, t->pick) : NULL;
-        if (f && !make_fields(v)) v->editing = false, dgx_ge_talk_field_done(t, false); /* no memory to edit it in: as it was */
+        if (f && !make_fields(v)) v->editing = false, dgx_ge_talk_field_done(t, false, now_ms, world_ms); /* no memory to edit it in: as it was */
         else if (f) {
             const int most = (f->size < DGX_GE_FIELD_BYTES ? f->size : DGX_GE_FIELD_BYTES) - 1;
             int       n    = (int)strnlen(f->text, f->size);
@@ -488,7 +488,7 @@ bool dgx_ge_talk_view_play(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge
     else if (t->state == DGX_GE_TALK_SAYING && dgx_ge_textbox_play(&v->line, now_ms)) mark(v, text_place(v)); /* a letter more, a line up: the text alone */
     if (changed || (t->state == DGX_GE_TALK_CHOOSING && (v->widgets.count < 2 || v->widget_store[1].value != first_line(v, t->pick, NULL))))
         place_widgets(v, t);
-    dgx_ge_talk_play(t, now_ms, t->state != DGX_GE_TALK_SAYING || dgx_ge_textbox_at_end(&v->line));
+    dgx_ge_talk_play(t, now_ms, world_ms, t->state != DGX_GE_TALK_SAYING || dgx_ge_textbox_at_end(&v->line));
     return true;
 }
 
@@ -526,32 +526,32 @@ static void worked(dgx_ge_widget_t *w, int what, void *ctx)
         else if (y < ky) to = top - rows;
         else if (y >= ky + kh) to = top + 2 * rows - 1;
         to = answer_of(v, to < 0 ? 0 : to); /* the line to the answer it shows */
-        for (int k = 0; k < 64 && t->pick != to; ++k) dgx_ge_talk_event(t, t->pick < to ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
+        for (int k = 0; k < 64 && t->pick != to; ++k) dgx_ge_talk_event(t, t->pick < to ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, t->now_ms, t->world_ms);
     } else if (w->kind == DGX_GE_WIDGET_LIST) {
         /* the answer of the line under the pointer chosen: the choice moved there; taken when let go */
         const int to = answer_of(v, w->value);
-        for (int k = 0; k < 16 && t->pick != to; ++k) dgx_ge_talk_event(t, t->pick < to ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
-        if (what == DGX_GE_WIDGET_ACTIVATED) dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, v->now_ms);
+        for (int k = 0; k < 16 && t->pick != to; ++k) dgx_ge_talk_event(t, t->pick < to ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, t->now_ms, t->world_ms);
+        if (what == DGX_GE_WIDGET_ACTIVATED) dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, t->now_ms, t->world_ms);
     } else if (w->kind == DGX_GE_WIDGET_SLIDER && (w->flags & DGX_GE_WIDGET_SWIPE) && what == DGX_GE_WIDGET_ACTIVATED) {
         /* a tap on a slider's row: the row chosen, as a tap on any row; its value as it is */
-        for (int k = 0; k < 16 && t->pick != w->min_row; ++k) dgx_ge_talk_event(t, t->pick < w->min_row ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
+        for (int k = 0; k < 16 && t->pick != w->min_row; ++k) dgx_ge_talk_event(t, t->pick < w->min_row ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, t->now_ms, t->world_ms);
     } else if ((w->kind == DGX_GE_WIDGET_SLIDER || w->kind == DGX_GE_WIDGET_SWITCH) && what == DGX_GE_WIDGET_CHANGED) {
         /* a control with a range put at a place: its answer chosen, then its own events (more, less) until it is there; its value as it came out */
-        for (int k = 0; k < 16 && t->pick != w->min_row; ++k) dgx_ge_talk_event(t, t->pick < w->min_row ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
+        for (int k = 0; k < 16 && t->pick != w->min_row; ++k) dgx_ge_talk_event(t, t->pick < w->min_row ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, t->now_ms, t->world_ms);
         int value, least, most, step;
         if (w->kind == DGX_GE_WIDGET_SWITCH) {
             /* two values: the control's own activate flips it (and takes its answer, as the button does) */
-            if (dgx_ge_talk_control_range(t, t->pick, &value, &least, &most, &step) && value != w->value) dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, v->now_ms);
+            if (dgx_ge_talk_control_range(t, t->pick, &value, &least, &most, &step) && value != w->value) dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, t->now_ms, t->world_ms);
         } else {
             for (int k = 0; k < 64 && dgx_ge_talk_control_range(t, t->pick, &value, &least, &most, &step) && value != w->value; ++k)
-                dgx_ge_talk_event(t, value < w->value ? DGX_GE_UI_MORE : DGX_GE_UI_LESS, v->now_ms);
+                dgx_ge_talk_event(t, value < w->value ? DGX_GE_UI_MORE : DGX_GE_UI_LESS, t->now_ms, t->world_ms);
         }
         if (dgx_ge_talk_control_range(t, t->pick, &value, &least, &most, &step)) w->value = (int16_t)value;
     } else if (what == DGX_GE_WIDGET_ACTIVATED) {
         /* the line: on; a control: the choice moved to its answer, then worked as activate (the control's own) */
         if (t->state == DGX_GE_TALK_CHOOSING)
-            for (int k = 0; k < 16 && t->pick != w->value; ++k) dgx_ge_talk_event(t, t->pick < w->value ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, v->now_ms);
-        dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, v->now_ms);
+            for (int k = 0; k < 16 && t->pick != w->value; ++k) dgx_ge_talk_event(t, t->pick < w->value ? DGX_GE_UI_NEXT : DGX_GE_UI_PREV, t->now_ms, t->world_ms);
+        dgx_ge_talk_view_event(v, t, DGX_GE_UI_ACTIVATE, t->now_ms, t->world_ms);
     }
 }
 
@@ -644,23 +644,23 @@ static void place_widgets(dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t)
     }
 }
 
-bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge_pointer_t *p, uint32_t now_ms)
+bool dgx_ge_talk_view_pointer(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, const dgx_ge_pointer_t *p, uint32_t now_ms, uint32_t world_ms)
 {
     if (t->state == DGX_GE_TALK_OVER || v->style_number < 0 || !v->widgets.count) return false;
     dgx_ge_rect_t field;
     if (dgx_ge_talk_view_editing(v, t, &field)) {
         /* a field edited: the pointer is the talk's; a tap away from the field is done (the keyboard's own fingers never come here) */
         if (p->pressed && !(p->x >= field.x && p->x < field.x + field.w && p->y >= field.y && p->y < field.y + field.h))
-            dgx_ge_talk_view_type(v, t, '\n', now_ms);
+            dgx_ge_talk_view_type(v, t, '\n', now_ms, world_ms);
         return true;
     }
-    v->talk = t, v->now_ms = now_ms;
+    v->talk = t, t->now_ms = now_ms, t->world_ms = world_ms; /* the moments of the events the widgets tell it */
     const bool taken = dgx_ge_widgets_pointer(&v->widgets, p);
     v->talk = NULL;
     return taken;
 }
 
-void dgx_ge_talk_view_type(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, uint32_t code, uint32_t now_ms)
+void dgx_ge_talk_view_type(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, uint32_t code, uint32_t now_ms, uint32_t world_ms)
 {
     const dgx_ge_field_t *f = v->editing && t->editing && v->fields ? dgx_ge_talk_field(t, t->pick) : NULL;
     if (!f) return;
@@ -670,7 +670,7 @@ void dgx_ge_talk_view_type(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, uint32_t cod
         const bool changed = code == '\n' && strcmp(f->text, v->fields->edit) != 0;
         if (changed) memcpy(f->text, v->fields->edit, (size_t)v->fields->edit_len + 1);
         v->editing = false;
-        dgx_ge_talk_field_done(t, changed);
+        dgx_ge_talk_field_done(t, changed, now_ms, world_ms);
         if (t->state == DGX_GE_TALK_CHOOSING) take_controls(v, t, now_ms);
         mark(v, v->box);
         return;
@@ -708,20 +708,20 @@ bool dgx_ge_talk_view_editing(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *
     return true;
 }
 
-void dgx_ge_talk_view_event(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms)
+void dgx_ge_talk_view_event(dgx_ge_talk_view_t *v, dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms, uint32_t world_ms)
 {
     /* a step not shown yet (the talk begun, or gone on, since the view last played it): nothing, none is passed unseen */
     if (v->style_number < 0 || v->dialog != t->dialog || v->state != t->state || v->at != t->at) return;
     if (v->editing && t->editing) {
         /* a field edited: activate is done, back leaves it as it was; the rest nothing */
-        if (event == DGX_GE_UI_ACTIVATE || event == DGX_GE_UI_BACK) dgx_ge_talk_view_type(v, t, event == DGX_GE_UI_ACTIVATE ? '\n' : 0x1B, now_ms);
+        if (event == DGX_GE_UI_ACTIVATE || event == DGX_GE_UI_BACK) dgx_ge_talk_view_type(v, t, event == DGX_GE_UI_ACTIVATE ? '\n' : 0x1B, now_ms, world_ms);
         return;
     }
     if (t->state == DGX_GE_TALK_SAYING && (event == DGX_GE_UI_ACTIVATE || event == DGX_GE_UI_NEXT) && dgx_ge_textbox_appear_all(&v->line)) {
         mark(v, text_place(v));
         return;
     }
-    dgx_ge_talk_event(t, event, now_ms);
+    dgx_ge_talk_event(t, event, now_ms, world_ms);
 }
 
 void dgx_ge_talk_view_show(const dgx_ge_talk_view_t *v, const dgx_ge_talk_t *t, dgx_ge_scene_t *scene, uint8_t layer)

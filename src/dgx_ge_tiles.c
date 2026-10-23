@@ -521,6 +521,19 @@ dgx_ge_rect_t dgx_ge_grid_change_box(const dgx_ge_grid_t *g, int col, int row)
     return box;
 }
 
+/* Does a cycle of the tile of a cell show another picture at to_ms than at from_ms? */
+static bool cycle_turns(const dgx_ge_grid_t *g, int col, int row, int tile, uint32_t from_ms, uint32_t to_ms)
+{
+    const dgx_ge_tileset_t *set   = g->tileset;
+    const uint8_t          *t     = set->table + (tile - 1) * TILE_BYTES;
+    const cell_t            owner = cell_of(g, col, row);
+    for (unsigned i = 0; i < t[3]; ++i) {
+        const uint8_t *r = set->piece_table + (u16_at(t + 4) + i) * PIECE_BYTES;
+        if (r[3] == MODE_CYCLE && picture_of(g, r, owner, NULL, from_ms) != picture_of(g, r, owner, NULL, to_ms)) return true; /* a cycle reads no expression */
+    }
+    return false;
+}
+
 int dgx_ge_grid_animate(dgx_ge_grid_t *g, uint32_t now_ms, dgx_ge_rect_t *places, int max)
 {
     const dgx_ge_tileset_t *set = g->tileset;
@@ -528,16 +541,7 @@ int dgx_ge_grid_animate(dgx_ge_grid_t *g, uint32_t now_ms, dgx_ge_rect_t *places
     for (int row = 0; set && row < g->rows; ++row)
         for (int col = 0; col < g->cols; ++col) {
             const int tile = dgx_ge_grid_cell(g, col, row);
-            if (tile < 1 || tile > set->tiles) continue;
-            /* a cycle of this tile showing another picture now */
-            const uint8_t *t       = set->table + (tile - 1) * TILE_BYTES;
-            const cell_t   owner   = cell_of(g, col, row);
-            bool           changed = false;
-            for (unsigned i = 0; !changed && i < t[3]; ++i) {
-                const uint8_t *r = set->piece_table + (u16_at(t + 4) + i) * PIECE_BYTES;
-                changed          = r[3] == MODE_CYCLE && picture_of(g, r, owner, NULL, g->now_ms) != picture_of(g, r, owner, NULL, now_ms); /* a cycle reads no expression */
-            }
-            if (!changed) continue;
+            if (tile < 1 || tile > set->tiles || !cycle_turns(g, col, row, tile, g->now_ms, now_ms)) continue;
             if (n < max) {
                 const dgx_ge_rect_t was = box_at(g, col, row, tile, g->now_ms), is = box_at(g, col, row, tile, now_ms);
                 places[n] = dgx_ge_rect_empty(was) ? is : dgx_ge_rect_empty(is) ? was : dgx_ge_rect_union(was, is);
@@ -546,6 +550,40 @@ int dgx_ge_grid_animate(dgx_ge_grid_t *g, uint32_t now_ms, dgx_ge_rect_t *places
         }
     g->now_ms = now_ms;
     return n;
+}
+
+/* The places of the pieces of a tile in a cell at a time marked, each in its layer. */
+static void mark_at(const dgx_ge_grid_t *g, dgx_ge_scene_t *scene, int col, int row, int tile, uint32_t now_ms)
+{
+    const uint8_t *t     = g->tileset->table + (tile - 1) * TILE_BYTES;
+    const cell_t   owner = cell_of(g, col, row);
+    for (unsigned i = 0; i < t[3]; ++i) {
+        dgx_ge_item_t item;
+        if (piece_item(g, col, row, owner, u16_at(t + 4) + i, now_ms, &item))
+            dgx_ge_scene_invalidate(scene, item.layer, item.image ? dgx_ge_image_box(item.image, item.x, item.y, false) : item.clip);
+    }
+}
+
+bool dgx_ge_grid_play(dgx_ge_grid_t *g, dgx_ge_scene_t *scene, uint32_t now_ms)
+{
+    const dgx_ge_tileset_t *set  = g->tileset;
+    const uint32_t          was  = g->now_ms;
+    const bool              kept = g->laid && g->laid[g->cols * g->rows] <= scene->set_count;
+    bool                    same = true;
+    g->now_ms                    = now_ms;
+    for (int row = 0; set && row < g->rows; ++row)
+        for (int col = 0; col < g->cols; ++col) {
+            const int tile = dgx_ge_grid_cell(g, col, row);
+            if (tile < 1 || tile > set->tiles || !cycle_turns(g, col, row, tile, was, now_ms)) continue;
+            if (kept) same &= dgx_ge_grid_relay(g, scene, col, row, false);
+            else {
+                /* nothing kept to lay it again by: where it was and is marked, the game lays the set anew */
+                mark_at(g, scene, col, row, tile, was);
+                mark_at(g, scene, col, row, tile, now_ms);
+                same = false;
+            }
+        }
+    return same;
 }
 
 static int floor_div(int a, int b)
@@ -809,20 +847,54 @@ static void touch_solid(int col, int row, int tile, dgx_ge_rect_t solid, unsigne
     }
 }
 
-/* The solids about a body, gathered first: a touch is then found among them all (a point inside one is beside no other). */
+/*
+ * The solids about a body, gathered first: a touch is then found among them all (a point inside one is beside no other).
+ * SOLIDS_ABOUT of them on the stack; more in a buffer of the heap, taken once at need and kept, grown only when more are
+ * needed (the stack of a game's task is small and this call is deep in it).
+ */
 #define SOLIDS_ABOUT 32
 typedef struct {
-    dgx_ge_rect_t rects[SOLIDS_ABOUT];
-    int16_t       col[SOLIDS_ABOUT], row[SOLIDS_ABOUT];
-    uint16_t      tile[SOLIDS_ABOUT];
-    int           count, over;
+    dgx_ge_rect_t *rects;
+    int16_t       *col, *row;
+    uint16_t      *tile;
+    int            room, count, over;
 } solids_t;
+
+#define SOLID_BYTES (sizeof(dgx_ge_rect_t) + 2 * sizeof(int16_t) + sizeof(uint16_t))
+#define SOLIDS_STEP 16 /* the buffer of the heap grows by so many */
+
+static struct {
+    uint8_t *block;
+    int      room;
+    bool     busy; /* a touch told while they are in use asks again: that one goes point by point, not over them */
+} more_solids;
+
+/* s laid over the buffer of the heap, room for n at least; false when there is no memory for them, or it is in use. */
+static bool solids_of_heap(solids_t *s, int n)
+{
+    if (more_solids.busy) return false;
+    if (n > more_solids.room) {
+        n = (n + SOLIDS_STEP - 1) / SOLIDS_STEP * SOLIDS_STEP; /* a step at a time: a crowd a little larger takes no new one */
+        uint8_t *block = malloc((size_t)n * SOLID_BYTES);
+        if (!block) return false;
+        free(more_solids.block);
+        more_solids.block = block, more_solids.room = n;
+    }
+    const int room = more_solids.room;
+    uint8_t  *p    = more_solids.block;
+    s->rects = (dgx_ge_rect_t *)p, p += (size_t)room * sizeof(dgx_ge_rect_t);
+    s->col   = (int16_t *)p, p += (size_t)room * sizeof(int16_t);
+    s->row   = (int16_t *)p, p += (size_t)room * sizeof(int16_t);
+    s->tile  = (uint16_t *)p;
+    s->room = room, s->count = s->over = 0;
+    return true;
+}
 
 static void gather_solid(int col, int row, int tile, dgx_ge_rect_t solid, unsigned held, void *ctx)
 {
     solids_t *s = ctx;
     (void)held; /* gathered for one mask: every body here holds it */
-    if (s->count >= SOLIDS_ABOUT) {
+    if (s->count >= s->room) {
         ++s->over;
         return;
     }
@@ -847,15 +919,22 @@ int dgx_ge_grid_touching(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, int 
     dgx_ge_rect_t all = masks_box(body, masks, n, mask);
     if (dgx_ge_rect_empty(all)) return 0;
     const dgx_ge_rect_t about = dgx_ge_rect(all.x - reach, all.y - reach, all.w + 2 * reach, all.h + 2 * reach);
-    solids_t            s     = {.count = 0, .over = 0};
+    dgx_ge_rect_t       rects[SOLIDS_ABOUT];
+    int16_t             cols[SOLIDS_ABOUT], rows[SOLIDS_ABOUT];
+    uint16_t            tiles[SOLIDS_ABOUT];
+    solids_t            s = {.rects = rects, .col = cols, .row = rows, .tile = tiles, .room = SOLIDS_ABOUT};
     each_solid(g, about, 1u << mask, gather_solid, &s);
+    if (s.over && solids_of_heap(&s, s.count + s.over)) each_solid(g, about, 1u << mask, gather_solid, &s);
     if (s.over) {
-        /* more solids about than are kept at once: each in turn, whether a point is inside another asked of the grid there */
+        /* more solids about than can be kept: each in turn, whether a point is inside another asked of the grid there */
         each_solid(g, about, 1u << mask, touch_solid, &w);
         return w.found;
     }
+    const bool heap = s.rects != rects;
+    if (heap) more_solids.busy = true;
     w.solids = s.rects, w.solid_count = s.count;
     for (int i = 0; i < s.count; ++i) touch_solid(s.col[i], s.row[i], s.tile[i], s.rects[i], 1u << mask, &w);
+    if (heap) more_solids.busy = false;
     return w.found;
 }
 

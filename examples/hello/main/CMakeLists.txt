@@ -19,3 +19,7 @@ idf_component_register(
 )
 # the params an actor keeps, as many as the pack's animations need
 dgx_ge_params_of_pack(assets/hello_pack.h)
+# the events at once an actor's own say may give in one step: the engine's default, said aloud
+dgx_ge_now_events(4)
+# the synthesizers of music the build carries: the engine's default, FM, said aloud
+dgx_ge_synths(fm)

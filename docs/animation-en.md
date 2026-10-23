@@ -48,8 +48,10 @@ The commands of a step:
 | --- | --- |
 | `frame P 83ms` | show picture P for so many ms; this ends the step |
 | `frame P 83ms at 2,-1` | the same, with the picture moved from the actor forward and down |
+| `frame none (speed)ms` | the time an expression: worked out at the moment the frame begins, from the params as they are then (section 2) |
 | `dx 3`, `dy -2` | move the actor at once by so many scene points: forward (back when negative), down |
-| `flip` | turn round |
+| `flip` | turn round: mirrored, facing the other way than its pictures |
+| `rotate 90`, `rotate -90`, `rotate to 180`, `rotate to (dir * 90)` | turn by so many degrees clockwise (anticlockwise when negative), or into that turn; the degrees an expression worked out at the step; see "Facing" below |
 | `velocity 40 0` | velocity in scene points a second, x forward; holds until the next movement command |
 | `accel 0 300` | acceleration in scene points a second a second |
 | `path x: 40*t, y: g*t*t/2` | position by a formula of time, section 3 |
@@ -67,8 +69,11 @@ The commands of a step:
 | `vanish` | the actor leaves the game; the game removes it |
 | `hit 2 on 1 damage 3 event hurt` | what mask 2 does when it meets mask 1 of another actor: damage, an event for that actor, and `recoil` for an event to itself; section 5 |
 | `set hp 3`, `add hp -1` | the actor's params |
+| `set game_var.score 0`, `add game_var.score 10` | a variable of the game (declared in the pack, `Pack.add_variable`); section 6 |
 | `signal 3` | tell the game |
 | `sound 1` | a sound |
+| `music theme`, `music theme 500ms`, `music stop`, `music stop 1s` | a music of the pack plays (`Pack.add_music`; the same one already playing goes on), at once or by a fade: the one playing goes quieter over the time, then this one comes in as long; `stop` is silence; section 5 |
+| `music volume 30% 500ms`, `music volume 100% 500ms` | the music's level by design, a share of its volume in the settings, reached over the time (at once without one); 100% is back to the setting; section 5 |
 | `branch` | a branch point: the script may be interrupted here (section 4) |
 | `hold` | stay on the last frame |
 | `goto name` | go on from a label of this script or from the start of another script |
@@ -80,6 +85,49 @@ PoP does it.
 **Forward** is the way the unflipped picture faces. After `flip`, forward is
 the other way. The side is taken at the moment of each command, so a `flip`
 followed by `dx 3` in the same step moves the actor in the new direction.
+
+**Facing.** An actor faces one of eight ways, the eight DGX draws a picture
+in: mirrored or not (`flip`), and then turned clockwise by a quarter turn
+0, 1, 2 or 3 times (`rotate`). Its picture is drawn so around its origin. A
+game seen from above turns its hero to face up or down; a platformer never
+turns and notices nothing: with no turn everything is as it always was.
+
+Whatever a script says in the actor's own axes, x forward and y down of its
+pictures, turns with it: `dx`, `dy`, `velocity`, `accel`, a `path` (in the
+axes it began in: a turn in the middle of it does not bend it), the picture's
+offset `frame … at`, `release` and `shoot`, the points of its pictures (a hand
+and what it holds, which is turned with it), its masks (collisions, hits,
+contacts), `front` and `back` of a contact, the `dx`, `dy` a `sense` gives and
+the found one's `its.vx`, `its.vy`, `steer`. The scene does not turn: `x`, `y`,
+the terrain and the tiles, the sides `below`, `above`, `left`, `right` of a
+contact. Turned 90 (facing down), `velocity 40 0` goes down the screen,
+`dy 2` moves two points to the left, and `contact 1 front on bump` watches
+what is below it.
+
+```
+script go_down
+    rotate to 90          # forward is down now
+    velocity 60 0
+    frame HERO_WALK_1 100ms
+    frame HERO_WALK_2 100ms
+    goto go_down
+```
+
+The degrees of `rotate` are an expression, worked out at the step, as a
+velocity's are: `rotate 90`, `rotate dir` (a param), `rotate game_var.facing`,
+`rotate to (dir * 90)`. They are taken to the nearest multiple of 90, a half
+away from zero (45 is 90, -45 is -90, 44 is 0), and round the circle (-90 is
+270, 450 is 90). `rotate` turns by them, `rotate to` into them. A `flip` after
+a turn still turns round: forward goes the other way, its up stays where it
+was.
+
+The turn is read as `rotation`, degrees: 0, 90, 180 or 270 (`goto up if
+rotation == 270`); of the one a `sense` found, as `its.rotation`; in a
+dialog's condition, of the one choosing. In C, `dgx_ge_actor_rotation(&a)`
+gives the degrees and `dgx_ge_actor_set_rotation(&a, degrees)` turns it,
+rounded as `rotate to`; the actor keeps it as `a.turn`, quarter turns 0..3,
+beside `a.flip`, and `dgx_ge_actor_orient(&a)` is the two together, what
+the drawing, the masks and the bodies take.
 
 ---
 
@@ -121,6 +169,36 @@ and branch points may switch the script.
 **The game's clock.** `advance` is given the game's time, not the wall
 clock: it stands still while the game is paused, and after the pause the
 actor carries on from where it was.
+
+**A time from params.** A frame's time may be an expression:
+`frame none (speed)ms`. It is worked out at the moment the frame begins,
+from the params as they are at that moment; a param changed later does not
+touch the frame already running, only the frames after it. So the even pace
+of a game, a snake moving a cell at a time or a piece falling a row, is a
+script and not a loop in C:
+
+```
+param speed 150                 # ms a step
+
+script playing
+    frame none (speed)ms        # wait for the step
+    signal STEP                 # the game moves the snake a cell
+    goto playing
+```
+
+The game answers `STEP` by moving the snake. An apple, answered by a script
+that does `set speed max(60, speed - 10)` and goes back to `playing`, makes
+the steps after it shorter. Like all steps, these come at their own moments
+however often `advance` is called: on a slow device two steps may be made in
+one call, and each reaches the game with its own moment (`at_ms` in `say`).
+
+A time below 1 is taken as 1 ms, one above 65535 as 65535 (a written number
+must be within 1..65535); a time of constants alone is a number, as it
+always was. An event answered `now` cuts such a frame short like any other
+(section 4), and the wait begins again from the moment of the event. The
+events of the step itself (the game's answer to `STEP`, at the moment of the
+step) do not shift the pace; an event at another moment does, so such a
+clock lives in an actor of its own, or answers those events at `end`.
 
 Long processes, a corpse decaying or a tree growing, are written as long
 steps ("corpse, 5 minutes") and are worked out in a couple of steps even if
@@ -239,6 +317,18 @@ no questions in `path` or in tiles: a path is computed from `t` alone.
 expression that is evaluated (`and`, `or`, `?:` are lazy), so the dice are
 rolled exactly on the road taken.
 
+A variable of the game is not a question: `game_var.<name>` is a number the
+engine keeps for the whole game (`dgx_ge_game_vars`, section 6), read as it
+is at the moment of the step, with no call to the game:
+
+```
+goto best if game_var.score > 1000
+```
+
+Variables are declared in the pack, not in the animation; an undeclared
+`game_var.` is refused, and so is a question named like a variable. There are
+none in `path`, for the same reason as questions.
+
 An axis of the player's game pad is `axis(<name>)`: the sticks `lx`, `ly`,
 `rx`, `ry` from −1 to 1 and the triggers `lt`, `rt` from 0 to 1, as they
 are at the moment of the step:
@@ -257,6 +347,25 @@ with no input the axes are 0. This works only in animation scripts: not in
 again only when it changes, so the stick would be seen as it was back then)
 and not in dialog conditions.
 
+`music` is the music playing now: its number in the pack, or −1 when none
+plays (it ended, or was stopped; during a fade, the one fading out). A
+script waits for a music to end with it, with no C: a title waits for its
+theme, a death message for the death music.
+
+```
+script title
+    music theme
+label waiting
+    frame TITLE 100ms
+    goto waiting if music >= 0     # the theme still plays
+    signal TITLE_DONE
+    hold
+```
+
+The game says once whose music the scripts see: `dgx_ge_expr_sound =
+&sound` (its output of sounds, `dgx_ge_sound.h`); with none, `music` is −1.
+Not in `path`. A param named `music` is the param.
+
 The same language is used in tiles (overview-en.md, 2.6): there the names
 are the cell's modifier `mod`, its variant `variant`, and their fields by
 the names the tile set gives them.
@@ -274,9 +383,9 @@ script throw
 
 An expression of numbers and constants alone is worked out by the assembler
 at once and costs nothing on the board. One with params is worked out at the
-moment of the step: `velocity`, `accel`, `set`, `add` (and in `path`). The
-frame duration, `dx`, `dy`, `at`, `signal`, `sound` and `masks` take
-constants only.
+moment of the step: `velocity`, `accel`, `set`, `add` (and in `path`). A
+frame's time is worked out at the moment the frame begins (section 2).
+`dx`, `dy`, `at`, `signal`, `sound` and `masks` take constants only.
 
 An expression counts in floats, which hold whole numbers exactly up to
 2²⁴ (16 777 216); a larger one comes out rounded. A param holds a whole
@@ -481,7 +590,8 @@ script flee
   works only with a named kind (the actor's own kind has its own params;
   another kind must be added to the pack earlier). An actor also has
   `its.vx`, `its.vy` (its velocity, x forward from the searcher),
-  `its.image`, `its.script`, `its.flip`; a cell has `its.tile`, `its.mod`,
+  `its.image`, `its.script`, `its.flip`, `its.rotation` (its turn, degrees);
+  a cell has `its.tile`, `its.mod`,
   `its.cell` (the game's number of the cell, for `tell cell`).
 
 Who can be found is the game's decision: the actor's terrain has a `sense`
@@ -613,7 +723,34 @@ transition would happen at the end of the round, on `goto run` at 240.
 - **An event from the actor's own step.** The game may answer what a step
   says (a signal, a param changed) with a `now` event to the same actor,
   right in its `say`. The new script begins at the moment of that step, at
-  once after the `say`; what was left of the step is not made.
+  once after the `say`; what was left of the step is not made. The answer
+  is looked up in the row of the script whose step it is: a script that
+  answers no event drops it (`dgx_ge_actor_event` returns false), even
+  when its next command is a `goto` to a script that answers it
+  (`signal SIG_LOCK`, then `goto idle`). Name such a script in the rule of
+  the answer, by itself or in a group; `tools/dgx_ge_explain.py` points out
+  the scripts that signal and go on with no rule of their own.
+- **Several events from one step.** The game may send more than one such
+  event from the same step (a snake turns and, in the same step, eats or
+  hits a wall). They wait in a queue and are taken in the order they were
+  sent, just as if the game had sent them one by one after the step. The
+  first is taken as above. Each next one is taken when the actor, in the
+  script the one before led to, comes to its next frame or to `hold`, at
+  the same moment, and it is looked up in the row of the script the actor
+  is in then. So whatever the new script does before its first frame (a
+  sound, a param, a signal) is done before the next event is looked at. An
+  event sent while others wait joins the queue whatever the present script
+  answers it with (`dgx_ge_actor_event` returns true). When its turn comes,
+  a script that answers it with nothing drops it, and an answer of
+  `branch` or `end` makes it wait like any such event. The queue holds
+  `DGX_GE_ANIM_NOW_EVENTS` events: 4 unless the build says otherwise
+  (`dgx_ge_now_events` in `main/CMakeLists.txt`, see the overview, Part 3),
+  each place 2 bytes in every actor. One more is refused:
+  `dgx_ge_actor_event` returns false, the log says so once, and the events
+  already in the queue are still taken. A script that never comes to a
+  frame stops, and the events left in the queue are dropped. While the
+  queue is empty, an event answered with `branch` or `end` does not join
+  it: as before, a later one replaces the one waiting.
 - **An event from the past.** A `now` event stamped earlier than the
   moment the actor has already been moved to (a step of another actor,
   made late in a long call; a game that starts a script a tick back) takes
@@ -645,6 +782,24 @@ static void say(dgx_ge_actor_t *actor, dgx_ge_anim_say_t what, uint8_t value, ui
 ```
 
 `at_ms` is the moment of the step the signal belongs to.
+
+What a script says of sound (`sound`, `music`, `music volume`) the engine
+hands on to the game's output itself: `dgx_ge_anim_said_sound(&sound, what,
+value)` in the game's `say` plays the sound, plays or stops the music with
+its fade, sets its level, and answers false for everything else. A game
+that leaves out stale sounds checks `at_ms` before it. `music <name>`
+reaches the game as `DGX_GE_ANIM_MUSIC` (the value: the music's number, 255
+for `stop`; `dgx_ge_anim_said(0)`: the fade's milliseconds), `music volume`
+as `DGX_GE_ANIM_MUSIC_LEVEL` (the value: the percent; `dgx_ge_anim_said(0)`:
+the milliseconds).
+
+```c
+static void say(dgx_ge_actor_t *actor, dgx_ge_anim_say_t what, uint8_t value, uint32_t at_ms, void *ctx)
+{
+    if (dgx_ge_anim_said_sound(&sound, what, value)) return;   /* sounds and music */
+    if (what == DGX_GE_ANIM_SIGNAL && value == SIGNAL_FOOT_DOWN) ...
+}
+```
 
 ### What is in the hand: `carry`
 
@@ -867,15 +1022,49 @@ script drink
 The engine does not know what params mean and checks no thresholds. "Out of
 lives" is the game's decision, and the game sends the event.
 
+### The game's variables
+
+What belongs to the whole game and not to one actor (the score, the time
+left, a setting) is a variable of the game, not a param: every actor keeps as
+many params as the greediest kind, and a variable is kept once, 4 bytes. The
+pack declares it (`Pack.add_variable("score", 0)`), the game makes the store
+from the pack's blob `VARIABLES` and gives it to the engine
+(`dgx_ge_vars_open`, `dgx_ge_game_vars`; overview-en.md, 2.7). Scripts read
+and write it:
+
+```
+script ate_dot
+    add game_var.score 10
+    goto extra if game_var.score >= 10000 and game_var.extra == 0
+```
+
+- `set game_var.<name> <expression>`, `add game_var.<name> <expression>`:
+  the expression is worked out at the moment of the step; the value stops at
+  the limits of 32 bits, as a param's does.
+- When the value actually differs, the game is told `DGX_GE_ANIM_VAR` with
+  the variable's number and the moment of the step.
+- A variable is written by every step of the game, heard or not (an actor
+  moved on with no `say` writes too), and by no rehearsal. A thing of the
+  world brought back into a scene is made again from its record and its
+  script played again from where it entered it, up to now: the game does
+  that by `dgx_ge_actor_rehearse` (or `_rehearse_event`), which says
+  nothing and writes nothing, so what that script added to the score the
+  first time is not added again. The engine rehearses so itself where it
+  makes a thing of a pocket again, and for a dialog's control and a
+  shot's model.
+- The game reads and writes them by the numbers from the header:
+  `vars.values[MYGAME_GAME_VAR_SCORE]`.
+
 ---
 
 ## 7. What a frame is to the game
 
 A script sets only the picture's number, its offset from the actor
-(`at dx,dy`) and the side (`flip`). An actor is not a scene item. Every
-display frame the game makes a scene item (`dgx_ge_item_t`) from it by
-itself: it takes the picture by number, places it by the actor's position
-and offset, mirrors it, and picks the layer and the key. So one and the same
+(`at dx,dy`) and the way it faces (`flip`, `rotate`). An actor is not a scene
+item. Every display frame the game makes a scene item (`dgx_ge_item_t`) from
+it by itself: it takes the picture by number, places it by the actor's
+position and offset, mirrors and turns it (`dgx_ge_item_actor` does all
+that), and picks the layer and the key. So one and the same
 animation can be drawn in different ways: in PoP the frame number is first
 looked up in the game's frame table, and the guard's table is a different
 one from the prince's.
@@ -885,7 +1074,8 @@ one from the prince's.
 ## 8. Where to check it
 
 - The engine's host test, `test/host/test_anim.c`, covers the timeline of
-  steps, the now/branch/end transitions, turning and moving, and params.
+  steps, the now/branch/end transitions, turning and moving, and params;
+  `test/host/test_orient.c` the eight ways an actor faces, drawn and moved.
 - The sprite editor ([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), a separate program, the
   Animations tab). Its player
   repeats the engine's `dgx_ge_actor_event()`: you can send events with

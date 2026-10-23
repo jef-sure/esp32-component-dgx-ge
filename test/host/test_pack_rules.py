@@ -72,6 +72,17 @@ p = Pack("T")
 p.add_anim("hero-one", SCRIPT)
 check("#define T_HERO_ONE_SCRIPT_STAND 0" in p.header("T"), "an animation's name cleaned in the header")
 
+# the colors of all the sets, the bytes of their maps (dgx_ge_frame_pack_colors): none without sets; a set named so is
+# refused as the header's own
+check("#define T_SET_COLOR_COUNT 0\n" in p.header("T"), "no sets: no colors")
+p.add_set("hero", [(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+p.add_set("wide", [(i, i, i) for i in range(200)])
+p.add_set("one", [(9, 9, 9)])
+check("#define T_SET_COUNT 3\n#define T_SET_COLOR_COUNT 204\n" in p.header("T"), f"the colors of the sets: {p.header('T')[:200]}")
+p = Pack("T")
+p.add_set("color-count", [(1, 2, 3)])
+refused("a set named COLOR_COUNT", lambda: p.header("T"), ("T_SET_COLOR_COUNT",))
+
 # the names of the blobs the packer adds itself as it writes the pack
 for name in ("GAME", "STRINGS", "TIMERS", "STYLES", "CHASE", "SOUNDS", "strings"):
     refused(f"a blob named {name}", lambda: Pack("T").add_blob(name, b"x"), ("packer",))
@@ -310,6 +321,30 @@ refused("a sound given samples twice", lambda: p.add_sound("STEP", samples=[0, 1
 q = Pack("SM")
 q.add_sound("A")
 refused("a sound named twice", lambda: q.add_sound("A"), ("A", "twice"))
+
+# the sounds a document names take their samples from sounds/<name>.wav beside it; one with no file stays a name, a
+# later add_sound gives it samples; one whose file was taken is refused a later add_sound (which samples would it be?)
+import wave  # noqa: E402
+
+sound_doc = os.path.join(out, "sound_doc")
+os.makedirs(os.path.join(sound_doc, "sounds"), exist_ok=True)
+with wave.open(os.path.join(sound_doc, "sounds", "eat.wav"), "wb") as w:
+    w.setnchannels(1)
+    w.setsampwidth(2)
+    w.setframerate(11025)
+    w.writeframes(struct.pack("<4h", 0, 8000, -8000, 100))
+with open(os.path.join(sound_doc, "sounds", "unnamed.wav"), "wb") as f:
+    f.write(b"not a wav: a file no sound of the document names is not read")
+with open(os.path.join(sound_doc, "s.json"), "w") as f:
+    json.dump({"format": "dgx-ge-sprites", "formatVersion": 1, "name": "s", "sounds": ["turn", "eat"]}, f)
+p = Pack("SD")
+p.add_sprites(os.path.join(sound_doc, "s.json"))
+check(p.sounds == ["turn", "eat"] and p.sound_data[0] is None, f"the document's sounds by their order, one with no file a name: {p.sounds}")
+check(p.sound_data[1] is not None and p.sound_data[1][:4] == ([0, 8000, -8000, 100], 11025, False, "adpcm"),
+      f"a sound's samples from sounds/eat.wav beside the document, as add_sound(wav=) takes them: {p.sound_data[1] and p.sound_data[1][:4]}")
+check(p.add_sound("turn", samples=[0, 1], rate=8000) == 0, "a named sound with no file given its samples by the script")
+refused("a sound of the document's folder given samples again", lambda: p.add_sound("eat", wav=os.path.join(sound_doc, "sounds", "eat.wav"), loop=True),
+        ("sound eat", os.path.join(sound_doc, "sounds", "eat.wav"), "beside the document"))
 
 # the header ends with a line's end, whatever its last name is
 p = Pack("NL")

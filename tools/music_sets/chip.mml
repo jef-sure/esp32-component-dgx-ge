@@ -1,0 +1,12 @@
+; The chip's instruments of the engine: a song takes them by #set chip, by number or name (@lead, @bass). They serve
+; the NES too (#synth nes), and its own waves (square 75%, noise short) are its songs' to add.
+#synth chip
+@0 square = square 50%
+@1 lead = square 25% attack 2 decay 80 sustain 10 release 60
+@2 thin = square 12.5% attack 2 decay 60 sustain 9 release 50
+@3 pluck = square 50% decay 200 sustain 0 release 40
+@4 pad = square 50% attack 120 decay 300 sustain 11 release 200
+@5 bass = triangle release 30
+@6 kick = triangle decay 80 sustain 0
+@7 hat = noise decay 30 sustain 0 volume 10
+@8 snare = noise decay 120 sustain 0

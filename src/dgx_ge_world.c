@@ -209,13 +209,14 @@ static dgx_ge_pocket_t pocket_of(const dgx_ge_object_t *o)
     return r;
 }
 
-int32_t dgx_ge_world_lay(dgx_ge_world_t *w, dgx_ge_kinds_t *kinds, const dgx_ge_pocket_t *thing, int count, int scene, int x, int y, bool flip,
+int32_t dgx_ge_world_lay(dgx_ge_world_t *w, dgx_ge_kinds_t *kinds, const dgx_ge_pocket_t *thing, int count, int scene, int x, int y, unsigned orient,
                          int event, uint32_t now_ms, const dgx_ge_lay_t *how)
 {
     /* the thing as it lies: made, sent the event, kept */
     dgx_ge_actor_t a;
     if (count < 1 || count > 255 || !dgx_ge_pocket_actor(kinds, thing, x, y, now_ms, &a)) return -1;
-    a.flip = a.entered_flip = flip;
+    a.flip = a.entered_flip = orient & 1u;
+    a.turn = a.entered_turn = (uint8_t)(orient >> 1 & 3u);
     a.amount               = (uint8_t)count;
     if (event >= 0) dgx_ge_actor_event(&a, event, now_ms, NULL, NULL);
     dgx_ge_object_t lying = {.scene = (uint16_t)scene};
@@ -299,6 +300,7 @@ void dgx_ge_object_of(dgx_ge_object_t *o, const dgx_ge_actor_t *a)
     o->count    = a->amount;
     o->script   = a->script;
     o->flip     = a->entered_flip;
+    o->turn     = a->entered_turn & 3u;
     o->x        = a->entered_x;
     o->y        = a->entered_y;
     o->since_ms = a->entered_ms;
@@ -311,6 +313,7 @@ void dgx_ge_object_actor(const dgx_ge_object_t *o, const dgx_ge_anim_t *anim, dg
     a->x = a->entered_x = o->x;
     a->y = a->entered_y = o->y;
     a->flip = a->entered_flip = o->flip;
+    a->turn = a->entered_turn = o->turn;
     a->amount = o->count ? o->count : 1;
     for (int i = 0; i < DGX_GE_WORLD_PARAMS && i < anim->params && i < DGX_GE_ANIM_PARAMS; ++i) a->params[i] = a->entered_params[i] = o->params[i];
 }
@@ -330,7 +333,7 @@ void dgx_ge_world_save(const dgx_ge_world_t *w, dgx_ge_save_t *s)
         dgx_ge_save_u16(s, o->scene);
         dgx_ge_save_u16(s, o->kind);
         dgx_ge_save_u8(s, o->script);
-        dgx_ge_save_u8(s, (uint8_t)((o->flip ? 1 : 0) | (o->keep ? 2 : 0)));
+        dgx_ge_save_u8(s, (uint8_t)((o->flip ? 1 : 0) | (o->keep ? 2 : 0) | o->turn << 2));
         dgx_ge_save_u8(s, o->count);
         dgx_ge_save_u8(s, o->box);
         dgx_ge_save_i32(s, o->x);
@@ -361,6 +364,7 @@ static bool load(const dgx_ge_world_t *w, dgx_ge_world_t *into, dgx_ge_load_t *l
         const uint8_t flags       = dgx_ge_load_u8(l);
         o.flip  = flags & 1;
         o.keep  = (flags & 2) != 0;
+        o.turn  = flags >> 2 & 3u; /* a save before version 4 has none: it faced so */
         o.count = dgx_ge_load_u8(l);
         o.box   = dgx_ge_load_u8(l);
         o.x     = dgx_ge_load_i32(l);

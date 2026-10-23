@@ -84,6 +84,20 @@ bool dgx_ge_frame_scale(dgx_ge_frame_t *frame, int scale)
     return true;
 }
 
+dgx_ge_frame_t *dgx_ge_frame_fit(dgx_screen_t *display, int width, int height, int scale, uint32_t band)
+{
+    if (!display || width < 1 || height < 1) return NULL;
+    if (scale < 1) {
+        const int sx = display->width / width, sy = display->height / height;
+        scale        = sx < sy ? sx : sy;
+        scale        = scale < 1 ? 1 : scale > 8 ? 8 : scale;
+    }
+    dgx_ge_frame_t *frame = dgx_ge_frame_create(display, (display->width - width * scale) / 2, (display->height - height * scale) / 2, width, height);
+    if (frame && scale > 1 && !dgx_ge_frame_scale(frame, scale)) dgx_ge_frame_destroy(&frame);
+    if (frame && band) dgx_ge_frame_band(frame, band); /* no room for it: the strip stays */
+    return frame;
+}
+
 bool dgx_ge_frame_smooth(dgx_ge_frame_t *frame, int how)
 {
     if (how < DGX_GE_SMOOTH_NONE || how > DGX_GE_SMOOTH_SFX) return false;
@@ -123,7 +137,7 @@ static dgx_ge_rect_t overlay_box(const dgx_ge_item_t *item)
 {
     const bool    fill = item->flags & DGX_GE_ITEM_FILL, over_clip = fill || (item->flags & DGX_GE_ITEM_REPEAT);
     if (!item->image && !fill) return dgx_ge_rect(0, 0, 0, 0);
-    dgx_ge_rect_t box = over_clip ? item->clip : dgx_ge_image_box_scaled(item->image, item->x, item->y, item->flags & DGX_GE_BLIT_FLIP_X, item->scale);
+    dgx_ge_rect_t box = over_clip ? item->clip : dgx_ge_image_box_scaled(item->image, item->x, item->y, dgx_ge_item_orient(item), item->scale);
     return dgx_ge_rect_empty(item->clip) ? box : dgx_ge_rect_intersect(box, item->clip);
 }
 

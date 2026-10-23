@@ -24,11 +24,14 @@
  * of the animation at that offset of its tables (u16 length, int16 values),
  * read at the whole part of the index on the stack; outside: 0. ITS u8:
  * of the one a sense found (dgx_ge_expr_its): its param k, or below
- * ITS_VX and on: its velocity, picture, script, turn, a cell's tile,
- * modifier, number; 0 when nothing is found or it has none. GAME u8: the
+ * ITS_VX and on: its velocity, picture, script, mirror (flip), a cell's
+ * tile, modifier, number, its turn (degrees); 0 when nothing is found or it has none. GAME u8: the
  * game's answer to its question of that number, asked by who (dgx_ge_expr_ask; none: 0).
  * AXIS u8: an axis of the pad of the input the game gave (dgx_ge_expr_input:
  * DGX_GE_AXIS_*), -1..1 (a trigger 0..1); no input, no such axis: 0.
+ * MUSIC: the music the game's output plays now (dgx_ge_expr_sound), -1 none.
+ * VAR u8: a variable of the game by its number (game_var.<name>: dgx_ge_game_vars), as it is now; none such: 0.
+ * ROTATION: the turn of the actor whose expression it is, degrees clockwise (0, 90, 180, 270; no actor: 0).
  *
  * and, or and c ? a : b are lazy, as in C: the part not needed is jumped
  * over, never worked out (it matters to rnd, the one that changes
@@ -42,15 +45,16 @@
 #include <stdint.h>
 
 #include "dgx_ge_anim.h"
+#include "dgx_ge_game.h"
 
 enum { E_NUM = 1, E_PARAM, E_T, E_ADD, E_SUB, E_MUL, E_DIV, E_NEG, E_MIN, E_MAX, E_ABS, E_SIN, E_COS, E_SQRT, E_EXP, E_VX, E_VY, E_FIELD,
        E_LT, E_LE, E_GT, E_GE, E_EQ, E_NE, E_AND, E_OR, E_NOT, E_NOW, E_COUNT, E_AMOUNT,
        E_MOD, E_BAND, E_BOR, E_RND, E_TIMER, E_COND, E_X, E_Y, E_SMOOTH,
        E_XOR, E_BITS, E_BIT, E_BITFIELD, E_TABLE, E_ITS, E_GAME,
-       E_AND_THEN, E_OR_ELSE, E_TRUTH, E_IF_NOT, E_JUMP, E_AXIS };
+       E_AND_THEN, E_OR_ELSE, E_TRUTH, E_IF_NOT, E_JUMP, E_AXIS, E_MUSIC, E_VAR, E_ROTATION };
 
 /* What ITS reads beyond the params of the one found. */
-enum { ITS_VX = 0xF0, ITS_VY, ITS_IMAGE, ITS_SCRIPT, ITS_FLIP, ITS_TILE, ITS_MOD, ITS_CELL };
+enum { ITS_VX = 0xF0, ITS_VY, ITS_IMAGE, ITS_SCRIPT, ITS_FLIP, ITS_TILE, ITS_MOD, ITS_CELL, ITS_ROTATION };
 
 /* The one a sense found, for its. while its expression is worked out; NULL otherwise. */
 typedef struct {
@@ -58,6 +62,7 @@ typedef struct {
     int            count;
     float          vx, vy; /* points a second, x forward of the one looking */
     int            image, script, flip, tile, mod, cell;
+    int            rotation; /* its turn, degrees clockwise */
 } dgx_ge_its_t;
 extern const dgx_ge_its_t *dgx_ge_expr_its;
 

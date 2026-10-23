@@ -1,5 +1,5 @@
 ## IDF Component Manager Manifest File
-version: "0.3.0"
+version: "0.4.0"
 description: "A small engine of 2D and 2.5D games on top of DGX: an indexed frame sent by its changes and scaled, pictures from a pack in flash, actors living by animation scripts, tiles, masks, a world that lives on, dialogs, a sound mixer"
 url: https://github.com/jef-sure/esp32-component-dgx-ge
 repository: https://github.com/jef-sure/esp32-component-dgx-ge.git
@@ -63,6 +63,11 @@ files:
     - "examples/*/art/*.png"
     - "examples/*/tools/*.py"
     - "tools/**/*.py"
+    # the tools' data: the engine's sets of instruments and palettes, the song player for a computer and an editor
+    - "tools/music_sets/*.mml"
+    - "tools/palettes/*.txt"
+    - "tools/synth/Makefile"
+    - "tools/synth/*.c"
     - "README.md"
     - "CHANGES.md"
     - "LICENSE"

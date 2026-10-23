@@ -285,6 +285,15 @@ static inline uint8_t dgx_ge_grid_mod(const dgx_ge_grid_t *g, int col, int row)
  */
 int dgx_ge_grid_animate(dgx_ge_grid_t *g, uint32_t now_ms, dgx_ge_rect_t *places, int max);
 
+/*
+ * The same in one call, for a grid laid in a scene: the time of the scene moves to now, and every cell whose cycle
+ * shows another picture now is laid again in the set (dgx_ge_grid_relay, kind false), only what it changed marked.
+ * False when the game must lay the set anew (dgx_ge_scene_set_begin, dgx_ge_grid_add of each grid, _end; nothing to
+ * mark, the places are marked): a cell laid more or fewer pieces (a cycle of a frame of no picture), the set had no
+ * room, or the grid keeps no laid (the places of those cells, where they were and are, marked each in its layer).
+ */
+bool dgx_ge_grid_play(dgx_ge_grid_t *g, dgx_ge_scene_t *scene, uint32_t now_ms);
+
 /* The cell a point of the scene is in; false outside the grid. */
 bool dgx_ge_grid_cell_at(const dgx_ge_grid_t *g, int x, int y, int *col, int *row);
 

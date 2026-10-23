@@ -42,7 +42,7 @@ extern "C" {
  *   data        colors, pixels, blobs and the bits of masks
  *
  * - masks of collisions: 1-bit pictures of the zones of a picture (body,
- *   blade, shield) by an index 0..15, from its origin, mirrored with it.
+ *   blade, shield) by an index 0..15, from its origin, mirrored and turned with it.
  */
 #define DGX_GE_PACK_MAGIC   0x4B504744u /* "DGPK" */
 #define DGX_GE_PACK_VERSION 4u

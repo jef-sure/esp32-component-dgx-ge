@@ -320,7 +320,7 @@ added: letters and digits stay, anything else becomes `_`, everything is
 upper case (`stand-1` gives `MYGAME_IMG_STAND_1`). Two names that come out
 the same, such as `stand-1` and `stand_1`, are an error, and so is a blob
 named like one the packer adds by itself (`STRINGS`, `GAME`, `TIMERS`,
-`STYLES`, `CHASE`, `SOUNDS`), or a constant whose header name is another
+`STYLES`, `CHASE`, `SOUNDS`, `VARIABLES`), or a constant whose header name is another
 thing's (`SET_COUNT`). `write` writes the pack and its header
 together: if either cannot be written, both old files stay as they were.
 
@@ -346,7 +346,8 @@ Besides pictures and animations, the pack can hold:
 - timers;
 - dialogs and their lines in the chosen language;
 - styles for showing text;
-- game constants.
+- game constants;
+- the game's variables and the values they begin with.
 
 `Pack` has an `add_...` method for each kind of data.
 
@@ -363,9 +364,35 @@ transparent.**
 A **set** is a group of pictures with shared colors: "hero", "dungeon",
 "guard".
 
+**A ready palette.** A set's colors are those its pictures are drawn in. A
+game in the style of the NES, the Game Boy or PICO-8 keeps to another
+machine's colors instead, and its set names that palette: `nes` (the 54
+colors of the NES's picture chip, the 2C02, as the NESdev wiki gives them),
+`gameboy` (the four greens of its screen), `pico8` (its 16), or a palette of
+the project's own. The packer then brings every color of the set's pictures
+to the nearest color of the palette as the eye sees it (CIE76: the distance
+in CIELAB, not in RGB, so a dark green goes to a dark green and not to
+black). Only the colors the pictures take go into the set, in the palette's
+order, so the frame's 255 indices are not spent on the rest; 0 stays
+transparent. When some colors of the pictures were not the palette's own,
+the packer says so once for the set: how many it brought and the farthest of
+them, with its picture and the distance (about 2.3 is the least the eye
+tells apart, 20 is another color). That is how an artist sees that a game
+for the NES was drawn in colors the NES has not. On the board nothing is
+new: the set's colors are colors like any others.
+
+```python
+ship = pack.add_set("SHIP", palette="nes")              # instead of colors
+pack.add_png("SHIP", ship, "ship.png")                  # its colors brought to the NES's
+```
+
+A document's set says the same by `"palette": "nes"`. The engine's palettes
+are files `tools/palettes/<name>.txt`, a color `#rrggbb` a line, with the
+source of the colors in a comment.
+
 The **origin** is "where the picture's feet are". The picture is placed on
-the scene by this point and mirrored around it when the character turns
-round. If the hero's feet are somewhere else in a jump frame, that is drawn
+the scene by this point, mirrored around it when the character turns
+round and turned around it when it faces up or down. If the hero's feet are somewhere else in a jump frame, that is drawn
 by the artist, not handled by code.
 
 **Colors on the screen.** The frame has one palette of 256 entries. When the
@@ -381,7 +408,28 @@ dgx_ge_frame_add_colors(frame, rgb, n, map);   /* map[v-1] is the frame's index 
 
 Equal colors of different sets share one index. On a new level
 `dgx_ge_frame_forget_colors()` frees the palette. Index 0 of the frame is
-the **paper**, the background color.
+the **paper**, the background color: the game sets it
+(`dgx_ge_frame_set_color(frame, 0, r, g, b)`), or a scene from the editor
+brings its own (section 2.5).
+
+A game usually gives the colors of all its sets at once, at the start.
+`dgx_ge_frame_pack_colors` (`dgx_ge_glue.h`) goes through the sets in order
+and lays their tables one after another in a single array, a byte a color.
+The pack's header says how large the array must be (`<P>_SET_COLOR_COUNT`,
+the colors of all the sets together), and `map_of[set]` gets the place where
+each set's table begins. That array of pointers is what the parts of the
+engine take as `maps`: a scene from the editor, tiles, shows, dialogs.
+
+```c
+static uint8_t        maps[MYGAME_SET_COLOR_COUNT];
+static const uint8_t *map_of[MYGAME_SET_COUNT];
+dgx_ge_frame_pack_colors(frame, &pack, maps, sizeof maps, map_of);
+uint8_t ink = map_of[MYGAME_SET_UI][0];   /* the frame's index of the first color of UI */
+```
+
+It returns `false` when the array is too small (the set that does not fit
+and those after it get `NULL`) or the frame runs out of its 255 indices
+(those sets get the nearest colors the frame already has).
 
 ### 2.4. The frame
 
@@ -397,6 +445,22 @@ dgx_ge_frame_present(frame);    /* send what changed */
 
 You usually do not need to call `present` yourself: `dgx_ge_scene_render()`
 draws and sends on its own.
+
+A game usually makes its frame for whatever display it is given:
+
+```c
+dgx_ge_frame_t *frame = dgx_ge_frame_fit(display, 320, 200, 0, board_band);
+```
+
+With a scale of 0 the frame takes the largest whole scale at which all of it
+is seen (8 at most; 1 when even that is too large) and stands in the middle
+of the display: on 320×240 it is ×1 with 20 pixels above and below, on
+1280×800 ×4, on 1024×600 ×3 with 32 pixels at each side. The scale it took
+is `frame->scale`. A game whose fonts are made for a known scale gives that
+scale instead of 0. The last number is the band the board asks for
+(`board_band`, section 2.17); if there is no room for the band, the frame
+is sent in strips, and `frame->band` is 0. `NULL` means there is no memory
+for the frame.
 
 - **Cost.** Width × height bytes: 320×200 is 64 KB, plus about 1.5 KB on top
   (palettes, the list). The same frame in 16-bit colors would take 128 KB.
@@ -466,14 +530,33 @@ Anything you can see is an **item** (`dgx_ge_item_t`):
 - a layer and a key;
 - a clipping rectangle of its own, if needed;
 - flags: mirrored, a one-color silhouette, a fill (a rectangle of color
-  with no picture), a card (a picture on a rectangle of its own color).
+  with no picture), a card (a picture on a rectangle of its own color);
+- a turn (`turn`): so many quarter turns clockwise after the mirror, 0..3;
+  turned a quarter, a picture is as wide as it was high.
 
 For example, this is how an actor is put on the scene:
 
 ```c
-dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = im, .map = maps[set],
+dgx_ge_scene_actor(scene, &(dgx_ge_item_t){.image = im, .map = map_of[set],
                                            .x = x, .y = y, .layer = LAYER_ACTORS});
 ```
+
+An actor of the game (section 2.7) becomes such an item in one call:
+
+```c
+static dgx_image_t hero_picture;   /* its picture, kept until the frame is drawn */
+dgx_ge_scene_show_actor(scene, &hero, LAYER_ACTORS, &pack, map_of, &hero_picture);
+```
+
+It reads the picture the actor shows from the pack, puts it where the actor
+stands with the picture's own offset (`image_dx` forward and `image_dy`
+down, of the actor's axes, so mirrored and turned as it faces), mirrors it
+by `flip` and turns it by `turn`, takes the table of the picture's set, and adds it as an actor of this
+frame. It returns `false` when the actor shows no picture or the scene has
+no room. Each actor shown in a frame needs a `dgx_image_t` of its own.
+`dgx_ge_item_actor` fills an item the same way without adding it, so the
+game can change something first (another set's colors, say), and
+`dgx_ge_item_picture` puts any picture of the pack into an item.
 
 #### The set and the actors
 
@@ -547,10 +630,24 @@ characters are started, the zones and entrances are taken by number, the
 grids are put in place. To the engine such a scene is no different from one
 built in code.
 
+The scene's background in the editor is its paper. `dgx_ge_layout_scene`
+makes it color 0 of the frame and the paper of the scene, and gives it again
+only when it is another color: a new color makes the whole frame drawn anew,
+so laying the same scene again costs nothing for it. A scene without a
+background leaves the game's paper as it is.
+
+A scene may also name its music (2.16) and the time of the fade it comes in
+by: as the game enters the scene, `dgx_ge_layout_music` asks it of the
+game's output. The music already playing goes on; a scene that names none
+leaves what plays, and silence has to be named (`stop`). It is a call of its
+own, not part of laying the scene, since a game lays the same scene again
+while it plays in it, and a music that has ended would start again.
+
 ```c
 dgx_ge_layout_t l;
 dgx_ge_layout_open(&l, blob, size);
-dgx_ge_layout_scene(&l, scene, pack, maps, images);                  /* layers and pictures */
+dgx_ge_layout_music(&l, &sound);                                     /* entering it: its music, by its fade */
+dgx_ge_layout_scene(&l, scene, pack, maps, images);                  /* paper, layers and pictures */
 dgx_ge_layout_actor_start(&l, GAME_SCENE_ROOM1_ACTOR_GUARD, &guard, kinds, now);
 dgx_ge_layout_zone(&l, GAME_SCENE_ROOM1_ZONE_DOOR, &door, &kind);   /* a rectangle and a kind */
 ```
@@ -611,6 +708,24 @@ did in code is data here:
 A **modifier** is a number in a cell that the game or a script changes: how
 far a gate is raised, which frame the spikes are on.
 
+A `cycle` goes by the time of the scene alone. Once a frame the game moves
+that time on, and the grid lays again only the cells whose cycle shows
+another picture now, marking only what changed. When it cannot (the set has
+no room, a frame of the cycle has no picture, so the cell has one piece
+fewer, or the grid keeps no `laid`), it returns false, the places are already
+marked, and the game lays the set anew, as after a failed relay:
+
+```c
+if (!dgx_ge_grid_play(&grid, scene, now)) {
+    dgx_ge_scene_set_begin(scene);
+    dgx_ge_grid_add(&grid, scene);
+    dgx_ge_scene_set_end(scene);
+}
+```
+
+A game that lays the set anew itself and wants the places of those cells
+gets them from `dgx_ge_grid_animate`.
+
 What data cannot express is drawn by a **callback** of the game: a
 function the engine calls for each cell (the grid's `draw`). A Prince of
 Persia room needs no callback; it is data from end to end.
@@ -639,7 +754,11 @@ has:
 - a position x, y, a speed and an acceleration (in 1/256 of a point, so
   that slow movement is smooth);
 - the picture it is showing now;
-- a direction (mirrored or not);
+- the way it faces: mirrored or not (`flip`), then turned clockwise by
+  quarter turns (`turn`), one of the eight ways DGX draws a picture; what a
+  script says in its axes (x forward, y down: movement, points, masks)
+  turns with it, the scene does not ([animation-en.md](animation-en.md),
+  "Facing");
 - active masks;
 - **params**: numbers the actor keeps with it: lives, "what I am doing
   now".
@@ -674,14 +793,15 @@ The full description of the language is at the start of
 
 | Command | What it does |
 | --- | --- |
-| `frame KID_15 83ms` | a picture for a time, optionally with an offset `at 2,-1`; `frame none` shows nothing |
+| `frame KID_15 83ms` | a picture for a time, optionally with an offset `at 2,-1`; `frame none` shows nothing; the time may be an expression of params, `frame none (speed)ms`, worked out as the frame begins |
 | `dx 4`, `dy -2` | move (forward is the way the picture faces) |
 | `flip` | turn around |
+| `rotate 90`, `rotate to 270` | turn by quarter turns clockwise, or into one: the hero of a game seen from above faces up; `rotation` reads it |
 | `velocity`, `accel` | speed and acceleration: flying, falling |
 | `signal 3`, `sound 1` | tell the game; play a sound |
 | `masks 0 2` | which masks are active now |
 | `hit 2 on 1 damage 3 event hurt` | what mask 2 does when it meets mask 1 |
-| `set`, `add` | change a param |
+| `set`, `add` | change a param, or a variable of the game: `add game_var.score 10` |
 | `branch` | here the script may be cut short by a `branch` rule |
 | `goto run`, `goto turn if x < 166` | go to another script, optionally on a condition |
 | `hold` | stay on the last frame |
@@ -741,6 +861,51 @@ A param is a whole number of 32 bits (`int32_t`), 8 bytes of an actor
 with the value it entered its script with; the starting values in the
 pack are of 16 bits.
 
+#### The game's variables
+
+A number that belongs to the game and not to an actor (a setting, the score,
+the time left) is a **variable of the game**. Kept as a param of some actor,
+it would cost every actor of the game a place, since every actor keeps as
+many params as the greediest kind. A variable costs 4 bytes, once.
+
+The pack declares a variable with the value it begins with,
+`Pack.add_variable("score", 0)`, or the editor's file in its `variables`
+part. The header gives its number, `MYGAME_GAME_VAR_SCORE`, and how many
+there are, `MYGAME_GAME_VAR_COUNT`. The game makes one store of them from
+the pack and gives it to the engine once:
+
+```c
+static dgx_ge_vars_t vars;
+size_t n;
+const uint8_t *blob = dgx_ge_pack_blob(&pack, MYGAME_BLOB_VARIABLES, &n);
+dgx_ge_vars_open(&vars, blob, n);            /* each as it begins; 4 bytes of the heap a variable */
+dgx_ge_game_vars = &vars;                    /* the store scripts and dialogs read and write */
+...
+if (vars.values[MYGAME_GAME_VAR_SCORE] >= 1000) ...
+```
+
+A script reads a variable as `game_var.<name>` and writes it with
+`set game_var.score 0` and `add game_var.score 10`; the conditions of
+dialogs read it too, and a control of a dialog edits it (2.12). A variable
+is a whole number of 32 bits and stops at their limits, like a param. When
+a script changes one, the game's `say` hears `DGX_GE_ANIM_VAR` with its
+number: the music's volume was changed, so the game sets its mixer. A
+variable is written by every step of the game, heard or not, and by no
+rehearsal: a thing of the world brought back, made again from its record
+and caught up to now by `dgx_ge_actor_rehearse`, plays its script again
+from where it entered it and writes nothing, so a score is not added twice
+(animation-en.md).
+
+Three kinds of names a script gets from the game stay apart:
+`game.<name>` is a question the game answers by its function
+([animation-en.md](animation-en.md)), a constant (`Pack.add_constants`) is a
+number fixed when the pack is built, and a variable is a number the engine
+keeps and scripts change. The packer refuses a variable named like a
+constant, a number of `add_game` or a question, and a `game_var.` that is
+not declared. There are no variables in `path` or in tiles: a path is worked
+out by its time alone, and a tile is laid again only when its cell changes,
+so it would show a value long gone.
+
 #### Scripts in plain words
 
 `tools/dgx_ge_explain.py` retells scripts in words, in Russian or in
@@ -752,15 +917,31 @@ else's animation (and of your own old one).
 - “taken” (`taken`): sent by KID (reaching: hit); answered by POTION: lying → in hand; …
 ```
 
+It also points out where an answer of the game would be lost. The game may
+answer a signal with an event at once, in its `say`, and the actor is then
+still in the script whose step signalled. A script that signals, then goes
+on into another script (`goto`, `goto … if`), and answers no event itself
+(no `on` rule names it, by itself or in a group) drops that answer, though
+the script it goes on to would take it. The explainer lists such scripts
+under **The game's answer would be lost**, if the kind answers any event at
+all. Whether the game does answer that signal with an event the text cannot
+say: a signal that only reports (the numbers changed, the level is over)
+needs no rule, and the note is then to be read and left. Scripts that stay
+in themselves after a signal (`hold`, a round of their own) are not listed:
+answering nothing there is what they say.
+
 ### 2.8. Collisions
 
 **Masks** are 1-bit zones of a picture, numbered 0..15: body, blade,
 shield. They are set by the pack build script (`Pack.add_mask`) or by the
 sprite editor; for a picture without masks, its opaque points serve as the
-mask. Masks are mirrored together with the picture.
+mask. Masks are mirrored and turned together with the picture: a body's
+`flip` says how it lies, `true` the mirror as it always did, or a whole
+orientation (`dgx_ge_orient(flip, quarters)`; of an actor,
+`dgx_ge_actor_orient`).
 
 ```c
-dgx_ge_body_t hero  = {&pack, hero_image, hx, hy, hero_flip, hero_actor.masks};
+dgx_ge_body_t hero  = {&pack, hero_image, hx, hy, dgx_ge_actor_orient(&hero_actor), hero_actor.masks};
 dgx_ge_body_t enemy = {&pack, enemy_image, ex, ey, enemy_flip, enemy_actor.masks};
 dgx_ge_bodies_overlap(&hero, &enemy, 8, hit, ctx);   /* hit(mask_a, mask_b, areas, count, ctx) */
 ```
@@ -842,7 +1023,8 @@ enemies on the screen.
   by one of its sides, and the rules decide what follows.
 - **World objects** (`dgx_ge_world.h`) are what lies in scenes nobody is
   looking at: a dropped sword, a broken plate. What is kept is not an actor
-  but a record of when and where it entered its script. When the hero comes
+  but a record of when and where it entered its script, and which way it
+  faced (its mirror and its turn). When the hero comes
   back to the room, the game restores the actor and brings it up to "now",
   as if it had been living all along. The records are kept in a ring: when
   there is no room left, a new one takes the place of the oldest. What a
@@ -871,7 +1053,9 @@ enemies on the screen.
   passes through, how far from home it goes, when it calms down: all of
   that is data.
 - **Game constants** (`dgx_ge_game.h`) are numbers the author writes: how
-  many timers, how many world objects, "an hour to save the princess".
+  many timers, how many world objects, "an hour to save the princess". The
+  numbers that change as the game goes (the score, the settings) are its
+  **variables**, in the same header (2.7).
 
 ### 2.11. Walking from cell to cell
 
@@ -934,14 +1118,25 @@ script left it.
   letter and its accent as one character, the way fonts hold them), so a
   file saved decomposed on a Mac draws the same; a BOM at the start of a
   `.po` is skipped. A line can show numbers, the params of whoever says it:
-  `"Sound {sound}, volume {volume}."`. A translation uses the same names and
-  may put them in its own order (`"Громкость {volume}, звук {sound}."`); the
-  packer refuses a name the line does not have. A dialog can **pause the
+  `"Sound {sound}, volume {volume}."`, or the game's variables:
+  `"Score {game_var.score}"` (a line shows the one or the other, not both). A
+  translation uses the same names and may put them in its own order
+  (`"Громкость {volume}, звук {sound}."`); the packer refuses a name the line
+  does not have. An answer may carry a **control**, a kind of its own whose
+  first param is the value and whose picture shows it (a switch, a slider):
+  `"Volume" control SLIDER game_var.volume` edits a variable of the game,
+  `"Volume" control SLIDER volume` a param of whoever chooses. The conditions
+  of answers read variables as well: `"Gamepad" if game_var.board & BOARD_PAD
+  control SWITCH game_var.pad`. A dialog can **pause the
   game** while it is open (a `pause` line; a settings menu): the game asks
-  `dgx_ge_talk_pauses` and does not advance the world. The talk itself keeps
-  its own time running (timed lines, letters, controls), while events for
-  actors and things handed over land at the moment where the world stands
-  (`ahead_ms`).
+  `dgx_ge_talk_pauses` and does not advance the world. So a talk has two
+  clocks, and every call that moves it on (`dgx_ge_talk_start`,
+  `dgx_ge_talk_view_play`, `_event`, `_pointer`, `_type`) takes two moments:
+  the talk's own, real time, by which its timed lines, letters and controls
+  go on while the world stands; and the world's, where events for actors,
+  things handed over and the conditions of answers land. The game does not
+  work out how far the talk is ahead of the world. A game that never stops
+  its world passes the same moment twice.
 - The **talk view** (`dgx_ge_talk_view.h`) is how a dialog looks: its place
   on the screen, border, font, colors, a portrait of the speaker, letters
   appearing one by one. Such a set is called a **style**. A style is not
@@ -1155,10 +1350,11 @@ Dialogs and menus understand not buttons but **interface events**
 Which button means what is up to the game. For example:
 
 ```c
-if (input.pressed & DGX_GE_KEY_DOWN)   dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_NEXT, now_ms);
-if (input.pressed & DGX_GE_KEY_UP)     dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_PREV, now_ms);
-if (input.pressed & DGX_GE_KEY_ACTION) dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_ACTIVATE, now_ms);
-dgx_ge_talk_view_pointer(&view, &talk, &input.pointer, now_ms);   /* a touch on a line or an answer */
+/* now_ms: the talk's own time; world_ms: the world's (the same moment when nothing stops the world) */
+if (input.pressed & DGX_GE_KEY_DOWN)   dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_NEXT, now_ms, world_ms);
+if (input.pressed & DGX_GE_KEY_UP)     dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_PREV, now_ms, world_ms);
+if (input.pressed & DGX_GE_KEY_ACTION) dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_ACTIVATE, now_ms, world_ms);
+dgx_ge_talk_view_pointer(&view, &talk, &input.pointer, now_ms, world_ms);   /* a touch on a line or an answer */
 ```
 
 Menus made of **widgets** (`dgx_ge_widgets.h`) work the same way:
@@ -1186,7 +1382,7 @@ already taken is **spent**:
 
 ```c
 if (talking) {
-    if (input.pressed & DGX_GE_KEY_ACTION) dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_ACTIVATE, now_ms);
+    if (input.pressed & DGX_GE_KEY_ACTION) dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_ACTIVATE, now_ms, world_ms);
     dgx_ge_input_spend(&input, input.pressed);   /* everything pressed went into the talk */
 }
 ```
@@ -1230,7 +1426,14 @@ On loading, all times are shifted, and the game goes on as if no time had
 passed. Params are numbers to the engine and are not shifted: a game that
 keeps a moment of `now` in a param goes on with its clock from the saved
 one. A save of an older version, whose params were of 16 bits, is read as
-it was made. Where the bytes go (a file, the board's memory) is up to the game.
+it was made; so is one from before the turn was kept (version 3): its
+things faced as they were saved, unturned. The game's variables have a chunk of their own, `VARS`
+(`dgx_ge_vars_save`, `dgx_ge_vars_load`, `dgx_ge_vars_load_check`): a save
+without it (made before the game had variables) or with another number of
+them is refused for them, and they stay as they were. Which variables a game
+keeps where is its own choice: its settings, say, it may keep apart from
+its saves, so that loading a game does not bring back the sound of that day.
+Where the bytes go (a file, the board's memory) is up to the game.
 It is best to save at the boundary between scenes: on entering a level, at
 a checkpoint.
 
@@ -1244,6 +1447,229 @@ their sum, as 16-bit samples, is sent over I2S by a task of the board. A
 game with sound hardware of its own (a buzzer, a DAC) has its own `play`
 and `stop`.
 
+#### Music by notes
+
+Music in a game is not a recording but notes, as in the games of the
+programmable sound chips (the MSX's AY-3-8910, the NES, the AdLib's FM): a
+few channels, each with its own envelope, play the notes of a song on the
+synthesizer it chose (a square, a triangle or noise; the NES's; FM's two
+operators). A melody minutes long takes a few kilobytes. The pack keeps a music
+as a text in MML, the language of notes of those machines
+(`Pack.add_music(name, text)`; the header gets `<PREFIX>_MUSIC_<NAME>`), and
+the packer turns it into a small song: channels, instruments, notes and
+their lengths. Songs lie with the samples of the sounds (the blob `SOUNDS`,
+the file of the sounds), so a board without sound carries none.
+
+The mixer synthesizes the music itself, sample by sample, in whole
+numbers, at the rate of the output, and adds it to the stream beside the
+voices of the effects. One music plays at a time, and it has a place of its
+own: an effect never takes it, and stopping all the sounds
+(`dgx_ge_mixer_stop(-1)`) leaves it playing. A music goes round from its
+loop point, or ends after its last note.
+
+Scripts say what plays: `music theme`; `music theme 500ms`, a change by a
+fade (the music playing goes quieter for 500 ms, then theme comes in as
+long); `music stop`; and `music volume 30% 500ms`. The game hands them to
+its output in its `say` with `dgx_ge_anim_said_sound` (animation-en.md,
+section 5); in C the same is `dgx_ge_mixer_music(mixer, n, fade_ms)`. The
+same music asked for again goes on, not from its start, so entering a scene
+that names the music already playing changes nothing (a scene's music: 2.5,
+`dgx_ge_layout_music`; the editor's scene names it, with the time of its
+fade, 500 ms unless it says). The expression
+`music` is the number of the music playing now, −1 when none plays: a
+script waits for a music to end by itself (`goto waiting if music >= 0`)
+once the game has said `dgx_ge_expr_sound = &sound`.
+
+The mixer has two buses, each with the volume the game keeps as the
+player's setting: the effects (`dgx_ge_mixer_effects_volume`) and the music
+(`dgx_ge_mixer_music_volume`), both under the volume of all
+(`dgx_ge_mixer_volume`). Under the music's bus there is also its level by
+design: a quiet scene, the music lower under a talk or a boss's roar. It
+moves to the level over the time given (`music volume 30% 500ms`,
+`dgx_ge_mixer_music_level`), holds for the musics after, and `music volume
+100% 500ms` brings it back; the player's setting stays as it was.
+
+An example of the language, three channels:
+
+```
+; a march: the tune, a bass, a drum (on the chip; a song that names none is of FM)
+#synth chip
+@1 = square 25% attack 2 decay 60 sustain 9 release 40
+@2 = triangle release 30
+@3 = noise decay 40 sustain 0
+A t132 o5 l8 @1 v13 $ c e g > c4 < g e c [d f a]2 g2
+B @2 o3 l4 $ c g c g [d a]2 g2
+C @3 o6 l8 v9 $ [c r c c]4
+```
+
+| MML | what it does |
+|-----|--------------|
+| `@1 = square 25% attack 2 decay 60 sustain 9 release 40 volume 12` | an instrument, `@0`..`@99`: a wave (`square` of `12.5%`, `25%` or `50%`, 50% unless said; `triangle`; `noise`), its envelope (attack: ms from silence to the top; decay: ms from the top down to the sustain; sustain: the level held while the note sounds, 0..15; release: ms down to silence after the note) and its volume 0..15. Unsaid: volume 15, sustain 15, the times 0. `@0` not defined is a plain square of 50% |
+| `A ...`, `CD ...` | the notes of channel A (channels A..H); several names: the same notes for each; more lines of a name go on with it |
+| `c d e f g a b`, `c+` `c#` `d-` | notes; `+` or `#` sharp, `-` flat |
+| `c4`, `c8.`, `c16..`, `c3` | the length after a note: 1 a whole note, 2, 4, 8, 16, 32, 64, and 3, 6, 12, 24, 48 for triplets; each dot adds half of what the one before it added |
+| `r4` | a rest |
+| `c4&c8`, `c4&d4` | a tie: the same pitch is one longer note; another pitch goes on from the first without a new attack |
+| `o4`, `<`, `>` | the octave 0..9 (`o4 a` is 440 Hz); one down, one up |
+| `l8`, `l8.` | the length of notes written without one |
+| `t150` | the tempo, quarter notes a minute (1..999), for the whole song from that moment |
+| `v12` | the channel's volume, 0..15 |
+| `@1` | the instrument |
+| `q6` | the gate, 1..8: the note sounds 6/8 of its length, then its release |
+| `[c e g]3`, `[c d \| e]2` | a repeat (2 times without a number); the part after `\|` is left out the last time |
+| `$` | where the channel goes round from when it ends; without it the channel ends |
+| `; ...` | a comment to the end of the line |
+
+Lengths are counted in ticks, 48 a quarter note, so all of them are whole.
+An error names the file, the line and the column. A document of the editor
+lists its musics under `music`, and their texts lie in `music/<name>.mml`
+beside it (workflow-en.md).
+
+**Synthesizers.** A song says which synthesizer plays it, as a game of old
+sounded as the machine it was written for. The engine has three, all in
+whole numbers: the same song at the same rate gives the same samples on a
+board, on a computer and in the editor.
+
+- **chip**, the engine's own: a square of 12.5, 25 or 50%, a
+  triangle, noise, each with the envelope above.
+- **nes**, after the NES's 2A03. A pulse of 12.5, 25, 50 or 75% at the
+  frequency its 11-bit timer gives (the CPU's clock divided, so a high note
+  is a little off, as on the console; a note too low for the timer sounds an
+  octave up). The triangle is the console's staircase of 32 steps and has
+  no volume of its own: it sounds whole from its note's start until its
+  envelope dies, whatever `v` and the instrument's volume say. Noise from
+  the console's 16 periods, the one nearest to the note (16 times its
+  frequency, as the chip's noise): `noise long` (32767 steps, a hiss) or
+  `noise short` (93 steps, metallic). The envelope is the chip's, but a
+  channel sounds at one of 16 levels of volume, as on the console.
+- **fm**, after the OPL2, the chip of the AdLib, unless said. A channel is two
+  operators, a modulator and a carrier, each a sine read from a table in
+  flash (or a half-sine, an abs-sine, a quarter-sine) at the note's
+  frequency times its multiplier, with its own level, envelope and key
+  scale level. The modulator goes into the carrier's phase (`connect fm`)
+  or is heard beside it (`connect add`); its feedback puts its own output
+  into its phase, and the tone grows harsher. The envelope is in decibels,
+  as the OPL2's: the attack rises from silence along a curve, the decay
+  falls in a straight line to the sustain, which holds while the note
+  sounds (`percussive`: goes on falling at the release's pace), the release
+  falls in a straight line. As on the OPL2, a higher note runs its envelope
+  faster (a little, or much with `ksr`) and, with `ksl`, sounds quieter;
+  `vibrato` and `tremolo` are the OPL2's shallow ones (7 cents at 6.1 Hz,
+  1 dB at 3.7 Hz); a note starts both operators' waves from their start.
+
+The project chooses: `"synth": "fm"` in the editor's document,
+`Pack.set_music_synth("fm")`, or `add_music(name, text, synth="fm")` for one
+music. A song may say its own on a line of its head: `#synth nes`.
+
+```
+#synth fm
+@1 = fm mod(mult 2 level 20 attack 2 decay 300 sustain 6 release 100 feedback 4) car(mult 1 attack 5 decay 800 sustain 10 release 200) volume 14
+A t120 o4 l4 @1 c e g > c2
+```
+
+An instrument of FM is one line: `fm`, then the modulator's settings in
+`mod(...)`, the carrier's in `car(...)`, then `connect fm` (unless said) or
+`connect add`, and `volume` 0..15 (15 unless said). Without `mod(...)` the
+modulator is silent and the carrier is a plain sine.
+
+| setting of an operator | what it does |
+|------------------------|--------------|
+| `mult 2` | the operator's frequency to the note's: 0.5, 1..10, 12 or 15, as the OPL2 has them; 1 unless said |
+| `level 20` | quieter by 0.75 dB a step, 0..63; 0, the loudest, unless said. The modulator's level is how deep it modulates |
+| `ksl 3` | quieter the higher the note: 0, 1.5, 3 or 6 dB an octave from G0; 0 unless said |
+| `attack 5` | ms from silence to the top; `never`: the operator stays silent |
+| `decay 800`, `release 200` | ms of a fall of 96 dB: the pace of the decay down to the sustain, of the release after the note; `never`: the stage does not move. These are the times of the lowest notes: an octave up runs them a little faster, as the OPL2 does, and much faster with `ksr` |
+| `sustain 10` | the level held while the note sounds: 15 the top, each step 3 dB lower, 0 is 93 dB down; 15 unless said |
+| `wave half-sine` | `sine` (unless said), `half-sine` (its lower half silent), `abs-sine` (its lower half turned up), `quarter-sine` (only the rising quarters) |
+| `percussive`, `ksr`, `vibrato`, `tremolo` | past its sustain it goes on falling at its release's pace; its envelope much faster with the note; its pitch wavering by 7 cents at 6.1 Hz; its level by 1 dB at 3.7 Hz |
+| `feedback 5` | the modulator's alone: its own output into its phase, 0..7 (7 is 4π); 0 unless said |
+
+On the NES the instruments are the chip's, and `square 75%`, `noise short`,
+`noise long` as well. More of the language:
+
+| MML | what it does |
+|-----|--------------|
+| `#synth fm` | the song's synthesizer: `chip`, `nes` or `fm`; in the head, before the instruments and the notes, once |
+| `#set msx-music` | the set of instruments the song takes its own from (below) |
+| `#tail 300ms` | once the notes of every channel are over, the song goes on so long and ends, cutting what still rings (0..65534 ms). Without it a song ends when its last note has died away |
+| `@2 bass = triangle`, `@bass` | an instrument with a name (a letter, then letters, digits, `_` or `-`); the notes name it `@bass` or `@2`. A name ends at a space |
+
+A set of instruments is data apart from the synthesizers: a text of a
+`#synth` line and instruments only. A song takes one with `#set <name>` and
+uses its instruments by number or name; an instrument the song defines
+itself with the same number takes the place of the set's. Only the
+instruments the song uses go into it. The engine has two sets
+(`tools/music_sets/`): `chip` (square, lead, thin, pluck, pad, bass, kick,
+hat, snare; it serves the NES too) and `msx-music`, fifteen instruments of
+FM in the spirit of the built-in ones of the YM2413 (MSX-MUSIC), with its
+numbers and names: 1 violin, 2 guitar, 3 piano, 4 flute, 5 clarinet, 6 oboe,
+7 trumpet, 8 organ, 9 horn, 10 synth, 11 harpsichord, 12 vibraphone,
+13 synth-bass, 14 acoustic-bass, 15 electric-guitar. Their settings are the
+engine's own, not the chip's. A project adds sets of its own
+(`Pack.add_music_set(name, text)`, or a file `music/sets/<name>.mml` beside
+the document); the project's set comes before the engine's of the same name.
+
+```
+#synth fm
+#set msx-music
+A t110 o4 l8 @piano c e g > c < g e c4
+B o2 l4 @acoustic-bass c g c g
+```
+
+Which synthesizers the firmware carries, the game's build says beside its
+other settings (Part 3): `dgx_ge_synths(chip fm)` in `main/CMakeLists.txt`,
+and on the computer `DGX_GE_SYNTH_CHIP=1 DGX_GE_SYNTH_FM=1` in
+`GAME_DEFINES`. Not said, FM alone: what is not chosen is not in the
+flash, and a channel's state is as large as the largest of those chosen
+needs. A song of a synthesizer the build left out plays nothing (the mixer
+answers as if it had ended at once), and the log says so once.
+
+The same C plays a song alone, with no mixer, pack or board
+(`dgx_ge_synth.h`): `dgx_ge_song_player_new(song, size, rate)`, then
+`dgx_ge_song_render(player, out, frames)` as often as wanted (it returns how
+many frames it gave before the song ended; one that goes round never ends),
+`dgx_ge_song_player_free`; or all at once `dgx_ge_music_render(song, size,
+rate, out, frames)`. `dgx_ge_song_check` says what is wrong with a song: 0
+nothing, 1 it is no song, 2 its synthesizer is not in this build. The
+samples are those the mixer adds of the same song at the same rate: mono,
+16 bits, at full volume. `tools/synth/` builds it for the computer, a writer
+of WAV files (`make`, then `build/dgx_ge_music_wav song.dgmu song.wav
+[rate] [seconds]`), and for the editor in WebAssembly (`make wasm`, by
+Emscripten's `emcc`), so the editor sounds sample for sample as the board
+does: at the board's rate (22050 Hz, an `AudioContext` of that rate) the
+samples are the board's. A song is made of a text by
+`python3 tools/dgx_ge_music.py song.mml song.dgmu [--synth fm] [--sets <dir>]`.
+
+From JavaScript, with the module `make wasm` builds (16 MB of memory that
+never grows, so a view of it stays good):
+
+```js
+const module = await WebAssembly.compile(bytes);                 // build/dgx_ge_synth.wasm
+const imports = {};                                              // what it asks for, if anything: empty functions
+for (const i of WebAssembly.Module.imports(module)) (imports[i.module] ??= {})[i.name] = () => 0;
+const e = (await WebAssembly.instantiate(module, imports)).exports;
+if (e._initialize) e._initialize();
+const song = e.malloc(dgmu.length);                              // the song's bytes, as the packer made them
+new Uint8Array(e.memory.buffer, song, dgmu.length).set(dgmu);
+const player = e.dgx_ge_song_player_new(song, dgmu.length, 22050); // 0: a song it cannot play
+const out = e.malloc(2 * 1024);
+const given = e.dgx_ge_song_render(player, out, 1024);            // fewer than 1024: the song is over
+const samples = new Int16Array(e.memory.buffer, out, 1024);       // mono, -32768..32767
+e.dgx_ge_song_player_free(player), e.free(out), e.free(song);
+```
+
+What it costs. Flash: a note is 2 or 3 bytes, an instrument 10 (of FM, 28);
+the code of the music on an ESP32 some 3.4 KB with the chip alone, 5.3 KB
+with FM alone, 6.8 KB with all three (the tables of FM, 1 KB, among them).
+RAM: with no music in the pack only the mixer's pointer (4 bytes); with
+music, 68 bytes and 36 more a channel of the largest song (four channels:
+212), taken by `dgx_ge_mixer_init`; with FM in the build, 84 bytes and 64 a
+channel (340). Time, a channel a sample, on a computer: 3.3 ns on the chip,
+3.6 on the NES, 7.7 on FM (8.6 with vibrato and tremolo); on an ESP32 at
+240 MHz, reckoned from its instructions, some 40 instructions on the chip
+and the NES and 180 on FM: four channels at 22050 Hz take about 2% and 8% of
+a core.
+
 The board's task fills the stream while the game plays and stops sounds,
 and keeping the two apart is the mixer's job, not the game's. Whoever fills
 from a task of its own gives the mixer its lock (`lock`, a function that
@@ -1253,6 +1679,21 @@ mixer takes that lock: play, stop, the volume, filling, and the
 `board_sound_start`, so a game calls the mixer however it likes and never
 wraps the calls in a lock of its own. A board's sound runs for as long as
 the firmware does, and the mixer has to live as long.
+
+On a board of `boards/` the sound starts with one call:
+
+```c
+const uint8_t *blob = dgx_ge_pack_blob(&pack, MYGAME_BLOB_SOUNDS, &size);
+sound = board_sound_open(&mixer, &sounds, blob, size, dgx_ge_game_value(&game, MYGAME_GAME_VOICES, 4));
+```
+
+It opens the sounds, makes a mixer of that many voices at the board's rate
+(mono), starts the board's task, sets the board's volume
+(`board_sound_volume`) and returns the output to play through. On a board
+without sound, with no blob, or with no room for the voices it returns an
+empty output (`play` is `NULL`) and keeps nothing: `dgx_ge_sound_play` on
+it does nothing, so the game needs no checks of its own. How many voices
+sound at once is the game's choice, here a constant of the game.
 
 ### 2.17. The board
 
@@ -1327,6 +1768,41 @@ the display, in a band at the bottom or the top, so while it is open the
 game's frame must not draw there: `dgx_ge_frame_cover(frame, band)` covers
 those pixels, and once it is closed the frame redraws them.
 
+**The end of a pass of the loop.** `board_pace(t0, period_us)` waits for
+what is left of the period since `t0`, the `esp_timer_get_time()` taken at
+the start of the pass, and in any case gives up the processor for at least
+one tick, even when the pass took longer than the period. On a board the
+other tasks need that tick (and so does the task watchdog); on the computer
+the tick is when the window is shown and the input read. A late pass is not
+made up: the game moves by time. It is in `dgx_ge_board.h` and works the
+same on every board and on the computer.
+
+**What the game keeps over a restart.** A number or two (the best score, a
+count) go into NVS, and on the computer the same calls keep them in files
+([host-en.md](host-en.md), section 8). The game's component needs
+`nvs_flash` among its requirements.
+
+```c
+esp_err_t e = nvs_flash_init();   /* a partition of another layout, or full: erased, and up again */
+if (e == ESP_ERR_NVS_NO_FREE_PAGES || e == ESP_ERR_NVS_NEW_VERSION_FOUND) e = nvs_flash_erase() == ESP_OK ? nvs_flash_init() : e;
+nvs_handle_t h;
+if (e == ESP_OK && nvs_open("mygame", NVS_READONLY, &h) == ESP_OK) {
+    if (nvs_get_u32(h, "best", &best) != ESP_OK) best = 0;   /* nothing kept yet */
+    nvs_close(h);
+}
+/* … later, only when the number has changed: flash wears out */
+if (nvs_open("mygame", NVS_READWRITE, &h) == ESP_OK) {
+    nvs_set_u32(h, "best", best);
+    nvs_commit(h);
+    nvs_close(h);
+}
+```
+
+NVS that stays up holds some 2.4 KB of RAM the whole time. A game short of
+memory brings it up only for a read or a write and lets it go afterwards
+(`nvs_flash_deinit`). A whole saved game (section 2.15) goes in the same
+way, as a blob (`nvs_set_blob`, `nvs_get_blob`).
+
 The frame's scale, the fonts, the sounds and whatever the game stores are
 not the board file's business: the game sets them. If the ready board file
 does not suit you (other pins, another display, your own sound), copy it
@@ -1339,8 +1815,9 @@ The main loop looks roughly like this:
 
 ```c
 for (;;) {
-    const uint32_t now = esp_timer_get_time() / 1000;
-    dgx_ge_input_update(&input, read_buttons());
+    const int64_t  t0  = esp_timer_get_time();
+    const uint32_t now = (uint32_t)(t0 / 1000);
+    dgx_ge_input_update(&input, board_buttons());
 
     /* first the steps whose time has come, then the decisions by the buttons and the world:
        the logic looks at the hero where he has already got to */
@@ -1349,15 +1826,18 @@ for (;;) {
 
     /* what is visible: this frame's actors */
     dgx_ge_scene_actors_begin(scene);
-    dgx_ge_item_t item;
-    if (hero_item(&hero, &item)) dgx_ge_scene_actor(scene, &item);
+    dgx_ge_scene_show_actor(scene, &hero, LAYER_ACTORS, &pack, map_of, &hero_picture);
 
     dgx_ge_scene_render(scene);       /* draw what changed and send it */
+    board_pace(t0, 20000);            /* the rest of 20 ms, and a tick at least */
 }
 ```
 
-There is no waiting inside the loop: the next frame is drawn as soon as the
-previous one is ready, and the actors' time is real time.
+The actors' time is real time, so how often the loop runs does not change
+how fast they move. A pass every 20 ms is enough: the picture changes at
+most 50 times a second, and the rest of the time goes to the board's other
+tasks. `board_pace` (section 2.17) waits for the rest of the period and
+always gives up at least one tick.
 
 ---
 
@@ -1400,7 +1880,7 @@ a board, step by step and with what each step gives, is in its own
 document, [workflow-en.md](workflow-en.md). In short:
 
 1. Add the engine to your ESP-IDF project from the registry:
-   `idf.py add-dependency "jef-sure/dgx-ge^0.3.0"`. It lands in
+   `idf.py add-dependency "jef-sure/dgx-ge"`. It lands in
    `managed_components/jef-sure__dgx-ge`, `main` requires it by itself, and
    DGX comes along as its dependency (`jef-sure/dgx`).
 2. Write a Python script that builds the pack (`Pack`, section 2.2). How to
@@ -1423,6 +1903,34 @@ document, [workflow-en.md](workflow-en.md). In short:
    names it, as soon as an actor of the pack needs more params than the
    engine keeps by default.
 
+   Beside it, say how many `now` events the game may send to an actor from
+   that actor's own step (in its `say`): they wait in a queue and are taken
+   in turn (animation-en.md, section 4, "Fine points"). The engine's
+   default is 4; saying it shows where this setting lives:
+
+   ```cmake
+   dgx_ge_now_events(4)
+   ```
+
+   It sets `DGX_GE_ANIM_NOW_EVENTS` for the whole build, the engine's code
+   and the game's alike, since the size of an actor depends on it: each
+   place takes 2 bytes in every actor. Any whole number from 1 to 255, said
+   once; not said, it is 4. On the computer the same value goes into
+   `GAME_DEFINES` of the game's `Makefile`: `DGX_GE_ANIM_NOW_EVENTS=4`
+   (host-en.md).
+
+   A game with music says which synthesizers its firmware carries (2.16,
+   "Synthesizers"): those its songs play on, one or more of `chip`, `nes`,
+   `fm`. Not said, FM alone; saying it shows where it lives:
+
+   ```cmake
+   dgx_ge_synths(fm)
+   ```
+
+   It sets `DGX_GE_SYNTH_<NAME>=1` for the whole build, said once; the ones
+   left out are not in the flash. On the computer the same goes into
+   `GAME_DEFINES`: `DGX_GE_SYNTH_FM=1`.
+
 4. Put the pack into the firmware (`EMBED_FILES "assets/mygame.pack"` in
    `main/CMakeLists.txt`). If the game has named its fonts (`Pack.add_font`),
    hand their requests to DGX in the same place: `dgx_ge_fonts(assets/mygame.fonts)`,
@@ -1431,8 +1939,9 @@ document, [workflow-en.md](workflow-en.md). In short:
    ready-made setup code in `boards/` (section 2.17). For any other board,
    create the DGX bus and screen yourself (the `examples/` of DGX show how
    for different displays) and give the screen to the engine
-   (`dgx_ge_frame_create`). Turn on DGX's virtual screens and the display's
-   bus and driver in `sdkconfig` (section 2.17).
+   (`dgx_ge_frame_fit`, or `dgx_ge_frame_create` at a place of your own).
+   Turn on DGX's virtual screens and the display's bus and driver in
+   `sdkconfig` (section 2.17).
 6. Build and flash: `idf.py build flash monitor`.
 7. Start with one actor on an empty scene. Then add a set, then a second
    actor, then collisions. Every step can be checked on the computer.
@@ -1445,7 +1954,7 @@ document, [workflow-en.md](workflow-en.md). In short:
 | `tools/dgx_ge_anim.py` | the animation language: scripts, events, rules; the language is described at the start of the file |
 | `tools/dgx_ge_dialog.py` | the dialog language |
 | `tools/dgx_ge_graph.py` | the scene graph |
-| `tools/dgx_ge_explain.py` | retells scripts in words |
+| `tools/dgx_ge_explain.py` | retells scripts in words, and shows where an answer of the game would be lost |
 | `font2c/dgx_fonts.py` of DGX | fonts: which face the rules will pick (`pick`, `list`), a font as JSON for editors (`json`); the fonts themselves are made by the build from the requests |
 | `tools/dgx_ge_text.py` | text layout as the engine does it, for the editor; the font as `dgx_fonts.py json` of DGX reads it |
 | sprite editor | a separate program, [dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor): pictures, masks, animations, the state machine, scenes, dialogs, with a live preview in motion. The pack reads its files through `Pack.add_sprites`: sets, masks, animations, tilesets, styles, dialogs, scenes, the scene graph and the game's data (constants, timers, sounds, shows, crops, chases) |
@@ -1459,7 +1968,7 @@ document, [workflow-en.md](workflow-en.md). In short:
   often it is a typo or a reference to something that does not exist.
 - **An actor is not visible.** Check, in this order:
   - whether you gave the frame the colors of its set
-    (`dgx_ge_frame_add_colors`);
+    (`dgx_ge_frame_pack_colors`, `dgx_ge_frame_add_colors`);
   - which layer it is in;
   - whether a later layer covers it;
   - whether it was added between `actors_begin` and `render`.
@@ -1471,8 +1980,8 @@ document, [workflow-en.md](workflow-en.md). In short:
 
 ## Part 4. What's not ready yet
 
-- **Sound:** the mixer and output over I2S are there; volume of the world's
-  sounds by distance, and music, will come later.
+- **Sound:** the mixer, music by notes and output over I2S are there; the
+  volume of the world's sounds by distance will come later.
 - **A generated scrolling world** (an endless river with a little plane):
   the ring grid (`dgx_ge_grid_scroll`) and moving the origin of coordinates
   (`dgx_ge_scene_shift`, `dgx_ge_actor_shift`) are done; trying them out in

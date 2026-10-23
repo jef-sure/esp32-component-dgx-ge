@@ -170,31 +170,34 @@ bool dgx_ge_scene_actor_child(dgx_ge_scene_t *scene, const dgx_ge_item_t *item, 
 /*
  * A picture carried by another: a sword in a hand, a stone held. It stands
  * at dx, dy from the origin of the carrier as its picture is drawn unturned
- * (right, down), so it turns round with it; it is in the layer and at the key
- * of the carrier, cut as it is, turned and a silhouette as it is. Give it with
- * dgx_ge_scene_actor_child(), right after its carrier.
+ * (right, down), so it turns round with it and is turned with it; it is in
+ * the layer and at the key of the carrier, cut as it is, mirrored, turned and
+ * a silhouette as it is. Give it with dgx_ge_scene_actor_child(), right after
+ * its carrier.
  */
 static inline dgx_ge_item_t dgx_ge_item_child(const dgx_ge_item_t *carrier, const dgx_image_t *image, const uint8_t *map, int dx, int dy)
 {
-    const bool flip = carrier->flags & DGX_GE_BLIT_FLIP_X;
+    int32_t x = dx, y = dy;
+    dgx_ge_orient_apply(dgx_ge_item_orient(carrier), &x, &y);
     return (dgx_ge_item_t){
         .image = image,
         .map   = map,
-        .x     = (int16_t)(carrier->x + (flip ? -dx : dx)),
-        .y     = (int16_t)(carrier->y + dy),
+        .x     = (int16_t)(carrier->x + x),
+        .y     = (int16_t)(carrier->y + y),
         .key   = carrier->key,
         .clip  = carrier->clip,
         .layer = carrier->layer,
         .flags = (uint8_t)(carrier->flags & (DGX_GE_BLIT_FLIP_X | DGX_GE_BLIT_SILHOUETTE | DGX_GE_ITEM_OPEN_SPACE | DGX_GE_ITEM_INSIDE)),
         .color = carrier->color,
+        .turn  = carrier->turn,
     };
 }
 
 /*
  * A child held at a point of its carrier's picture (a sword in a hand,
  * dgx_ge_pack_point): the child's own point of that name, if its picture has
- * one (where it is held: the hilt), goes to it, else its origin; mirrored with
- * the carrier, as dgx_ge_item_child. carrier_image, image: the numbers of the
+ * one (where it is held: the hilt), goes to it, else its origin; mirrored and
+ * turned with the carrier, as dgx_ge_item_child. carrier_image, image: the numbers of the
  * pictures in the pack. z: the point's, for dgx_ge_scene_actor_child. False
  * when the carrier's picture has no such point: nothing is held in that frame.
  */

@@ -120,6 +120,24 @@ static void touch_into(const dgx_ge_touch_t *t, void *ctx)
     ++k->count;
 }
 
+/* The bytes of the heap in use now, as ASan counts them (the tests are built with it). */
+size_t __sanitizer_get_current_allocated_bytes(void);
+
+/* A touch that, the first time, asks the grid again about another body (while the solids of the first are in use). */
+typedef struct {
+    const dgx_ge_grid_t *grid;
+    dgx_ge_body_t        body;
+    touches_t           *outer, *inner;
+    int                  asked;
+} nested_t;
+
+static void touch_nested(const dgx_ge_touch_t *t, void *ctx)
+{
+    nested_t *n = ctx;
+    touch_into(t, n->outer);
+    if (!n->asked++) dgx_ge_grid_touching(n->grid, &n->body, 1, 2, touch_into, n->inner);
+}
+
 /* By hand: every plate of the grid against every other, a mask at a time (the plates of cells are x 0..7, y 4..5 of each). */
 static void touches_by_hand(const dgx_ge_grid_t *g, const dgx_ge_body_t *body, int reach, touches_t *k)
 {
@@ -694,10 +712,63 @@ int main(void)
         /* a grid laid in part (no room): its laid is no good for relaying */
         dgx_ge_scene_t *small = dgx_ge_scene_create(frame, 3, 2, 4);
         CHECK(small && !dgx_ge_grid_add(&rg, small) && !dgx_ge_grid_relay(&rg, small, 1, 1, false));
+        /* the time moves (dgx_ge_grid_play): the door's cycle laid again in its place, only it marked, the set as laid anew then */
+        rg.now_ms = plain.now_ms = 0, rm[5] = 1;
+        dgx_ge_scene_set_begin(rs);
+        CHECK(dgx_ge_grid_add(&rg, rs));
+        dgx_ge_scene_set_end(rs);
+        dgx_ge_scene_render(rs);
+        CHECK(dgx_ge_grid_play(&rg, rs, 50) && rg.now_ms == 50 && frame->dirty_count == 0);
+        memcpy(was, rs->set, sizeof(dgx_ge_item_t) * rs->set_count);
+        CHECK(dgx_ge_grid_play(&rg, rs, 150) && rg.now_ms == 150);
+        plain.now_ms = 150;
+        CHECK(same_as_laid(rs, &plain, whole));
+        changed = -1, changes = 0;
+        for (int i = 0; i < rs->set_count; ++i)
+            if (!dgx_ge_item_same(&was[i], &rs->set[i])) changed = i, ++changes;
+        CHECK(changes == 1 && SAME(rs->set[changed].image, img_four));
+        if (changes == 1) {
+            const dgx_ge_rect_t turned = dgx_ge_rect_union(dgx_ge_image_box(was[changed].image, was[changed].x, was[changed].y, false),
+                                                           dgx_ge_image_box(rs->set[changed].image, rs->set[changed].x, rs->set[changed].y, false));
+            CHECK(frame->dirty_count == 1 && dgx_ge_rect_equal(frame->dirty[0], turned));
+        }
+        dgx_ge_scene_render(rs);
+        /* nothing kept: no, the set as it was; the cell's place marked (where it was and is), not all of the frame */
+        const int laid_count = rs->set_count;
+        CHECK(!dgx_ge_grid_play(&plain, rs, 410) && plain.now_ms == 410 && rs->set_count == laid_count && frame->dirty_count >= 1 &&
+              frame->dirty[0].w < 64);
+        dgx_ge_scene_render(rs);
         dgx_ge_scene_destroy(&small);
         dgx_ge_scene_destroy(&tight);
         dgx_ge_scene_destroy(&whole);
         dgx_ge_scene_destroy(&rs);
+    }
+    /*
+     * More than 32 solids about a body: a buffer of the heap taken once and kept (not the stack); a touch told while it
+     * is in use that asks again about a crowd is still right (that one goes point by point).
+     */
+    {
+        static uint16_t      full[TOUCH_COLS * TOUCH_ROWS];
+        static touches_t     found, by_hand, inner, inner_by_hand;
+        static nested_t      nest;
+        dgx_ge_grid_t        lot  = {.tileset = &tiles, .cells = full, .cols = TOUCH_COLS, .rows = TOUCH_ROWS};
+        const dgx_ge_body_t  slab = {&pack, TEST_IMG_SLAB, 20, 20, false, 1u << 1};
+        for (int i = 0; i < TOUCH_COLS * TOUCH_ROWS; ++i) full[i] = TEST_TILES_TILE_PLATE;
+        const size_t before = __sanitizer_get_current_allocated_bytes();
+        dgx_ge_grid_touching(&lot, &slab, 1, 2, touch_into, &found);
+        const size_t kept = __sanitizer_get_current_allocated_bytes();
+        touches_by_hand(&lot, &slab, 2, &by_hand);
+        CHECK(found.count > 0 && !memcmp(&found, &by_hand, sizeof(found)));
+        CHECK(kept >= before + 33 * 14); /* taken and kept: no free after the call */
+        memset(&found, 0, sizeof(found));
+        dgx_ge_grid_touching(&lot, &slab, 1, 2, touch_into, &found);
+        CHECK(__sanitizer_get_current_allocated_bytes() == kept && !memcmp(&found, &by_hand, sizeof(found))); /* the same buffer again */
+        /* asked again from inside a touch: the inner call right, the outer one too */
+        memset(&found, 0, sizeof(found));
+        nest = (nested_t){.grid = &lot, .body = {&pack, TEST_IMG_SLAB, 52, 36, true, 1u << 1}, .outer = &found, .inner = &inner};
+        dgx_ge_grid_touching(&lot, &slab, 1, 2, touch_nested, &nest);
+        touches_by_hand(&lot, &nest.body, 2, &inner_by_hand);
+        CHECK(nest.asked > 0 && inner.count > 0 && !memcmp(&inner, &inner_by_hand, sizeof(inner)) && !memcmp(&found, &by_hand, sizeof(found)));
     }
     /*
      * A body over many cells (72 x 40, cells of 8) on plates here and there: what it touches is what it touches among

@@ -6,8 +6,12 @@
 
 #include "bus/dgx_bus_protocols.h"
 #include "dgx_font.h"
+#include "dgx_ge_mixer.h"
 #include "dgx_ge_types.h"
 #include "dgx_screen.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 /*
  * Boards games of DGX-GE have run on, set up as those games use them: a convenience, not a must (the engine knows a
@@ -101,3 +105,34 @@ struct dgx_ge_mixer;
 extern const uint32_t board_sound_rate;
 extern const uint8_t  board_sound_volume; /* of the mixer, 1..255, with the game's sound on: the board's speaker, a room */
 bool board_sound_start(struct dgx_ge_mixer *mixer);
+
+/*
+ * The game's sound on the board, as a game starts it: a mixer of the blob SOUNDS (blob, size: the pack's, or samples
+ * in the board's flash) opened into sounds, of voices voices (a constant of the game, as it names one), at the board's
+ * rate, started by its task (board_sound_start), at its volume (board_sound_volume); its output, what the game plays
+ * through (dgx_ge_sound_play). None, play NULL, so that nothing sounds and nothing is kept, on a board without sound,
+ * with no blob or one that is not SOUNDS, or no room for the voices.
+ */
+static inline dgx_ge_sound_t board_sound_open(dgx_ge_mixer_t *mixer, dgx_ge_sounds_t *sounds, const void *blob, size_t size, int voices)
+{
+    const dgx_ge_sound_t none = {0};
+    if (!dgx_ge_sounds_open(sounds, blob, size) || !dgx_ge_mixer_init(mixer, sounds, voices, board_sound_rate, 1)) return none; /* a rate of 0: none */
+    if (!board_sound_start(mixer)) {
+        dgx_ge_mixer_free(mixer);
+        return none;
+    }
+    dgx_ge_mixer_volume(mixer, board_sound_volume);
+    return dgx_ge_mixer_output(mixer);
+}
+
+/*
+ * The end of a pass of the game's loop that began at t0_us (esp_timer_get_time): the rest of period_us waited, and the
+ * processor given up for a tick at least however long the pass took, so that the board's other tasks run (and its
+ * watchdog is fed) and, on the computer, the window is shown and the input read (boards/host: in vTaskDelay). A pass
+ * that took longer goes on after that one tick: the game moves by time, a step late is not made up.
+ */
+static inline void board_pace(int64_t t0_us, uint32_t period_us)
+{
+    const int64_t spent = esp_timer_get_time() - t0_us;
+    vTaskDelay(spent < (int64_t)period_us ? pdMS_TO_TICKS(((int64_t)period_us - spent) / 1000) + 1 : 1);
+}

@@ -28,22 +28,23 @@ static unsigned pixel_of(const dgx_image_t *im, int px, int py)
 
 /*
  * A picture with its origin at x, y, each of its pixels a square of n, into a linear 8-bit screen, inside clip: as
- * dgx_image_blit draws it (1 bit: the color; 4, 8 bits: the map, or the value; a silhouette: the color; mirrored round
- * its origin), only larger. DGX does not scale pictures.
+ * dgx_image_blit draws it (1 bit: the color; 4, 8 bits: the map, or the value; a silhouette: the color; mirrored and
+ * turned round its origin), only larger. DGX does not scale pictures.
  */
 static void blit_scaled(dgx_screen_t *into, int x, int y, const dgx_image_t *im, const dgx_ge_item_t *item, dgx_ge_rect_t clip, int n)
 {
     if (!im->data || (im->format != 1 && im->format != 4 && im->format != 8)) return;
-    const bool          flip = item->flags & DGX_GE_BLIT_FLIP_X, silhouette = item->flags & DGX_GE_BLIT_SILHOUETTE;
-    const dgx_ge_rect_t box  = dgx_ge_image_box_scaled(im, x, y, flip, n);
-    const dgx_ge_rect_t r    = dgx_ge_rect_intersect(dgx_ge_rect_intersect(box, clip), dgx_ge_rect(0, 0, into->width, into->height));
-    uint8_t            *out  = ((dgx_vscreen_t *)into)->v_array;
+    const unsigned      o          = dgx_ge_item_orient(item);
+    const bool          silhouette = item->flags & DGX_GE_BLIT_SILHOUETTE;
+    const dgx_ge_rect_t box        = dgx_ge_image_box_scaled(im, x, y, o, n);
+    const dgx_ge_rect_t r          = dgx_ge_rect_intersect(dgx_ge_rect_intersect(box, clip), dgx_ge_rect(0, 0, into->width, into->height));
+    uint8_t            *out        = ((dgx_vscreen_t *)into)->v_array;
     for (int dy = r.y; dy < r.y + r.h; ++dy) {
-        const int py  = (dy - box.y) / n;
-        uint8_t  *row = out + (size_t)dy * into->width;
+        uint8_t *row = out + (size_t)dy * into->width;
         for (int dx = r.x; dx < r.x + r.w; ++dx) {
-            const int      bx = (dx - box.x) / n;
-            const unsigned v  = pixel_of(im, flip ? im->width - 1 - bx : bx, py);
+            int px, py;
+            dgx_ge_orient_back(o, im->width, im->height, (dx - box.x) / n, (dy - box.y) / n, &px, &py);
+            const unsigned v = pixel_of(im, px, py);
             if (v) row[dx] = silhouette || im->format == 1 ? item->color : item->map ? item->map[v - 1] : (uint8_t)v;
         }
     }
@@ -61,7 +62,7 @@ void dgx_ge_item_draw(dgx_screen_t *into, const dgx_ge_item_t *item, int x, int 
         .flags       = DGX_IMAGE_CLIP | (item->flags & DGX_GE_BLIT_SILHOUETTE ? DGX_IMAGE_SILHOUETTE : 0u),
         .map         = item->map,
         .color       = item->color,
-        .orientation = item->flags & DGX_GE_BLIT_FLIP_X ? DgxOutputMirrorX : DgxOutputNormal,
+        .orientation = dgx_ge_orient_output(dgx_ge_item_orient(item)),
         .clip_x      = clip.x,
         .clip_y      = clip.y,
         .clip_w      = clip.w,
@@ -74,7 +75,7 @@ void dgx_ge_item_draw(dgx_screen_t *into, const dgx_ge_item_t *item, int x, int 
         return;
     }
     /* repeated: from the first picture that reaches into what is drawn, a step its size; a picture lies off its origin by the box of one there */
-    const dgx_ge_rect_t one = dgx_ge_image_box_scaled(item->image, 0, 0, item->flags & DGX_GE_BLIT_FLIP_X, n);
+    const dgx_ge_rect_t one = dgx_ge_image_box_scaled(item->image, 0, 0, dgx_ge_item_orient(item), n);
     const int           w = one.w, h = one.h;
     if (w < 1 || h < 1) return;
     const int x0 = x + floor_div(clip.x - x - one.x, w) * w, y0 = y + floor_div(clip.y - y - one.y, h) * h;

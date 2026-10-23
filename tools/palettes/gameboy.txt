@@ -1,0 +1,6 @@
+; The Game Boy (DMG-01): the four greens of its screen, from the lightest (shade 0 of its registers) to the darkest,
+; as the list of video game console palettes of Wikipedia gives them.
+#9bbc0f
+#8bac0f
+#306230
+#0f380f

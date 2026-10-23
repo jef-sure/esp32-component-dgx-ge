@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-enum { HEAD = 28, LAYER = 4, PICTURE = 18, ZONE = 10, ENTRY = 6, SOURCE = 6, ACTOR = 10, PARAM = 4, GRID = 14 };
+enum { HEAD = 36, PAPER = 28, MUSIC = 32, LAYER = 4, PICTURE = 18, ZONE = 10, ENTRY = 6, SOURCE = 6, ACTOR = 10, PARAM = 4, GRID = 14 };
 
 static uint16_t u16_at(const uint8_t *p)
 {
@@ -88,6 +88,12 @@ bool dgx_ge_layout_scene(const dgx_ge_layout_t *l, dgx_ge_scene_t *scene, const 
                          dgx_image_t *images)
 {
     if (!scene || scene->layer_count < l->layers) return false;
+    /* the paper: the color 0 of the frame, given only when it is another (a color given makes all of the frame drawn anew) */
+    const uint8_t *paper = l->data + PAPER;
+    if ((paper[3] & 1) && (scene->paper || memcmp(scene->frame->rgb[0], paper, 3))) {
+        dgx_ge_frame_set_color(scene->frame, 0, paper[0], paper[1], paper[2]);
+        scene->paper = 0;
+    }
     for (int i = 0; i < l->layers; ++i) {
         const uint8_t *y = l->data + HEAD + LAYER * i;
         dgx_ge_scene_layer(scene, i, i16_at(y), y[2] ? DGX_GE_ORDER_KEY : DGX_GE_ORDER_ADDED);
@@ -97,11 +103,25 @@ bool dgx_ge_layout_scene(const dgx_ge_layout_t *l, dgx_ge_scene_t *scene, const 
         const int      id = u16_at(q), set = dgx_ge_pack_image_set(pack, id);
         if (!dgx_ge_pack_image(pack, id, &images[i])) return false;
         const dgx_ge_item_t item = {.image = &images[i], .map = maps && set >= 0 ? maps[set] : NULL, .x = i16_at(q + 2), .y = i16_at(q + 4),
-                                    .key = i16_at(q + 6), .layer = q[8], .flags = q[9] & 1 ? DGX_GE_BLIT_FLIP_X : 0,
+                                    .key = i16_at(q + 6), .layer = q[8], .flags = q[9] & 1 ? DGX_GE_BLIT_FLIP_X : 0, .turn = (uint8_t)(q[9] >> 1 & 3),
                                     .clip = dgx_ge_rect(i16_at(q + 10), i16_at(q + 12), i16_at(q + 14), i16_at(q + 16))};
         if (dgx_ge_scene_add(scene, &item) < 0) return false;
     }
     return true;
+}
+
+int dgx_ge_layout_music_of(const dgx_ge_layout_t *l, uint32_t *fade_ms)
+{
+    const uint8_t *m = l->data ? l->data + MUSIC : NULL;
+    if (fade_ms) *fade_ms = m ? u16_at(m + 2) : 0;
+    return !m || !(m[1] & 3) ? -1 : m[1] & 2 ? 255 : m[0];
+}
+
+void dgx_ge_layout_music(const dgx_ge_layout_t *l, const dgx_ge_sound_t *out)
+{
+    uint32_t  fade;
+    const int music = dgx_ge_layout_music_of(l, &fade);
+    if (music >= 0) dgx_ge_sound_music(out, music, fade);
 }
 
 bool dgx_ge_layout_zone(const dgx_ge_layout_t *l, int n, dgx_ge_rect_t *place, int *kind)
@@ -127,7 +147,7 @@ bool dgx_ge_layout_actor(const dgx_ge_layout_t *l, int n, dgx_ge_layout_actor_t 
 {
     if (n < 0 || n >= l->actors) return false;
     const uint8_t *r = l->data + u16_at(l->data + offsets_at(l) + 2 * n);
-    *a = (dgx_ge_layout_actor_t){.kind = u16_at(r), .script = r[2], .layer = r[3], .x = i16_at(r + 4), .y = i16_at(r + 6), .flip = r[8] & 1,
+    *a = (dgx_ge_layout_actor_t){.kind = u16_at(r), .script = r[2], .layer = r[3], .x = i16_at(r + 4), .y = i16_at(r + 6), .flip = r[8] & 1, .turn = (uint8_t)(r[8] >> 1 & 3),
                                  .params = r[9], .given = r + ACTOR};
     return true;
 }
@@ -138,8 +158,9 @@ bool dgx_ge_layout_actor_start(const dgx_ge_layout_t *l, int n, dgx_ge_actor_t *
     const dgx_ge_anim_t  *anim = dgx_ge_layout_actor(l, n, &a) ? dgx_ge_kind(kinds, a.kind) : NULL;
     if (!anim) return false;
     dgx_ge_actor_start(actor, anim, a.script, a.x, a.y, now_ms);
-    /* it enters its script so: facing, the params given (a record of the world made from it keeps them) */
+    /* it enters its script so: facing (mirrored, turned), the params given (a record of the world made from it keeps them) */
     actor->flip = actor->entered_flip = a.flip;
+    actor->turn = actor->entered_turn = a.turn;
     for (int i = 0; i < a.params; ++i) {
         const uint8_t *g = a.given + PARAM * i;
         if (g[0] < DGX_GE_ANIM_PARAMS) actor->params[g[0]] = actor->entered_params[g[0]] = i16_at(g + 2);

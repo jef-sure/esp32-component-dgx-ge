@@ -11,6 +11,8 @@ pictures and calls this one:
     pack = Pack("MYGAME")
     hero = pack.add_set("HERO", colors)                 # up to 15 colors, RGB888
     pack.add_png("HERO_STAND", hero, "stand.png", origin="bottom-left")
+    ship = pack.add_set("SHIP", palette="nes")          # or a ready palette's colors (tools/palettes/)
+    pack.add_png("SHIP", ship, "ship.png")              # its colors brought to the nearest of the NES
     pack.add_blob("LEVEL_1", open("level1.bin", "rb").read())
     pack.write("mygame.pack", "mygame_pack.h")
 
@@ -28,6 +30,7 @@ import struct
 import sys
 import zlib
 from contextlib import contextmanager
+from functools import lru_cache
 
 MAGIC = 0x4B504744  # "DGPK"
 VERSION = 4
@@ -80,6 +83,51 @@ def values_of(im):
     return list(im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata())
 
 
+PALETTES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "palettes")
+
+
+def read_palette(text, where):
+    """The colors of a palette's text: a color a line, #rrggbb, ';' begins a comment; where names it in an error."""
+    colors = []
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.split(";", 1)[0].strip()
+        if not line:
+            continue
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", line):
+            raise ValueError(f"{where}: line {n}: {line!r} is not a color #rrggbb")
+        colors.append(tuple(int(line[i:i + 2], 16) for i in (1, 3, 5)))
+    if not 1 <= len(colors) <= 255:
+        raise ValueError(f"{where}: {len(colors)} colors, 1 .. 255")
+    return colors
+
+
+def engine_palettes():
+    """The names of the engine's palettes (tools/palettes/<name>.txt)."""
+    return sorted(f[:-4] for f in os.listdir(PALETTES) if f.endswith(".txt")) if os.path.isdir(PALETTES) else []
+
+
+@lru_cache(maxsize=None)
+def _lab(rgb):
+    """CIELAB of an sRGB color (D65)."""
+    def linear(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (linear(c) for c in rgb)
+    xyz = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047, 0.2126 * r + 0.7152 * g + 0.0722 * b, \
+        (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+    f = [t ** (1 / 3) if t > 216 / 24389 else (24389 / 27 * t + 16) / 116 for t in xyz]
+    return 116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+
+
+def nearest_color(colors, rgb):
+    """The index of the color of colors nearest to rgb as the eye sees it (CIE76: the distance in CIELAB; the first of
+    equals), and the distance (about 2.3 is the least the eye tells apart)."""
+    lab = _lab(rgb)
+    best, d = min(((i, sum((a - b) ** 2 for a, b in zip(_lab(c), lab)) ** 0.5) for i, c in enumerate(colors)), key=lambda t: t[1])
+    return best, d
+
+
 def write_files(files):
     """
     Files whole or not at all: each written beside its place first, then all put in their places (none is changed when
@@ -100,10 +148,14 @@ def write_files(files):
 
 
 # the blobs the packer adds itself as it writes the pack (write): no other may take their names
-OWN_BLOBS = ("STRINGS", "GAME", "CHASE", "TIMERS", "STYLES", "SOUNDS")
+OWN_BLOBS = ("STRINGS", "GAME", "CHASE", "TIMERS", "STYLES", "SOUNDS", "VARIABLES")
+VARS_MAGIC = 0x52564744  # "DGVR": the game's variables (dgx_ge_game.h)
+VARS_MAX = 256  # a variable's number is a byte in the steps of scripts and dialogs
 
 
 TIMER_RESETS = ("never", "scene", "map")
+
+MUSIC_FADE_MS = 500  # a scene's change of music, unless it says (its musicFade): a scene is a change of place
 
 
 # How a sound's samples are kept (dgx_ge_sound.h): 8 bits unsigned, IMA ADPCM of 4 bits.
@@ -187,6 +239,8 @@ class Pack:
             raise ValueError(f"the prefix of a pack {prefix!r}: capitals, digits and _, from a capital (MYGAME: MYGAME_SET_HERO)")
         self.prefix = prefix
         self.sets = []    # (name, [(r, g, b), ...])
+        self.palettes = {}  # name -> colors: the project's palettes (a document's "palettes"), before the engine's
+        self.set_palettes = {}  # set -> its ready palette: name, colors, the numbers of them taken, the colors brought
         self.images = []  # (name, set, width, height, origin_x, origin_y, bits, pixels)
         self.blobs = []   # (name, bytes)
         self.masks = []   # (image, index, x, y, width, height, bits): masks of collisions, from the origin of their picture
@@ -202,6 +256,12 @@ class Pack:
         self.timers = []    # the names of the timers of the pack: their numbers (timer(NAME), add_timers)
         self.sounds = []    # the names of the sounds, by their numbers (dgx_ge_sound.h)
         self.sound_data = []  # their samples, rate, loop, codec (None: a name only), by the same numbers
+        self.sound_files = {}  # name -> the file beside a document its samples were taken from (add_sprites)
+        self.musics = []    # the names of the musics, by their numbers (add_music; music <name> of scripts names them too)
+        self.music_data = []  # their songs (dgx_ge_music.py; None: a name only), by the same numbers
+        self.music_synth = "fm"  # the project's synthesizer of music (a document's "synth"): a song's #synth overrides it
+        self.music_sets = {}  # name -> the text of a set of instruments of the project (add_music_set), before the engine's
+        self.music_set_dirs = []  # music/sets/ beside the documents read: <name>.mml there is a set of the project
         self.timer_defs = {}  # name -> (kind, period ms, limit ms, reset, event name or None, starts with the game)
         self.chases = []    # (kind, its record) of the blob CHASE: how kinds chase the hero (add_chase)
         self.meets = None  # {"own": rows, "foreign": rows}, 16 rows of 16 bits: which masks meet
@@ -217,21 +277,105 @@ class Pack:
         self.zone_kinds = []  # the words of zones' kinds (exit, trap), by first use: their numbers
         self.screen = None  # (width, height) of the device's screen, as the editor's file says
         self.constants = {}  # the game's names of numbers its scripts write (add_constants), by their values
+        self.variables = []  # the game's variables (add_variable): (name, the value it begins with), by their numbers
         self.fields = []  # (name, size) of the game's text fields dialogs edit (add_field): their numbers
         self.field_letters = set()  # what can be typed into them: what a font typed must have
         self.warnings = []
 
-    def add_set(self, name, colors):
-        """A set of pictures and its colors, those of the values 1..; returns its number."""
+    def add_set(self, name, colors=None, palette=None):
+        """
+        A set of pictures and its colors, those of the values 1..; returns its number.
+
+        palette: instead of colors, a ready palette: its name (a palette of the project, a document's "palettes", else
+        the engine's, tools/palettes/<name>.txt: nes, gameboy, pico8) or its colors. Every color of the set's pictures
+        is brought to the nearest of the palette (add_png), and the set has the palette's colors its pictures took, in
+        the palette's order (renumbered as they come). Values given as they are (add_image, add_png by_index) are then
+        numbers of the palette's colors, 1 its first.
+        """
+        if (colors is None) == (palette is None):
+            raise ValueError(f"set {name}: its colors or a palette, one of them")
+        if palette is not None:
+            if isinstance(palette, str):
+                label = palette
+                if palette in self.palettes:
+                    palette = self.palettes[palette]
+                elif palette in engine_palettes():
+                    path = os.path.join(PALETTES, f"{palette}.txt")
+                    with open(path, encoding="utf-8") as f:
+                        palette = read_palette(f.read(), path)
+                else:
+                    known = sorted(self.palettes) + [n for n in engine_palettes() if n not in self.palettes]
+                    raise ValueError(f"set {name}: no palette {palette!r}; there are {', '.join(known)}")
+            else:
+                palette = [tuple(c[:3]) for c in palette]
+                label = f"of {len(palette)} colors"
+                if not 1 <= len(palette) <= 255:
+                    raise ValueError(f"set {name}: a palette of {len(palette)} colors, 1 .. 255")
+            colors = []
         if len(colors) > 255:
             raise ValueError(f"set {name}: {len(colors)} colors, 255 at most")
         if any(name_of(n) == name_of(name) for n, _ in self.sets):
             raise ValueError(f"set {name}: a set of that name already (the header names them alike)")
         self.sets.append((name, [tuple(c[:3]) for c in colors]))
+        if palette is not None:
+            self.set_palettes[len(self.sets) - 1] = {"name": label, "colors": palette, "taken": [], "brought": {}}
         return len(self.sets) - 1
 
+    def _take(self, set_id, numbers):
+        """
+        The colors of a set of a ready palette its pictures take, by their numbers in the palette (1..): the set gets
+        those it had not, in the palette's order, and its pictures already in are renumbered (8 bits a pixel for those
+        of 4 when their values pass 15). Returns {number in the palette: value in the set}.
+        """
+        pal = self.set_palettes[set_id]
+        for n in numbers:
+            if not 1 <= n <= len(pal["colors"]):
+                raise ValueError(f"set {self.sets[set_id][0]}: color {n} of palette {pal['name']}, which has {len(pal['colors'])}")
+        taken = sorted(set(pal["taken"]) | set(numbers))
+        if taken != pal["taken"]:
+            value = {n: i + 1 for i, n in enumerate(taken)}
+            moved = [0] + [value[n] for n in pal["taken"]]  # an old value -> its new one
+            for k, (name, s, w, h, ox, oy, bits, pixels) in enumerate(self.images):
+                if s == set_id and bits > 1:
+                    values = [moved[v] for v in unpack_pixels(pixels, w, h, bits)]
+                    if bits == 4 and max(values, default=0) > 15:
+                        bits = 8
+                    self.images[k] = (name, s, w, h, ox, oy, bits, pack_pixels(values, w, h, bits))
+            pal["taken"] = taken
+            self.sets[set_id] = (self.sets[set_id][0], [pal["colors"][n - 1] for n in taken])
+        return {n: i + 1 for i, n in enumerate(pal["taken"])}
+
+    def _bring(self, set_id, path, rgb):
+        """The number in the set's ready palette of the color nearest rgb, a color of the picture path; one not the
+        same is kept for the warning (_palette_warnings)."""
+        pal = self.set_palettes[set_id]
+        i, d = nearest_color(pal["colors"], rgb)
+        if d > 0 and rgb not in pal["brought"]:
+            pal["brought"][rgb] = (d, path, pal["colors"][i])
+        return i + 1
+
+    def _palette_warnings(self):
+        """For every set of a ready palette its pictures were not drawn in: how many colors were brought, the farthest."""
+        for set_id, pal in self.set_palettes.items():
+            if pal["brought"]:
+                rgb, (d, path, to) = max(pal["brought"].items(), key=lambda t: t[1][0])
+                n = len(pal["brought"])
+                self.warnings.append(f"set {self.sets[set_id][0]}: {n} color{'s' if n > 1 else ''} of its pictures not in palette "
+                                     f"{pal['name']}, each taken as the nearest; the farthest {rgb} of {path} as {to}, "
+                                     f"distance {d:.1f} (CIE76)")
+
     def add_image(self, name, set_id, width, height, values, bits, origin=(0, 0)):
-        """A picture of pixel values (0 transparent), row after row; returns its number."""
+        """A picture of pixel values (0 transparent), row after row; returns its number. In a set of a ready palette
+        the values are numbers of the palette's colors (add_set), and bits None is 4 or 8, as the set's colors need."""
+        if set_id in self.set_palettes and bits != 1:
+            value = self._take(set_id, set(values) - {0})
+            values = [value[v] if v else 0 for v in values]
+            if bits is None:
+                bits = 4 if len(self.sets[set_id][1]) <= 15 else 8
+        return self._image(name, set_id, width, height, values, bits, origin)
+
+    def _image(self, name, set_id, width, height, values, bits, origin=(0, 0)):
+        """A picture of the values of its set as they are (add_image; a crop, the pieces of a frame)."""
         if bits not in (1, 4, 8):
             raise ValueError(f"picture {name}: {bits} bits a pixel")
         top = max(values, default=0)
@@ -247,9 +391,13 @@ class Pack:
         A picture from a PNG of a palette, its color 0 transparent. Its colors are
         found among those of the set by their RGB; a color the set has not gets
         the nearest one, with a warning. A picture of two colors is 1-bit.
+        In a set of a ready palette (add_set) every color is brought to the
+        nearest of the palette, and the set takes it; write tells how many
+        were not the palette's and the farthest.
 
         by_index: the indices of the PNG are the values as they are, its colors
-        are not looked at (a picture whose colors come from another set).
+        are not looked at (a picture whose colors come from another set; of a
+        ready palette, the numbers of its colors).
         empty_rgb: a color that means nothing is there where the set has it not,
         and becomes transparent.
         """
@@ -263,12 +411,21 @@ class Pack:
         raw = values_of(im)
         if max(raw, default=0) >= len(palette) // 3:
             raise ValueError(f"{path}: value {max(raw)} has no color in its palette (of {len(palette) // 3})")
+        ready = set_id in self.set_palettes
         if bits is None:
-            bits = 1 if len(palette) // 3 <= 2 else 4 if len(self.sets[set_id][1]) <= 15 else 8
+            bits = 1 if len(palette) // 3 <= 2 else None if ready else 4 if len(self.sets[set_id][1]) <= 15 else 8
         if bits == 1:
             values = [1 if v else 0 for v in raw]
         elif by_index:
             values = raw
+        elif ready:
+            # the numbers of the palette's colors: add_image takes them into the set
+            lookup, ready_colors = {0: 0}, self.set_palettes[set_id]["colors"]
+            for v in set(raw) - {0}:
+                rgb = tuple(palette[3 * v:3 * v + 3])
+                empty = empty_rgb is not None and rgb == tuple(empty_rgb) and rgb not in ready_colors
+                lookup[v] = 0 if empty else self._bring(set_id, path, rgb)
+            values = [lookup[v] for v in raw]
         else:
             colors = self.sets[set_id][1]
             lookup = {}
@@ -332,10 +489,12 @@ class Pack:
         drawn, or else the default mask of the set made of the points of the
         picture. The names of the masks go into the header; "meets", text, is
         which of them meet (add_meets); "constants", the game's names of numbers its scripts write
-        (add_constants). A set with a file
+        (add_constants); "variables", the game's variables, [{"name", "value"}] by their numbers (add_variable). A set
+        with a file
         <set>.anim next to the JSON gets its animation too (all of them made together, add_anims: they sense and
         bear one another whatever the order of the sets); its sets of tiles
-        become blobs of tiles (add_tileset). images: where the
+        become blobs of tiles (add_tileset); the sounds it names take their samples from sounds/<name>.wav next to
+        it, where there is one (_add_game_of). images: where the
         PNGs are, by default next to the JSON (in <set>/ or right there).
         Returns {set name: set number}.
         """
@@ -356,6 +515,8 @@ class Pack:
         if doc.get("meets") is not None:
             self.add_meets(doc["meets"])
         self.add_constants(**doc.get("constants", {}))
+        for v in doc.get("variables", []):
+            self.add_variable(v["name"], v.get("value", 0))
         made = {}
         pack_names = {}  # (set, file) -> the name of the picture in the pack: <SET>_<FILE>, or the frame's packName
 
@@ -368,6 +529,9 @@ class Pack:
             for fr in st.get("frames", []):
                 pack_names[(st["name"], fr["image"])] = pack_name(st["name"], fr)
         anims = []
+        # the palettes of the document are the project's: a set's "palette" may name one, before the engine's
+        for pal in doc.get("palettes", []):
+            self.palettes[pal["name"]] = [tuple(c[:3]) for c in pal["colors"]]
         for st in doc.get("sets", []):
             frames = st.get("frames", [])
             files = []
@@ -386,21 +550,33 @@ class Pack:
             palettes = [im.getpalette() or [] for im in pictures]
             top = max((max(u, default=0) for u in used), default=0)
             colors = []
-            for i in range(1, top + 1):
-                said = {}  # the color -> the first picture that uses value i so
+            if st.get("palette"):
+                # a ready palette: every color of every frame brought to the nearest of it, the set the colors taken in
+                # the palette's order, so its frames need not share their values
+                set_id = self.add_set(name_of(st["name"]), palette=st["palette"])
+                taken = set()
                 for p, u, pal in zip(files, used, palettes):
-                    if i in u:
+                    for i in u - {0}:
                         if len(pal) < 3 * i + 3:
                             raise ValueError(f"{p}: value {i} has no color in its palette (of {len(pal) // 3})")
-                        said.setdefault(tuple(pal[3 * i:3 * i + 3]), p)
-                if len(said) > 1:
-                    (a, pa), (b, pb) = list(said.items())[:2]
-                    raise ValueError(f"set {st['name']}: value {i} is {a} in {pa}, {b} in {pb}: the frames of a set share their colors")
-                if said:
-                    colors.append(next(iter(said)))
-                else:
-                    colors.append(next((tuple(pal[3 * i:3 * i + 3]) for pal in palettes if len(pal) >= 3 * i + 3), (0, 0, 0)))
-            set_id = self.add_set(name_of(st["name"]), colors)
+                        taken.add(self._bring(set_id, p, tuple(pal[3 * i:3 * i + 3])))
+                top = len(self._take(set_id, taken))
+            else:
+                for i in range(1, top + 1):
+                    said = {}  # the color -> the first picture that uses value i so
+                    for p, u, pal in zip(files, used, palettes):
+                        if i in u:
+                            if len(pal) < 3 * i + 3:
+                                raise ValueError(f"{p}: value {i} has no color in its palette (of {len(pal) // 3})")
+                            said.setdefault(tuple(pal[3 * i:3 * i + 3]), p)
+                    if len(said) > 1:
+                        (a, pa), (b, pb) = list(said.items())[:2]
+                        raise ValueError(f"set {st['name']}: value {i} is {a} in {pa}, {b} in {pb}: the frames of a set share their colors")
+                    if said:
+                        colors.append(next(iter(said)))
+                    else:
+                        colors.append(next((tuple(pal[3 * i:3 * i + 3]) for pal in palettes if len(pal) >= 3 * i + 3), (0, 0, 0)))
+                set_id = self.add_set(name_of(st["name"]), colors)
             made[st["name"]] = set_id
             bits = 4 if top <= 15 else 8
             for fr, p, im in zip(frames, files, pictures):
@@ -408,7 +584,7 @@ class Pack:
                     raise ValueError(f"{path}: {fr['image']} is {im.size}, the marks are of {fr['width']}x{fr['height']}")
                 ox, oy = fr["origin"]["x"], fr["origin"]["y"]
                 image = self.add_png(pack_names[(st["name"], fr["image"])], set_id, p, origin=(ox, oy), bits=bits,
-                                     by_index=True)
+                                     by_index=not st.get("palette"))
                 masks = fr.get("masks") or {}
                 for key, m in masks.items():
                     index = int(key)
@@ -629,14 +805,37 @@ class Pack:
         return out
 
     def _add_game_of(self, doc, path, pack_names):
-        """The game as a whole of a document (its game, timers, sounds, crops, shows, chases): the same calls a game's script of building makes."""
+        """
+        The game as a whole of a document (its game, timers, sounds, crops, shows, chases): the same calls a game's
+        script of building makes. A sound it names takes its samples from sounds/<name>.wav beside the document, if
+        there is one (as add_sound with wav= and nothing more); with none it is a name only.
+        """
+        here = os.path.dirname(os.path.abspath(path))
         for c in doc.get("game", []):
             self.add_game(**{c["name"]: c["value"]})
         for t in doc.get("timers", []):
             self.add_timer(t["name"], once=t.get("once") or None, every=t.get("every") or None, until=t.get("until") or None,
                            reset=t.get("reset", "never"), event=t.get("event") or None, start=t.get("start") or None)
         for name in doc.get("sounds", []):
-            self.add_sound(name)
+            wav = os.path.join(here, "sounds", f"{name}.wav")
+            if os.path.isfile(wav):
+                self.add_sound(name, wav=wav)
+                self.sound_files[name] = wav
+            else:
+                self.add_sound(name)
+        # its musics: the notes in music/<name>.mml beside the document, or a name only; on its synthesizer, with the
+        # sets of instruments in music/sets/ beside it
+        if doc.get("synth") is not None:
+            self.set_music_synth(doc["synth"])
+        if os.path.isdir(os.path.join(here, "music", "sets")):
+            self.music_set_dirs.append(os.path.join(here, "music", "sets"))
+        for name in doc.get("music", []):
+            mml = os.path.join(here, "music", f"{name}.mml")
+            if os.path.isfile(mml):
+                with open(mml, encoding="utf-8") as f:
+                    self.add_music(name, f.read(), mml)
+            elif name not in self.musics:
+                self.add_music(name)
         for c in doc.get("crops", []):
             picture = pack_names.get((c["set"], c["image"])) or name_of(f"{c['set']}_{os.path.splitext(c['image'])[0]}")
             self.add_crop(c["name"], picture, c["x"], c["y"], c["width"], c["height"], (c.get("originX", 0), c.get("originY", 0)))
@@ -646,13 +845,40 @@ class Pack:
             self.add_chase(ch["kind"], sense=ch.get("sense", "always"), sides=ch.get("sides", ()), hearing=ch.get("hearing", 0),
                            near=ch.get("near") or None, steps=ch.get("steps", 0), calm=ch.get("calm") or 0)
 
+    @staticmethod
+    def _turns(ob, where):
+        """An object's rotation (degrees clockwise: 0, 90, 180, 270; any multiple of 90, -90 is 270; none: 0) in quarter turns."""
+        value = ob.get("rotation", 0)
+        if isinstance(value, bool) or not isinstance(value, int) or value % 90:
+            raise ValueError(f"{where}: rotation {value!r}: 0, 90, 180 or 270 (degrees clockwise)")
+        return value // 90 % 4
+
     def _add_layout(self, sc, path, pack_names, links):
         """
         A scene as the document lays it (its scenes) as a blob SCENE_<NAME>, "DGSC" (include/dgx_ge_layout.h):
-        its layers, pictures, zones, entries, sources of links, actors and grids (each with the number of its first cell
-        in its map, links: _links_of); the names of its objects into the header.
+        its paper (its background, "#rrggbb"; none when not given: the game's stays), its music (music: a music's name,
+        named here if new, or "stop" for silence; none: what plays goes on; musicFade, ms, 500 unless said), layers, pictures, zones, entries,
+        sources of links, actors and grids (each with the number of its first cell in its map, links: _links_of); the
+        names of its objects into the header.
         """
         where = f"{path}: scene {sc.get('name')}"
+        background, paper = sc.get("background"), bytes(3)
+        if background is not None:
+            try:
+                paper = bytes.fromhex(background[1:]) if isinstance(background, str) and background[:1] == "#" else b""
+            except ValueError:
+                paper = b""
+            if len(paper) != 3:
+                raise ValueError(f"{where}: background {background!r} is not a color #rrggbb")
+        music, fade = sc.get("music"), sc.get("musicFade", MUSIC_FADE_MS)
+        if music is not None and (not isinstance(music, str) or not re.fullmatch(r"[A-Za-z_]\w*", music)):
+            raise ValueError(f"{where}: music {music!r}: the name of a music, or stop")
+        if isinstance(fade, bool) or not isinstance(fade, int) or not 0 <= fade <= 65535:
+            raise ValueError(f"{where}: musicFade {fade!r}: 0..65535 ms")
+        if music and music != "stop" and music not in self.musics:
+            self.add_music(music)  # a name: its notes come with the document's music, or after
+        music_bytes = struct.pack("<BBH", 0, 0, 0) if music is None else struct.pack("<BBH", 0, 2, fade) if music == "stop" else \
+            struct.pack("<BBH", self.musics.index(music), 1, fade)
         layers = sc.get("layers", [])
         if not 1 <= len(layers) <= 8:
             raise ValueError(f"{where}: 1 .. 8 layers")
@@ -680,8 +906,9 @@ class Pack:
                 kind = ob.get("type")
                 if kind == "picture":
                     clip = ob.get("clip") or {}
+                    flags = (1 if ob.get("flip") else 0) | self._turns(ob, f"{where}: picture {ob.get('name')}") << 1
                     pictures += struct.pack("<HhhhBBhhhh", picture_of(ob), i16(ob.get("x", 0), "x"), i16(ob.get("y", 0), "y"), i16(ob.get("key", 0), "key"),
-                                            li, 1 if ob.get("flip") else 0, i16(clip.get("x", 0), "clip"), i16(clip.get("y", 0), "clip"),
+                                            li, flags, i16(clip.get("x", 0), "clip"), i16(clip.get("y", 0), "clip"),
                                             i16(clip.get("width", 0), "clip"), i16(clip.get("height", 0), "clip"))
                     names["PICTURE"].append(ob.get("name") or "")
                 elif kind == "actor":
@@ -697,8 +924,9 @@ class Pack:
                         if pname not in params:
                             raise ValueError(f"{where}: actor {ob.get('name')}: no param {pname} in {ob['set']}")
                         given.append(struct.pack("<BBh", params.index(pname), 0, i16(value, pname)))
+                    flags = (1 if ob.get("flip") else 0) | self._turns(ob, f"{where}: actor {ob.get('name')}") << 1
                     actors.append(struct.pack("<HBBhhBB", blobs[anim], scripts.index(script), li, i16(ob.get("x", 0), "x"), i16(ob.get("y", 0), "y"),
-                                              1 if ob.get("flip") else 0, len(given)) + b"".join(given))
+                                              flags, len(given)) + b"".join(given))
                     names["ACTOR"].append(ob.get("name") or "")
                 elif kind == "zone":
                     word = ob.get("kind") or ""
@@ -749,8 +977,9 @@ class Pack:
         # laid out: the counts, the fixed records, the actors by offsets, the grids aligned
         n_pic, n_act, n_zone, n_entry = len(pictures) // 18, len(actors), len(zones) // 10, len(entries) // 6
         sources = b"".join(struct.pack("<BBHH", kind, 0, which, first) for kind, which, first in links.sources.get(sc["name"], []))
-        head = struct.pack("<IHBBhhHHHHHHI", 0x43534744, 2, len(layers), len(grids), i16(sc.get("width", 0), "width"), i16(sc.get("height", 0), "height"),
-                           n_pic, n_act, n_zone, n_entry, len(sources) // 6, 0, 0)
+        head = struct.pack("<IHBBhhHHHHHHI3sB", 0x43534744, 5, len(layers), len(grids), i16(sc.get("width", 0), "width"),
+                           i16(sc.get("height", 0), "height"), n_pic, n_act, n_zone, n_entry, len(sources) // 6, 0, 0, paper,
+                           0 if background is None else 1) + music_bytes
         blob = bytearray(head) + out_layers + pictures + zones + entries + sources
         at = len(blob) + 2 * n_act
         offsets = bytearray()
@@ -1118,6 +1347,7 @@ class Pack:
         for name, value in constants.items():
             if not -2 ** 31 <= int(value) < 2 ** 31:
                 raise ValueError(f"game {name}: {value} is no 32-bit number")
+            self._not_a_variable(name, "game")
             for i, (n, _) in enumerate(self.game):
                 if n == name:
                     self.game[i] = (name, int(value))
@@ -1177,9 +1407,10 @@ class Pack:
     def add_show(self, name, pictures=(), actors=(), cues=()):
         """
         A show (include/dgx_ge_show.h): a scene that plays by itself, its blob named so.
-          pictures: its backdrop, [{"picture": a picture of the pack, "x", "y" (its origin), "layer", "flip", "color"}];
+          pictures: its backdrop, [{"picture": a picture of the pack, "x", "y" (its origin), "layer", "flip", "rotation", "color"}];
           actors: [{"name": its role in the cues, "kind": an animation added before, "script": a script of it (its first:
-            none), "x", "y", "flip", "layer", "color" (of pictures of 1 bit)}];
+            none), "x", "y", "flip", "rotation", "layer", "color" (of pictures of 1 bit)}];
+          flip: mirrored (an actor facing left); rotation: then turned clockwise, 0, 90, 180 or 270 degrees (none: 0).
           cues: [(time, role, event)]: at so long from the start ("500ms", "2s", or ms), the actor of that role told an event
             (a name of the pack's events); the role "end": the show is over then. In any order: they are put in time.
         """
@@ -1198,8 +1429,8 @@ class Pack:
         for p in pictures:
             if p["picture"] not in images:
                 raise ValueError(f"show {name}: no picture {p['picture']}")
-            out += struct.pack("<HhhBBBx", images[p["picture"]], p.get("x", 0), p.get("y", 0), p.get("layer", 0), 1 if p.get("flip") else 0,
-                               p.get("color", 0))
+            out += struct.pack("<HhhBBBB", images[p["picture"]], p.get("x", 0), p.get("y", 0), p.get("layer", 0), 1 if p.get("flip") else 0,
+                               p.get("color", 0), self._turns(p, f"show {name}: picture {p['picture']}"))
         roles = []
         for a in actors:
             if a["kind"] not in anims:
@@ -1212,7 +1443,7 @@ class Pack:
                 raise ValueError(f"show {name}: a role {a['name']} twice, or named end")
             roles.append(a["name"])
             out += struct.pack("<HhhBBBB", blobs[a["kind"]], a.get("x", 0), a.get("y", 0), scripts.index(script), a.get("layer", 0),
-                               1 if a.get("flip") else 0, a.get("color", 0))
+                               (1 if a.get("flip") else 0) | self._turns(a, f"show {name}: actor {a['name']}") << 1, a.get("color", 0))
         timed = []
         for at, role, event in cues:
             if role == "end":
@@ -1227,7 +1458,7 @@ class Pack:
             raise ValueError(f"show {name}: no end")
         timed.sort(key=lambda c: (c[0], c[1] == 0xFF))  # at one moment the end comes last
         out += b"".join(struct.pack("<IBBxx", *c) for c in timed)
-        return self.add_blob(name, struct.pack("<IHHHH", 0x48534744, 1, len(pictures), len(actors), len(timed)) + bytes(out))
+        return self.add_blob(name, struct.pack("<IHHHH", 0x48534744, 2, len(pictures), len(actors), len(timed)) + bytes(out))
 
     def add_crowd(self, name, places, bounds, kinds, groups=(), seed=1):
         """
@@ -1238,7 +1469,8 @@ class Pack:
             (of the scene), "damage": a param of it a hit's damage is taken off (none: none), "color" (of pictures of 1 bit),
             "by_y": its key in the layer is its y (a world seen from above)}];
           groups: [{"kind": one of the kinds, "script" (its first: none), "count", "area": (x, y, w, h) they are strewn in,
-            "flip": False, True or "either"}].
+            "flip": False, True or "either", "rotation": then turned clockwise, 0, 90, 180, 270 degrees (none: 0) or "any" (one of
+            the four by the dice)}].
         """
         blobs = {n: i for i, (n, _) in enumerate(self.blobs)}
         anims = {a[0]: a for a in self.anims}
@@ -1267,9 +1499,10 @@ class Pack:
                 raise ValueError(f"crowd {name}: no script {script} of {g['kind']}")
             ax, ay, aw, ah = g.get("area", bounds)
             flip = g.get("flip", False)
-            out += struct.pack("<BBHhhHHBxxx", entries.index(g["kind"]), scripts.index(script), g.get("count", 1), ax, ay, aw, ah,
-                               2 if flip == "either" else 1 if flip else 0)
-        head = struct.pack("<IHHHHhhHHI", 0x52434744, 1, places, len(kinds), len(groups), x, y, w, h, seed & 0xFFFFFFFF)
+            turns = 4 if g.get("rotation") == "any" else self._turns(g, f"crowd {name}: a group of {g['kind']}")
+            out += struct.pack("<BBHhhHHBBxx", entries.index(g["kind"]), scripts.index(script), g.get("count", 1), ax, ay, aw, ah,
+                               2 if flip == "either" else 1 if flip else 0, turns)
+        head = struct.pack("<IHHHHhhHHI", 0x52434744, 2, places, len(kinds), len(groups), x, y, w, h, seed & 0xFFFFFFFF)
         return self.add_blob(name, head + bytes(out))
 
     def add_chase(self, kind, sense="always", sides=(), hearing=0, near=None, steps=0, calm=0):
@@ -1349,8 +1582,12 @@ class Pack:
         at a 2^side-th of it (side=1: half; the two of one signal differ little), side=None: left and right as they
         are; channels that hardly differ are kept mono. gain: its loudness against the recording (0.5 half), made into
         its samples here (nothing at play). Without samples it is only a name: it plays nothing. A name given before
-        without samples (a document names its sounds, add_sprites) gets them now, at its number. Returns its number.
+        without samples (a document names its sounds, add_sprites) gets them now, at its number; one whose samples a
+        document's sounds/<name>.wav gave is refused (which of the two would it be?). Returns its number.
         """
+        if name in self.sound_files:
+            raise ValueError(f"sound {name}: its samples are taken from {self.sound_files[name]} beside the document already (add_sprites); "
+                             "a sound given otherwise (other options, another file) keeps no file of its name there")
         at = self.sounds.index(name) if name in self.sounds else None
         if at is not None and (self.sound_data[at] is not None or (wav is None and samples is None)):
             raise ValueError(f"sound {name} twice")
@@ -1378,6 +1615,76 @@ class Pack:
         self.sound_data.append(data)
         return len(self.sounds) - 1
 
+    def set_music_synth(self, synth):
+        """The project's synthesizer of music: fm (the default), chip or nes; a song's #synth overrides it (dgx_ge_music.py)."""
+        from dgx_ge_music import SYNTHS
+
+        if synth not in SYNTHS:
+            raise ValueError(f"synth {synth!r}: chip, nes or fm")
+        self.music_synth = synth
+
+    def add_music_set(self, name, text, path=None):
+        """
+        A set of instruments of the project by its name (#set <name> of a song): its text, a #synth line and
+        instruments only (dgx_ge_music.py), checked here (its errors name path); it goes before the engine's sets of
+        the same name (tools/music_sets/). A document's sets are the files music/sets/<name>.mml beside it.
+        """
+        from dgx_ge_music import NAME, MusicError, read_set
+
+        if not re.fullmatch(NAME, name) or name in self.music_sets:
+            raise ValueError(f"music set {name!r}: a name (a letter, then letters, digits, _ or -), once")
+        try:
+            read_set(text, name)
+        except MusicError as e:
+            raise MusicError(f"{path or f'music set {name}'}: {e}") from None
+        self.music_sets[name] = text
+
+    def _music_set(self, name):
+        """The text of a set of the project, or None (then the engine's)."""
+        if name in self.music_sets:
+            return self.music_sets[name]
+        for d in self.music_set_dirs:
+            p = os.path.join(d, f"{name}.mml")
+            if os.path.isfile(p):
+                with open(p, encoding="utf-8") as f:
+                    return f.read()
+        return None
+
+    def add_music(self, name, text=None, path=None, synth=None):
+        """
+        A music by notes by its name, the next number: the header gets <PREFIX>_MUSIC_<NAME>. Its text is MML
+        (dgx_ge_music.py: channels A..H, instruments @n = ..., notes, lengths, ties, repeats, the loop point $), made
+        into a song of channels, instruments and notes; its errors name the file (path; none: the music) and the line
+        and column. Without a text it is only a name (the same as a script's music <name> before it): it plays
+        nothing; a name given before without notes gets them now, at its number. synth: its synthesizer (chip, nes, fm;
+        None: the project's, set_music_synth), unless the text says its own (#synth); its #set is a set of the project
+        (add_music_set, a document's music/sets/) or the engine's. The songs go with the sounds' samples (the blob
+        SOUNDS, its version 2; Pack.write's sounds_path): a board without sound carries none. Returns its number.
+        """
+        from dgx_ge_music import MusicError, assemble
+
+        if name in ("stop", "volume") or not re.fullmatch(r"[A-Za-z_]\w*", name):
+            raise ValueError(f"music {name!r}: a name as scripts write it (a letter or _, then letters, digits, _), not stop or volume")
+        at = self.musics.index(name) if name in self.musics else None
+        if at is not None and (at < len(self.music_data) and self.music_data[at] is not None or text is None):
+            raise ValueError(f"music {name} twice")
+        song = None
+        if text is not None:
+            try:
+                song = assemble(text, synth or self.music_synth, self._music_set)
+            except MusicError as e:
+                raise MusicError(f"{path or f'music {name}'}: {e}") from None
+        if at is None:
+            if len(self.musics) == 255:
+                raise ValueError(f"music {name}: 255 musics at most (255 is a script's music stop)")
+            self.musics.append(name)
+            self.music_data.append(None)
+            at = len(self.musics) - 1
+        while len(self.music_data) < len(self.musics):  # names the scripts gave
+            self.music_data.append(None)
+        self.music_data[at] = song
+        return at
+
     def _sounds_blob(self):
         """
         SOUNDS: 'DGSN', version 1, the count; for each sound 12 bytes: the offset of its data from the start of the
@@ -1387,9 +1694,12 @@ class Pack:
         predictor (int16), step index (byte) and a byte 0 of each stream, then each stream's nibbles from a byte of
         its own (the first in the low half).
         """
-        head = struct.pack("<IHH", 0x4E534744, 1, len(self.sounds))
+        # with music, version 2: the count of the musics after that of the sounds, 8 bytes a music after the sounds'
+        # entries (the offset of its song, its size; 0: a name only), its songs after the samples; without, version 1
+        musics = self.musics if any(self._music_songs()) else []
+        head = struct.pack("<IHHHH", 0x4E534744, 2, len(self.sounds), len(musics), 0) if musics else struct.pack("<IHH", 0x4E534744, 1, len(self.sounds))
         data, entries = b"", []
-        at = len(head) + 12 * len(self.sounds)
+        at = len(head) + 12 * len(self.sounds) + 8 * len(musics)
         for d in self.sound_data:
             if d is None:
                 entries.append(struct.pack("<IIHBB", 0, 0, 0, 0, 0))
@@ -1413,7 +1723,14 @@ class Pack:
             flags = SOUND_CODECS[codec] | (0x20 if stereo and side is not None else 0) | (0x40 if stereo else 0) | (0x80 if loop else 0)
             entries.append(struct.pack("<IIHBB", at + len(data), len(samples), rate, flags, shift))
             data += body
+        for song in self._music_songs() if musics else []:
+            entries.append(struct.pack("<II", at + len(data) if song else 0, len(song or b"")))
+            data += song or b""
         return head + b"".join(entries) + data
+
+    def _music_songs(self):
+        """The songs of the musics by their numbers, None a name only (a script's music <name> named it last)."""
+        return [self.music_data[i] if i < len(self.music_data) else None for i in range(len(self.musics))]
 
     def add_blob(self, name, data):
         """
@@ -1452,7 +1769,46 @@ class Pack:
             whole = not isinstance(value, bool) and (isinstance(value, int) or isinstance(value, float) and value.is_integer())
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or not whole or not -2 ** 31 <= value < 2 ** 31:
                 raise ValueError(f"constant {name}: a name and a whole 32-bit number, not {value!r}")
+            self._not_a_variable(name, "constant")
             self.constants[name] = int(value)
+
+    def add_variable(self, name, value=0):
+        """
+        A variable of the game (include/dgx_ge_game.h): a number that changes as the game plays and belongs to no actor
+        (a setting, a score, the state of the game's rules), the value it begins with a whole 32-bit number. Numbered in
+        the order declared; the header names them, <PREFIX>_GAME_VAR_<NAME> and <PREFIX>_GAME_VAR_COUNT; the blob
+        VARIABLES (added when the pack is written) holds the values they begin with. Scripts and dialogs read it as
+        game_var.<name>, scripts write it (set, add game_var.<name>), dialogs' controls edit it: declared before the
+        animations and dialogs that name it. A name once; not a name of a constant (add_constants), of a number of the
+        game (add_game) or of a question to the game an animation declares (game <name>): one name, one thing.
+        """
+        whole = not isinstance(value, bool) and (isinstance(value, int) or isinstance(value, float) and value.is_integer())
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or not whole or not -2 ** 31 <= value < 2 ** 31:
+            raise ValueError(f"variable {name}: a name and a whole 32-bit number, not {value!r}")
+        if any(name_of(n) == name_of(name) for n, _ in self.variables):
+            raise ValueError(f"variable {name}: declared already (names alike in upper case are one name of the header)")
+        for n in self.constants:
+            if name_of(n) == name_of(name):
+                raise ValueError(f"variable {name}: {n} is a constant (add_constants): give the variable another name")
+        for n, _ in self.game:
+            if name_of(n) == name_of(name):
+                raise ValueError(f"variable {name}: {n} is a number of the game (add_game): give the variable another name")
+        for kind, questions in self.games.items():
+            for n in questions:
+                if name_of(n) == name_of(name):
+                    raise ValueError(f"variable {name}: {n} is a question to the game of {kind} (game.{n}): give the variable another name")
+        if len(self.variables) == VARS_MAX:
+            raise ValueError(f"variable {name}: {VARS_MAX} variables at most")
+        self.variables.append((name, int(value)))
+
+    def _not_a_variable(self, name, what):
+        """A name of another thing that is not to be a variable's too."""
+        for n, _ in self.variables:
+            if name_of(n) == name_of(name):
+                raise ValueError(f"{what} {name}: {n} is a variable of the game (add_variable): give it another name")
+
+    def _variable_names(self):
+        return [n for n, _ in self.variables]
 
     def add_field(self, name, size, keyboard=None, letters=None):
         """
@@ -1510,7 +1866,8 @@ class Pack:
         kind_params = {n: list(ps) for n, _, _, ps in self.anims}
         with _errors_of(path, f"animation {name}"):
             done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, len(self.blobs)), self.constants,
-                            self.script_masks())
+                            self.script_masks(), musics=self.musics, game_vars=self._variable_names())
+            self._questions_not_variables(done.games)
         self.anims.append((name, done.scripts, done.events, done.params))
         self.games[name] = done.games
         return self.add_blob(name, done.blob)
@@ -1541,11 +1898,19 @@ class Pack:
         for i, (name, text, path) in enumerate(anims):
             with _errors_of(path, f"animation {name}"):
                 done = assemble(text, images, points, self.events, kinds, self.timers, kind_params, (name, first + i), self.constants,
-                                self.script_masks())
+                                self.script_masks(), musics=self.musics, game_vars=self._variable_names())
+                self._questions_not_variables(done.games)
             self.anims.append((name, done.scripts, done.events, done.params))
             self.games[name] = done.games
             self.blobs[first + i] = (name, done.blob)
         return list(range(first, first + len(anims)))
+
+    def _questions_not_variables(self, questions):
+        """The questions to the game an animation declares: none named as a variable (alike in upper case too)."""
+        for q in questions:
+            for n, _ in self.variables:
+                if name_of(n) == name_of(q):
+                    raise ValueError(f"game {q}: {n} is a variable of the game (game_var.{n}), not a question to it")
 
     def translate(self, po_path):
         """The language of the pack: translations of msgid in contexts (a gettext .po). Before the dialogs."""
@@ -1566,7 +1931,7 @@ class Pack:
         named = re.search(r"^\s*dialog\s+(\w+)", text, re.M)
         with _errors_of(path, f"dialog {named.group(1)}" if named else "a dialog"):
             done = assemble_dialog(text, self.strings, kinds, params, self.events, self.styles, {im[0]: i for i, im in enumerate(self.images)},
-                                   self.timers, self.constants, {n: i for i, (n, _) in enumerate(self.fields)})
+                                   self.timers, self.constants, {n: i for i, (n, _) in enumerate(self.fields)}, self._variable_names())
         self.dialogs.append((done.name, done.roles))
         return self.add_blob(name_of(done.name), done.blob)
 
@@ -1666,7 +2031,7 @@ class Pack:
         if x < 0 or y < 0 or width < 1 or height < 1 or x + width > w or y + height > h:
             raise ValueError(f"crop {name}: {x}, {y}, {width} x {height} is not inside {picture} ({w} x {h})")
         values = unpack_pixels(data, w, h, bits)
-        return self.add_image(name, set_id, width, height, [values[(y + j) * w + x + i] for j in range(height) for i in range(width)], bits, origin)
+        return self._image(name, set_id, width, height, [values[(y + j) * w + x + i] for j in range(height) for i in range(width)], bits, origin)
 
     def _cut_frame(self, style, picture, insets):
         """The nine pictures of a frame cut out of a picture of the pack by insets l, t, r, b: the number of the first."""
@@ -1683,7 +2048,7 @@ class Pack:
         for i, (y0, y1) in enumerate(rows):
             for j, (x0, x1) in enumerate(cols):
                 piece = [values[y * w + x] for y in range(y0, y1) for x in range(x0, x1)]
-                self.add_image(f"{name_of(style)}_FRAME_{3 * i + j}", set_id, x1 - x0, y1 - y0, piece, bits, (0, 0))
+                self._image(f"{name_of(style)}_FRAME_{3 * i + j}", set_id, x1 - x0, y1 - y0, piece, bits, (0, 0))
         return first
 
     def _styles_blob(self):
@@ -1726,8 +2091,8 @@ class Pack:
         """
         shown = set()
         for text in self.strings.texts:
-            for part in re.split(r"(\{\w*\})", text):
-                if re.fullmatch(r"\{\w*\}", part):
+            for part in re.split(r"(\{(?:game_var\.)?\w*\})", text):
+                if re.fullmatch(r"\{(?:game_var\.)?\w*\}", part):
                     shown.update("0123456789-")
                 else:
                     shown.update(c for c in part if c.isprintable())
@@ -1779,6 +2144,8 @@ class Pack:
             for i, item in enumerate(items):
                 lines.append(f"#define {self.prefix}_{kind}_{name_of(item[0])} {i}")
             lines.append(f"#define {self.prefix}_{kind}_COUNT {len(items)}")
+            if kind == "SET":  # the colors of all the sets: the bytes of their maps (dgx_ge_frame_pack_colors)
+                lines.append(f"#define {self.prefix}_SET_COLOR_COUNT {sum(len(colors) for _, colors in self.sets)}")
             lines.append("")
         for name, tiles, slots in self.tilesets:
             for i, t in enumerate(tiles):
@@ -1790,6 +2157,15 @@ class Pack:
             lines.append(f"#define {self.prefix}_GAME_{name_of(n)} {i}")
         if self.game:
             lines.append("")
+        # the game's variables: their numbers in its store (dgx_ge_vars_t: values[]), how many
+        variable_lines = set()  # a name of the header for one of them and another thing is refused even with the same number
+        for i, (n, _) in enumerate(self.variables):
+            variable_lines.add(f"#define {self.prefix}_GAME_VAR_{name_of(n)} {i}")
+            lines.append(f"#define {self.prefix}_GAME_VAR_{name_of(n)} {i}")
+        if self.variables:
+            variable_lines.add(f"#define {self.prefix}_GAME_VAR_COUNT {len(self.variables)}")
+            lines += [f"#define {self.prefix}_GAME_VAR_COUNT {len(self.variables)}", ""]
+        variable_macros = {line.split()[1] for line in variable_lines}
         # the game's constants (add_constants) for its C, as its scripts name them: the number itself (a negative one in
         # parentheses, the least as C can write it)
         constant_of, constant_line = {}, {}  # macro -> the constant's name, its line: for the clash below
@@ -1820,6 +2196,11 @@ class Pack:
             lines.append(f"#define {self.prefix}_SOUND_{name_of(n)} {i}")
         if self.sounds:
             lines.append(f"#define {self.prefix}_SOUND_COUNT {len(self.sounds)}")
+            lines.append("")
+        for i, n in enumerate(self.musics):
+            lines.append(f"#define {self.prefix}_MUSIC_{name_of(n)} {i}")
+        if self.musics:
+            lines.append(f"#define {self.prefix}_MUSIC_COUNT {len(self.musics)}")
             lines.append("")
         for i, n in enumerate(self.timers):
             lines.append(f"#define {self.prefix}_TIMER_{name_of(n)} {i}")
@@ -1878,6 +2259,10 @@ class Pack:
                     other = line if seen[macro] == constant_line[macro] else seen[macro]  # the line of the other thing
                     raise ValueError(f"constant {constant_of[macro]}: its name in the header, {macro}, is another thing's: {other!r}; "
                                      "give the constant another name")
+                if macro in seen and macro in variable_macros:  # alike by chance: still two things of one name
+                    other = line if seen[macro] in variable_lines else seen[macro]
+                    raise ValueError(f"the header names a variable of the game and another thing {macro}: {other!r}; give one of them "
+                                     "another name")
                 if macro in seen and seen[macro] != line:
                     raise ValueError(f"the header names two things {macro}: {seen[macro]!r} and {line!r} (names alike once letters "
                                      "other than A-Z and 0-9 are _)")
@@ -1900,15 +2285,23 @@ class Pack:
             self._own_blob("TIMERS", self._timers_blob())   # the timers of the game, by their names
         if self.styles:
             self._own_blob("STYLES", self._styles_blob())   # the styles dialogs name
-        if any(self.sound_data) and sounds_path:
+        for name, song in zip(self.musics, self._music_songs()):
+            if song is None:
+                self.warnings.append(f"music {name}: named, never given its notes (Pack.add_music): it plays nothing")
+        sounding = any(self.sound_data) or any(self._music_songs())
+        if sounding and sounds_path:
             files.append((sounds_path, self._sounds_blob()))  # the samples of the sounds apart: a file of the board that plays them
-        elif any(self.sound_data):
+        elif sounding:
             self._own_blob("SOUNDS", self._sounds_blob())   # the samples of the sounds, one blob
+        if self.variables:
+            # the game's variables: the values they begin with, by their numbers (dgx_ge_vars_open); last, the other blobs keep theirs
+            self._own_blob("VARIABLES", struct.pack("<IHH", VARS_MAGIC, 1, len(self.variables)) + b"".join(struct.pack("<i", v) for _, v in self.variables))
         blob = self.build()
         files.append((pack_path, blob))
         if header_path:
             files.append((header_path, self.header(self.prefix)))
         write_files(files)
+        self._palette_warnings()
         for w in self.warnings:
             print("warning:", w, file=sys.stderr)
         return len(blob)

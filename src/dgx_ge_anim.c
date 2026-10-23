@@ -15,8 +15,10 @@
  *   FRAME     image u16, ms u16                 show a picture for a time
  *   FRAME_AT  image u16, ms u16, dx s8, dy s8   the same, the picture moved from the actor
  *   DX        s8                                move forward (back when negative)
- *   DY        s8                                move down
+ *   DY        s8                                move down (of its axes: everything said in them turns as the actor faces)
  *   FLIP                                        turn round
+ *   ROTATE    u8                                turned by quarter turns clockwise (bits 0-1), to so many (bit 2) or by so many
+ *   ROTATE_X  u8, expr                          as ROTATE (bit 2), the degrees worked out now, to the nearest multiple of 90
  *   SET       param u8, value s16               a param given a value
  *   VELOCITY  vx s16, vy s16                    pixels a second, x forward
  *   ACCEL     ax s16, ay s16                    pixels a second a second, x forward
@@ -31,6 +33,7 @@
  *   PATH      x expr, y expr                    the place by a formula of t, seconds from now: x forward, y down
  *   VELOCITY_X, ACCEL_X  x expr, y expr         as VELOCITY, ACCEL, worked out now
  *   SET_X, ADD_X  param u8, expr                as SET, ADD, worked out now
+ *   SET_VAR, ADD_VAR  variable u8, expr         a variable of the game (dgx_ge_game_vars) given the value, changed by it
  *   CONTACT   on u8, event u8 (0xFF none)        look for contacts with the terrain (1) or not (0); the event is sent at one
  *   CARRY     point u8, picture u16 (0xFFFF none)  what is held at a point from now
  *   RELEASE   point u8, vx expr, vy expr        let go what is held there, at that velocity (x forward)
@@ -44,6 +47,8 @@
  *   CONTACT_MASK  mask u8, from u8 (DGX_GE_TOUCH_* bits, 32 front, 64 back; 0: watched no more), reach u8, on u8, off u8 (0xFF none)
  *                                               a mask watched for touching anything solid on those sides: the events at the moments
  *   CONTACT_FIRST as CONTACT_MASK, then first u8: begun with nothing within so many points on those sides, the off event at once
+ *   FRAME_MS  dx s8, dy s8, image expr, ms expr  as FRAME_AT, the picture and then its time worked out as the frame begins
+ *                                               (a time from a param: a step of a speed); the time below 1: 1, above 65535: 65535
  *   HITS      count u8, then each: mask u8, on u16, damage s16, event u8, recoil u8 (0xFF none)
  *                                               what masks do when they meet others, until the next MASKS or HITS
  *
@@ -97,6 +102,13 @@ enum {
     OP_STEER, /* way u8 (STEER_*), the param of the angle u8 (wander; 0xFF none), count u8, then so many exprs: the velocity steered */
     OP_APPEAR_WITH, /* as OP_APPEAR, then count u8 and so many param u8 (of the kind appearing), expr: given to it */
     OP_CONTACT_FIRST, /* as OP_CONTACT_MASK, then first u8 */
+    OP_FRAME_MS,
+    OP_MUSIC,         /* music u8 (255 stop), fade u16 ms: a music of the pack for the game to play */
+    OP_MUSIC_LEVEL,   /* percent u8, u16 ms: the music's level by design */
+    OP_SET_VAR,       /* variable u8, expr: a variable of the game given a value */
+    OP_ADD_VAR,       /* variable u8, expr: changed by so much */
+    OP_ROTATE,
+    OP_ROTATE_X,
 };
 
 /* The ways of steer; its exprs: speed, force (the most the velocity changes at one steer), then seek, flee: dx, dy; arrive: the radius of
@@ -120,6 +132,20 @@ static int32_t param_of(float v)
     return v != v ? 0 : v >= 2147483648.0f ? INT32_MAX : v <= -2147483648.0f ? INT32_MIN : (int32_t)lroundf(v);
 }
 
+/* Degrees clockwise as quarter turns 0..3: to the nearest multiple of 90, a half away from zero, then round the circle (not a number: 0). */
+static unsigned quarters_of(float degrees)
+{
+    const float q = fmodf(roundf(degrees / 90.0f), 4.0f); /* -3..3; of one not a number, or endless: not a number */
+    return q != q ? 0u : (unsigned)((int)q + 4) & 3u;
+}
+
+void dgx_ge_actor_set_rotation(dgx_ge_actor_t *a, int degrees)
+{
+    /* as quarters_of, in whole numbers: exact however large */
+    const long long d = degrees, q = d >= 0 ? (d + 45) / 90 : -((-d + 45) / 90);
+    a->turn           = (uint8_t)((q % 4 + 4) % 4);
+}
+
 int dgx_ge_anim_said_params(dgx_ge_actor_t *child)
 {
     if (!said_with || !child || !child->anim) return 0;
@@ -136,6 +162,15 @@ int dgx_ge_anim_said_params(dgx_ge_actor_t *child)
 int32_t dgx_ge_anim_said(int i)
 {
     return i >= 0 && i < 4 ? said_args[i] : 0;
+}
+
+bool dgx_ge_anim_said_sound(const dgx_ge_sound_t *out, dgx_ge_anim_say_t what, uint8_t value)
+{
+    if (what == DGX_GE_ANIM_SOUND) dgx_ge_sound_play(out, value);
+    else if (what == DGX_GE_ANIM_MUSIC) dgx_ge_sound_music(out, value, (uint32_t)said_args[0]);
+    else if (what == DGX_GE_ANIM_MUSIC_LEVEL) dgx_ge_sound_music_level(out, value, (uint32_t)said_args[0]);
+    else return false;
+    return true;
 }
 #define HIT_BYTES 7u
 
@@ -187,16 +222,18 @@ static int count_of(const dgx_ge_actor_t *a, unsigned kind)
     return a->pockets ? dgx_ge_pockets_count(a->pockets, (int)kind) : 0;
 }
 
-/* What an expression of an actor reads: its params, its velocity now (x forward, as it is written), the time of its path, its pockets. */
+/* What an expression of an actor reads: its params, its velocity now (of its axes, x forward, as it is written), the time of its path, its pockets. */
 static dgx_ge_expr_ctx_t ctx_of(const dgx_ge_actor_t *a, float t)
 {
+    float vx = (float)a->vx / 256.0f, vy = (float)a->vy / 256.0f;
+    dgx_ge_orient_apply_f(dgx_ge_orient_inverse(dgx_ge_actor_orient(a)), &vx, &vy);
     return (dgx_ge_expr_ctx_t){.params      = a->params,
                                .param_count = a->anim->params,
                                .tables      = a->anim->tables,
                                .tables_size = a->anim->tables_size,
                                .t           = t,
-                               .vx          = (float)(a->flip ? -a->vx : a->vx) / 256.0f,
-                               .vy          = (float)a->vy / 256.0f,
+                               .vx          = vx,
+                               .vy          = vy,
                                .x           = (float)dgx_ge_actor_x(a),
                                .y           = (float)dgx_ge_actor_y(a),
                                .now_ms      = a->due_ms,
@@ -226,10 +263,12 @@ static void path_at(const dgx_ge_actor_t *a, uint32_t ms, int32_t *x, int32_t *y
     const float       fx = dgx_ge_expr_eval(px, &c), fy = dgx_ge_expr_eval(py, &c);
     c.t                  = t + h;
     const float gx = dgx_ge_expr_eval(px, &c), gy = dgx_ge_expr_eval(py, &c);
-    *x  = a->path_x + a->path_sign * (int32_t)lroundf(fx * 256.0f);
-    *y  = a->path_y + (int32_t)lroundf(fy * 256.0f);
-    *vx = a->path_sign * (int32_t)lroundf((gx - fx) / h * 256.0f);
-    *vy = (int32_t)lroundf((gy - fy) / h * 256.0f);
+    /* of the axes it faced when it began */
+    int32_t dx = (int32_t)lroundf(fx * 256.0f), dy = (int32_t)lroundf(fy * 256.0f);
+    int32_t wx = (int32_t)lroundf((gx - fx) / h * 256.0f), wy = (int32_t)lroundf((gy - fy) / h * 256.0f);
+    dgx_ge_orient_apply(a->path_orient, &dx, &dy);
+    dgx_ge_orient_apply(a->path_orient, &wx, &wy);
+    *x = a->path_x + dx, *y = a->path_y + dy, *vx = wx, *vy = wy;
 }
 
 /*
@@ -306,6 +345,7 @@ static void enter(dgx_ge_actor_t *a, int script)
     a->entered_x    = a->x;
     a->entered_y    = a->y;
     a->entered_flip = a->flip;
+    a->entered_turn = a->turn;
     memcpy(a->entered_params, a->params, sizeof(a->params));
     a->script  = (uint8_t)script;
     a->pc      = u16_at(a->anim->table + 2 * script);
@@ -323,6 +363,63 @@ static bool take_pending(dgx_ge_actor_t *a, bool at_end)
     return true;
 }
 
+/* The cell of the matrix for an event in the script the actor is in; NULL when it means nothing there. */
+static const uint8_t *cell_of(const dgx_ge_actor_t *a, int event)
+{
+    const dgx_ge_anim_t *anim = a->anim;
+    if (event < 0 || event >= anim->events) return NULL;
+    const uint8_t *cell = anim->matrix + 2 * ((uint32_t)a->script * anim->events + (uint32_t)event);
+    return cell[0] && cell[0] <= anim->scripts ? cell : NULL;
+}
+
+/* How many events at once its own say gave wait in turn. */
+static int now_waiting(const dgx_ge_actor_t *a)
+{
+    int n = 0;
+    while (n < DGX_GE_ANIM_NOW_EVENTS && a->now[n]) ++n;
+    return n;
+}
+
+/*
+ * The events at once waiting, taken in turn, each in the script the one before
+ * led to, as the game's own after the step would be: one that means nothing
+ * here is passed by, one at a branch point or at the end waits as such (a
+ * later takes its place); the first at once leads into its script, and the
+ * rest wait on. An actor at its hold takes any it means (as dgx_ge_actor_event
+ * for one that holds). True when it is in a new script.
+ */
+static bool take_now(dgx_ge_actor_t *a, bool holding)
+{
+    while (a->now[0]) {
+        const int event = a->now[0] - 1;
+        memmove(a->now, a->now + 1, sizeof(a->now) - sizeof(a->now[0]));
+        a->now[DGX_GE_ANIM_NOW_EVENTS - 1] = 0;
+        const uint8_t *cell = cell_of(a, event);
+        if (!cell) continue;
+        if (cell[1] == DGX_GE_WHEN_NOW || holding) {
+            enter(a, cell[0] - 1);
+            return true;
+        }
+        a->pending      = cell[0];
+        a->pending_when = cell[1];
+    }
+    return false;
+}
+
+/* An event at once from the actor's own say, behind those waiting; false when they fill the queue, the log told once. */
+static bool wait_now(dgx_ge_actor_t *a, int event)
+{
+    const int n = now_waiting(a);
+    if (n == DGX_GE_ANIM_NOW_EVENTS) {
+        static bool told;
+        if (!told) ESP_LOGE("dgx-ge", "event: more than %d at once from an actor's own step (DGX_GE_ANIM_NOW_EVENTS); the rest refused", DGX_GE_ANIM_NOW_EVENTS);
+        told = true;
+        return false;
+    }
+    a->now[n] = (uint16_t)(event + 1);
+    return true;
+}
+
 /* A param given a value at the moment of the step, kept within 32 bits; the game is told when it has changed. */
 static void set_param(dgx_ge_actor_t *a, int i, int64_t v, dgx_ge_anim_say_fn say, void *ctx)
 {
@@ -331,7 +428,7 @@ static void set_param(dgx_ge_actor_t *a, int i, int64_t v, dgx_ge_anim_say_fn sa
     if (say && a->params[i] != was) say(a, DGX_GE_ANIM_PARAM, (uint8_t)i, a->due_ms, ctx);
 }
 
-/* The one a sense found, as its. reads it: its velocity x forward of the one looking. */
+/* The one a sense found, as its. reads it: its velocity in the axes of the one looking (x its forward). */
 static dgx_ge_its_t its_of(const dgx_ge_actor_t *looking, const dgx_ge_sensed_t *f, bool cells)
 {
     dgx_ge_its_t w = {0};
@@ -340,8 +437,9 @@ static dgx_ge_its_t its_of(const dgx_ge_actor_t *looking, const dgx_ge_sensed_t 
     } else if (f->actor) {
         const dgx_ge_actor_t *o = f->actor;
         w.params = o->params, w.count = o->anim ? o->anim->params : 0;
-        w.vx = (float)(looking->flip ? -o->vx : o->vx) / 256.0f, w.vy = (float)o->vy / 256.0f;
-        w.image = o->image, w.script = o->script, w.flip = o->flip;
+        w.vx = (float)o->vx / 256.0f, w.vy = (float)o->vy / 256.0f;
+        dgx_ge_orient_apply_f(dgx_ge_orient_inverse(dgx_ge_actor_orient(looking)), &w.vx, &w.vy);
+        w.image = o->image, w.script = o->script, w.flip = o->flip, w.rotation = dgx_ge_actor_rotation(o);
     }
     return w;
 }
@@ -402,13 +500,14 @@ static void no_longer(float *x, float *y, float most)
 
 /*
  * Steering (Reynolds): the velocity wanted by the way, the change to it no larger than the force, the velocity no faster than the speed;
- * x forward. The velocity holds till the next step: the acceleration 0, a path left.
+ * of the actor's axes, x forward. The velocity holds till the next step: the acceleration 0, a path left.
  */
 static void steer(dgx_ge_actor_t *a, unsigned way, unsigned angle, const float *v, dgx_ge_anim_say_fn say, void *ctx)
 {
-    const int   sign  = a->flip ? -1 : 1;
-    const float speed = v[0] > 0 ? v[0] : 0, force = v[1] > 0 ? v[1] : 0;
-    float       vx = (float)(sign * a->vx) / 256.0f, vy = (float)a->vy / 256.0f, wx = 0, wy = 0;
+    const unsigned o     = dgx_ge_actor_orient(a);
+    const float    speed = v[0] > 0 ? v[0] : 0, force = v[1] > 0 ? v[1] : 0;
+    float          vx = (float)a->vx / 256.0f, vy = (float)a->vy / 256.0f, wx = 0, wy = 0;
+    dgx_ge_orient_apply_f(dgx_ge_orient_inverse(o), &vx, &vy);
     if (way == STEER_WANDER) {
         /* the angle moves by a cast of the dice within the spread, both ways */
         int       deg    = angle < a->anim->params ? a->params[angle] % 360 : 0;
@@ -440,12 +539,14 @@ static void steer(dgx_ge_actor_t *a, unsigned way, unsigned angle, const float *
     no_longer(&sx, &sy, force);
     vx += sx, vy += sy;
     no_longer(&vx, &vy, speed);
-    a->vx = sign * (int32_t)lroundf(vx * 256.0f), a->vy = (int32_t)lroundf(vy * 256.0f);
+    int32_t nx = (int32_t)lroundf(vx * 256.0f), ny = (int32_t)lroundf(vy * 256.0f);
+    dgx_ge_orient_apply(o, &nx, &ny);
+    a->vx = nx, a->vy = ny;
     a->ax = a->ay = 0;
     a->path = 0;
 }
 
-/* The sides a watched mask (contacts[i]) touches anything on, the actor put at x, y: as its terrain says, of those watched (front and back by the way it faces). */
+/* The sides a watched mask (contacts[i]) touches anything on, the actor put at x, y: as its terrain says, of those watched (front and back by the way it faces, turned too). */
 /*
  * The sides watched that the mask touches here. A mask wholly inside a solid
  * (inside, and no side found within its reach) touches it on every side: a
@@ -453,14 +554,22 @@ static void steer(dgx_ge_actor_t *a, unsigned way, unsigned angle, const float *
  * touch all the same, found at its first ms. One partly in touches it on the
  * sides its points outside find it on (the edge it crossed), and inside.
  */
+/* The side (DGX_GE_TOUCH_*) of the scene where what lies ahead (1) or behind (-1) of the actor is, as it faces. */
+static unsigned side_toward(const dgx_ge_actor_t *a, int32_t ahead)
+{
+    int32_t x = ahead, y = 0;
+    dgx_ge_orient_apply(dgx_ge_actor_orient(a), &x, &y);
+    return x > 0 ? DGX_GE_TOUCH_RIGHT : x < 0 ? DGX_GE_TOUCH_LEFT : y > 0 ? DGX_GE_TOUCH_BELOW : DGX_GE_TOUCH_ABOVE;
+}
+
 static uint8_t sides_now(const dgx_ge_actor_t *a, int32_t x, int32_t y, int i)
 {
     const dgx_ge_terrain_t *w = a->terrain;
     if (!w || !w->sides) return 0;
     const uint8_t from   = a->contacts[i].from;
     unsigned      wanted = from & 31u;
-    if (from & 32u) wanted |= a->flip ? DGX_GE_TOUCH_LEFT : DGX_GE_TOUCH_RIGHT; /* in front of it */
-    if (from & 64u) wanted |= a->flip ? DGX_GE_TOUCH_RIGHT : DGX_GE_TOUCH_LEFT; /* behind it */
+    if (from & 32u) wanted |= side_toward(a, 1);  /* in front of it */
+    if (from & 64u) wanted |= side_toward(a, -1); /* behind it */
     const unsigned sides = w->sides(a, x, y, a->contacts[i].mask, a->contacts[i].reach, w->ctx);
     if (sides == DGX_GE_TOUCH_INSIDE && wanted) return DGX_GE_TOUCH_INSIDE;
     return (uint8_t)(sides & wanted);
@@ -482,12 +591,14 @@ static bool nothing_near(dgx_ge_actor_t *a, int i)
 /*
  * The actors whose steps are being made, the latest first: what one says may
  * make another step (an event at once), and that one's say may come back to
- * the first. An event at once for one of them waits for the next command of
- * its step (dgx_ge_actor_event).
+ * the first. An event at once for one of them waits in its queue: the first
+ * for the next command of its step, the next ones each for where the script
+ * the one before led to would end the step (dgx_ge_actor_event, take_now).
  */
 typedef struct in_step {
     const dgx_ge_actor_t *actor;
     struct in_step       *up;
+    bool                  rehearsal; /* a step made to learn where the script comes to, not one of the game (dgx_ge_actor_rehearse) */
 } in_step_t;
 static in_step_t *stepping;
 
@@ -501,18 +612,27 @@ static bool in_its_step(const dgx_ge_actor_t *a)
 static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
 {
     const dgx_ge_anim_t *anim = a->anim;
+    int                  waited = 0; /* the events at once that waited at the command before: more now, its say gave one */
     for (int n = 0; n < MAX_STEPS_WITHOUT_FRAME; ++n) {
-        /* the game answered what it was told with an event at once: the new script from here, the rest of this step not made */
-        if (a->pending && a->pending_when == DGX_GE_WHEN_NOW) enter(a, a->pending - 1);
+        if (a->now[0] || waited) {
+            /*
+             * the game answered what it was told with an event at once: the new script from here, the rest of this
+             * step not made; more than one, the next where the script this one leads to would end the step (a frame,
+             * its hold)
+             */
+            if (now_waiting(a) > waited) take_now(a, false);
+            waited = now_waiting(a);
+        }
         if (a->pc >= anim->code_size) break;
         const uint8_t *p    = anim->code + a->pc;
         const uint32_t left = anim->code_size - a->pc;
-        const int      sign = a->flip ? -1 : 1; /* forward is the way the actor faces now, after a flip in this very step too */
+        const unsigned o    = dgx_ge_actor_orient(a); /* its axes as it faces now, after a flip or a turn in this very step too */
         switch (p[0]) {
         case OP_FRAME:
         case OP_FRAME_AT: {
             const bool at = p[0] == OP_FRAME_AT;
             if (left < (at ? 7u : 5u)) goto broken;
+            if (a->now[0] && take_now(a, false)) break; /* the next event at once in turn, where this script ends the step */
             a->image    = (int16_t)u16_at(p + 1);
             a->image_dx = at ? (int8_t)p[5] : 0;
             a->image_dy = at ? (int8_t)p[6] : 0;
@@ -521,20 +641,28 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             return true;
         }
         case OP_DX:
+        case OP_DY: {
             if (left < 2) goto broken;
-            a->x += sign * (int8_t)p[1] * 256;
-            a->path_x += sign * (int8_t)p[1] * 256; /* a path goes on from the new place */
+            int32_t dx = p[0] == OP_DX ? (int8_t)p[1] * 256 : 0, dy = p[0] == OP_DY ? (int8_t)p[1] * 256 : 0;
+            dgx_ge_orient_apply(o, &dx, &dy);
+            a->x += dx, a->y += dy;
+            a->path_x += dx, a->path_y += dy; /* a path goes on from the new place */
             a->pc += 2;
             break;
-        case OP_DY:
-            if (left < 2) goto broken;
-            a->y += (int8_t)p[1] * 256;
-            a->path_y += (int8_t)p[1] * 256;
-            a->pc += 2;
-            break;
+        }
         case OP_FLIP:
             a->flip = !a->flip;
             a->pc += 1;
+            break;
+        case OP_ROTATE:
+            if (left < 2) goto broken;
+            a->turn = (uint8_t)((((p[1] & 4u) ? 0u : a->turn) + p[1]) & 3u);
+            a->pc += 2;
+            break;
+        case OP_ROTATE_X:
+            if (left < 3 || 2u + 1 + p[2] > left) goto broken;
+            a->turn = (uint8_t)((((p[1] & 4u) ? 0u : a->turn) + quarters_of(eval(a, p + 2, 0))) & 3u);
+            a->pc += 2 + 1 + p[2];
             break;
         case OP_SET:
         case OP_ADD: {
@@ -547,7 +675,8 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
         case OP_VELOCITY:
         case OP_ACCEL: {
             if (left < 5) goto broken;
-            const int32_t x = sign * (int16_t)u16_at(p + 1) * 256, y = (int16_t)u16_at(p + 3) * 256;
+            int32_t x = (int16_t)u16_at(p + 1) * 256, y = (int16_t)u16_at(p + 3) * 256;
+            dgx_ge_orient_apply(o, &x, &y);
             if (a->path) a->ax = a->ay = 0; /* out of a path: on as it went */
             a->path = 0;
             if (p[0] == OP_VELOCITY) a->vx = x, a->vy = y;
@@ -563,13 +692,14 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             const uint32_t size = 1 + 1 + ex[0] + 1 + ey[0];
             if (p[0] == OP_PATH) {
                 a->path      = (uint16_t)(a->pc + 1); /* its x, right after the op */
-                a->path_sign = (int8_t)sign;
+                a->path_orient = (uint8_t)o;
                 a->path_ms   = a->due_ms;
                 a->path_x    = a->x;
                 a->path_y    = a->y;
                 a->ax = a->ay = 0;
             } else {
-                const int32_t x = sign * (int32_t)lroundf(eval(a, ex, 0) * 256.0f), y = (int32_t)lroundf(eval(a, ey, 0) * 256.0f);
+                int32_t x = (int32_t)lroundf(eval(a, ex, 0) * 256.0f), y = (int32_t)lroundf(eval(a, ey, 0) * 256.0f);
+                dgx_ge_orient_apply(o, &x, &y);
                 if (a->path) a->ax = a->ay = 0;
                 a->path = 0;
                 if (p[0] == OP_VELOCITY_X) a->vx = x, a->vy = y;
@@ -586,6 +716,19 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             set_param(a, p[1], v, say, ctx);
             break;
         }
+        case OP_SET_VAR:
+        case OP_ADD_VAR: {
+            if (left < 3 || 2u + 1 + p[2] > left) goto broken;
+            const int32_t v = param_of(eval(a, p + 2, 0));
+            a->pc += 2 + 1 + p[2];
+            /* written by a step of the game, heard or not; a rehearsal (a thing made again from its record) writes none */
+            dgx_ge_vars_t *vars = dgx_ge_game_vars;
+            if (stepping->rehearsal || !vars || p[1] >= vars->count) break;
+            const int32_t was = vars->values[p[1]];
+            dgx_ge_var_set(vars, p[1], (int64_t)v + (p[0] == OP_ADD_VAR ? was : 0));
+            if (say && vars->values[p[1]] != was) say(a, DGX_GE_ANIM_VAR, p[1], a->due_ms, ctx);
+            break;
+        }
         case OP_BRANCH:
             a->pc += 1;
             take_pending(a, false);
@@ -599,7 +742,7 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             if (!take_pending(a, true)) enter(a, p[1]);
             break;
         case OP_HOLD:
-            if (take_pending(a, true)) break;
+            if (take_pending(a, true) || (a->now[0] && take_now(a, true))) break;
             a->holding = true;
             return false;
         case OP_SIGNAL:
@@ -607,6 +750,13 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             if (left < 2) goto broken;
             a->pc += 2;
             if (say) say(a, p[0] == OP_SIGNAL ? DGX_GE_ANIM_SIGNAL : DGX_GE_ANIM_SOUND, p[1], a->due_ms, ctx);
+            break;
+        case OP_MUSIC:
+        case OP_MUSIC_LEVEL:
+            if (left < 4) goto broken;
+            a->pc += 4;
+            said_args[0] = u16_at(p + 2); /* the time of the fade, of the change of level */
+            if (say) say(a, p[0] == OP_MUSIC ? DGX_GE_ANIM_MUSIC : DGX_GE_ANIM_MUSIC_LEVEL, p[1], a->due_ms, ctx);
             break;
         case OP_CONTACT_MASK:
         case OP_CONTACT_FIRST: {
@@ -666,8 +816,10 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             if (slot < 0) break; /* nothing held there: nothing let go */
             dgx_ge_actor_t *thing = a->items[slot];
             a->released.image = thing ? (int16_t)dgx_ge_held_image(thing) : a->carried[slot];
-            a->released.vx   = (int16_t)(sign * lroundf(eval(a, ex, 0)));
-            a->released.vy   = (int16_t)lroundf(eval(a, ey, 0));
+            int32_t rx = (int32_t)lroundf(eval(a, ex, 0)), ry = (int32_t)lroundf(eval(a, ey, 0));
+            dgx_ge_orient_apply(o, &rx, &ry);
+            a->released.vx   = (int16_t)rx;
+            a->released.vy   = (int16_t)ry;
             a->carried[slot] = -1;
             if (thing) {
                 /* free, where it is, thrown at this moment */
@@ -682,8 +834,10 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             if (left < 5 || left < 6u + p[4] || left < 6u + p[4] + p[5 + p[4]]) goto broken;
             const uint8_t *ex = p + 4, *ey = ex + 1 + ex[0];
             a->shot.kind = u16_at(p + 2);
-            a->shot.vx   = (int16_t)(sign * lroundf(eval(a, ex, 0)));
-            a->shot.vy   = (int16_t)lroundf(eval(a, ey, 0));
+            int32_t sx = (int32_t)lroundf(eval(a, ex, 0)), sy = (int32_t)lroundf(eval(a, ey, 0));
+            dgx_ge_orient_apply(o, &sx, &sy);
+            a->shot.vx   = (int16_t)sx;
+            a->shot.vy   = (int16_t)sy;
             a->pc += (uint16_t)(4 + 1 + ex[0] + 1 + ey[0]);
             /* one with pockets shoots what it has: one of the kind out of them, none there, none shot */
             if (a->pockets) {
@@ -706,11 +860,25 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             break;
         case OP_FRAME_X: {
             if (left < 4 || left < 4u + p[3]) goto broken;
+            if (a->now[0] && take_now(a, false)) break;
             const long image = lroundf(eval(a, p + 3, 0));
             a->image    = (int16_t)(image < 0 ? -1 : image > INT16_MAX ? INT16_MAX : image);
             a->image_dx = a->image_dy = 0;
             a->due_ms += u16_at(p + 1);
             a->pc += (uint16_t)(3 + 1 + p[3]);
+            return true;
+        }
+        case OP_FRAME_MS: {
+            if (left < 4 || left < 5u + p[3] || left < 5u + p[3] + p[4 + p[3]]) goto broken;
+            if (a->now[0] && take_now(a, false)) break;
+            const uint8_t *pic = p + 3, *ms = pic + 1 + pic[0];
+            const long     image = lroundf(eval(a, pic, 0));
+            const float    t     = eval(a, ms, 0); /* not a number: 1 */
+            a->image    = (int16_t)(image < 0 ? -1 : image > INT16_MAX ? INT16_MAX : image);
+            a->image_dx = (int8_t)p[1];
+            a->image_dy = (int8_t)p[2];
+            a->due_ms += t >= 65535.0f ? 65535u : t >= 1.0f ? (uint32_t)lroundf(t) : 1u;
+            a->pc += (uint16_t)(3 + 1 + pic[0] + 1 + ms[0]);
             return true;
         }
         case OP_KEEP:
@@ -775,7 +943,8 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             dgx_ge_sensed_t f;
             memset(&f, 0, sizeof(f));
             const bool found = a->terrain && a->terrain->sense && a->terrain->sense(a, &q, &f, a->terrain->ctx);
-            const int  dx = found ? (a->flip ? -f.dx : f.dx) : 0, dy = found ? f.dy : 0; /* x forward */
+            int32_t dx = found ? f.dx : 0, dy = found ? f.dy : 0;
+            dgx_ge_orient_apply(dgx_ge_orient_inverse(o), &dx, &dy); /* of its axes: x forward */
             const int  got[3] = {found ? (int)lroundf(sqrtf((float)dx * dx + (float)dy * dy)) : -1, dx, dy};
             for (int k = 0; k < 3; ++k)
                 if (outs[k] < anim->params) set_param(a, outs[k], got[k], say, ctx);
@@ -843,15 +1012,16 @@ static bool make_steps(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
         }
     }
 broken:
-    /* a script that runs past its code or never shows a frame stops where it is */
+    /* a script that runs past its code or never shows a frame stops where it is; the events at once waiting are passed by */
     a->holding = true;
+    memset(a->now, 0, sizeof(a->now));
     return false;
 }
 
 /* Steps up to the next frame, made at the moment due_ms. False when the actor holds. */
-static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
+static bool step(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal)
 {
-    in_step_t me = {a, stepping};
+    in_step_t me = {a, stepping, rehearsal};
     stepping     = &me;
     const bool shows = make_steps(a, say, ctx);
     stepping     = me.up;
@@ -911,7 +1081,9 @@ static bool seen_again(const seen_t *s, const dgx_ge_actor_t *a)
  * event for a contact, it is sent at the moment of the contact, the actor put
  * there: true, time has gone back to it.
  */
-static bool look_point(dgx_ge_actor_t *a, seen_t *last, dgx_ge_anim_say_fn say, void *ctx)
+static bool send_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal);
+
+static bool look_point(dgx_ge_actor_t *a, seen_t *last, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal)
 {
     const dgx_ge_terrain_t *w = a->terrain;
     if (!a->contact || !w || !w->touches) {
@@ -955,7 +1127,7 @@ static bool look_point(dgx_ge_actor_t *a, seen_t *last, dgx_ge_anim_say_fn say, 
             dgx_ge_actor_state_at(a, c.to_ms, &x, &y, &vx, &vy);
             dgx_ge_actor_restart(a, c.to_ms, x, y, vx, vy);
             a->looked_ms = c.to_ms;
-            dgx_ge_actor_event(a, a->contact_event, c.to_ms, say, ctx);
+            send_event(a, a->contact_event, c.to_ms, say, ctx, rehearsal);
             return true;
         }
         if (a->moved_ms == now) {
@@ -976,7 +1148,7 @@ static bool look_point(dgx_ge_actor_t *a, seen_t *last, dgx_ge_anim_say_fn say, 
  * and told the event at that moment: true, time has gone back. A change
  * with no event named is only noted.
  */
-static bool look_masks(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
+static bool look_masks(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal)
 {
     if (!a->terrain || !a->terrain->sides) return false;
     for (int i = 0; i < DGX_GE_ANIM_CONTACTS; ++i) {
@@ -985,12 +1157,12 @@ static bool look_masks(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
         a->contacts[i].was = now;
         if (was == 0xFF && !now && a->contacts[i].first && a->contacts[i].off != 0xFF && nothing_near(a, i)) {
             /* begun before the terrain was given, over nothing: lost now, at its first look with one */
-            dgx_ge_actor_event(a, a->contacts[i].off, a->moved_ms, say, ctx);
+            send_event(a, a->contacts[i].off, a->moved_ms, say, ctx, rehearsal);
             return true;
         }
         if (was == 0xFF || !now == !was) continue;
-        const uint8_t event = now ? a->contacts[i].on : a->contacts[i].off;
-        if (event == 0xFF) continue;
+        const uint8_t sent = now ? a->contacts[i].on : a->contacts[i].off;
+        if (sent == 0xFF) continue;
         uint32_t lo = a->looked_ms, hi = a->moved_ms;
         while ((int32_t)(hi - lo) > 1) {
             const uint32_t mid = lo + (hi - lo) / 2;
@@ -1005,17 +1177,17 @@ static bool look_masks(dgx_ge_actor_t *a, dgx_ge_anim_say_fn say, void *ctx)
             dgx_ge_actor_restart(a, hi, x, y, vx, vy);
             a->looked_ms = hi;
         }
-        dgx_ge_actor_event(a, event, hi, say, ctx);
+        send_event(a, sent, hi, say, ctx, rehearsal);
         return true;
     }
     return false;
 }
 
 /* A look, where the motion has come to: the masks watched first (they need the last look as it was), then the point. */
-static bool look(dgx_ge_actor_t *a, seen_t *last, dgx_ge_anim_say_fn say, void *ctx)
+static bool look(dgx_ge_actor_t *a, seen_t *last, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal)
 {
-    if (look_masks(a, say, ctx)) return true;
-    return look_point(a, last, say, ctx);
+    if (look_masks(a, say, ctx, rehearsal)) return true;
+    return look_point(a, last, say, ctx, rehearsal);
 }
 
 void dgx_ge_actor_state_at(const dgx_ge_actor_t *a, uint32_t ms, int32_t *x, int32_t *y, int32_t *vx, int32_t *vy)
@@ -1108,32 +1280,51 @@ void dgx_ge_actor_restart(dgx_ge_actor_t *a, uint32_t at_ms, int32_t x, int32_t 
     a->moved_ms = at_ms;
 }
 
-void dgx_ge_actor_advance(dgx_ge_actor_t *actor, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx)
+static void advance(dgx_ge_actor_t *actor, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal)
 {
     seen_t last = {0};
     /* a contact that sends an event goes back to its moment: from there on again */
     do {
         while (!actor->holding && (int32_t)(now_ms - actor->due_ms) >= 0) {
             move_to(actor, actor->due_ms);
-            if (look(actor, &last, say, ctx)) continue;
-            if (!step(actor, say, ctx)) break;
+            if (look(actor, &last, say, ctx, rehearsal)) continue;
+            if (!step(actor, say, ctx, rehearsal)) break;
         }
         move_to(actor, now_ms);
-    } while (look(actor, &last, say, ctx));
+    } while (look(actor, &last, say, ctx, rehearsal));
+}
+
+void dgx_ge_actor_advance(dgx_ge_actor_t *actor, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx)
+{
+    advance(actor, now_ms, say, ctx, false);
+}
+
+void dgx_ge_actor_rehearse(dgx_ge_actor_t *actor, uint32_t now_ms)
+{
+    advance(actor, now_ms, NULL, NULL, true);
 }
 
 bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx)
 {
+    return send_event(actor, event, now_ms, say, ctx, false);
+}
+
+bool dgx_ge_actor_rehearse_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms)
+{
+    return send_event(actor, event, now_ms, NULL, NULL, true);
+}
+
+static bool send_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx, bool rehearsal)
+{
     const dgx_ge_anim_t *anim = actor->anim;
     if (!anim || event < 0 || event >= anim->events) return false;
-    const uint8_t *cell = anim->matrix + 2 * ((uint32_t)actor->script * anim->events + (uint32_t)event);
-    if (!cell[0] || cell[0] > anim->scripts) return false;
-    if (in_its_step(actor) && cell[1] == DGX_GE_WHEN_NOW) {
-        /* sent from what its own step says: taken at that step's moment, at its next command (make_steps) */
-        actor->pending      = cell[0];
-        actor->pending_when = DGX_GE_WHEN_NOW;
-        return true;
-    }
+    const bool own = in_its_step(actor);
+    /* sent from what its own step says behind others at once: what it means is of the script those before lead to */
+    if (own && actor->now[0]) return wait_now(actor, event);
+    const uint8_t *cell = cell_of(actor, event);
+    if (!cell) return false;
+    /* sent from what its own step says: taken at that step's moment, at its next command (make_steps) */
+    if (own && cell[1] == DGX_GE_WHEN_NOW) return wait_now(actor, event);
     if (cell[1] == DGX_GE_WHEN_NOW || actor->holding) {
         /*
          * from before the moment the motion has come to (a step of another actor, made late in a long call; a
@@ -1148,10 +1339,10 @@ bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_g
          * the steps that were due before now are made first, then the actor goes on in the new script from now: a
          * step due at this very moment comes after the event (as a game's tick looks at its buttons, then steps)
          */
-        dgx_ge_actor_advance(actor, now_ms - 1, say, ctx);
+        advance(actor, now_ms - 1, say, ctx, rehearsal);
         actor->due_ms = now_ms;
         enter(actor, cell[0] - 1);
-        dgx_ge_actor_advance(actor, now_ms, say, ctx);
+        advance(actor, now_ms, say, ctx, rehearsal);
         return true;
     }
     actor->pending      = cell[0];
@@ -1182,8 +1373,9 @@ void dgx_ge_collisions_set_actor(struct dgx_ge_collisions *c, int handle, const 
         dgx_ge_collisions_remove(c, handle);
         return;
     }
-    const dgx_ge_body_t body = {pack, a->image, dgx_ge_actor_x(a) + (a->flip ? -a->image_dx : a->image_dx), dgx_ge_actor_y(a) + a->image_dy, a->flip,
-                                a->masks};
+    int x, y;
+    dgx_ge_actor_picture_at(a, &x, &y);
+    const dgx_ge_body_t body = {pack, a->image, x, y, (uint8_t)dgx_ge_actor_orient(a), a->masks};
     dgx_ge_collisions_set(c, handle, &body, owner, side);
     dgx_ge_collisions_actor(c, handle, a);
 }

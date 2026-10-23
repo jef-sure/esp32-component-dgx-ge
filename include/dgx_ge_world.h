@@ -39,8 +39,9 @@ typedef struct {
     uint16_t scene;    /* whose, a number of the game */
     uint16_t kind;     /* what: its animation, a blob of the pack (dgx_ge_kind) */
     uint8_t  script;   /* the script it entered */
-    bool     flip : 1; /* which way it faced */
+    bool     flip : 1; /* which way it faced: mirrored, */
     bool     keep : 1; /* not given up to newer records */
+    uint8_t  turn : 2; /* and turned by so many quarter turns clockwise */
     uint8_t  count;    /* how many lie here, a stack of the same (0 as 1) */
     uint8_t  box;      /* what it holds (a heap, a chest): its box + 1 (dgx_ge_world_boxes), 0 none */
     int32_t  x, y;   /* where it entered, 1/256 of a point of the scene */
@@ -130,7 +131,7 @@ typedef struct {
 
 /*
  * A thing (a record of pockets, script and params as it is) laid at x, y of a
- * scene (points), facing so, sent an event (dropped: its kind's matrix makes
+ * scene (points), facing so (orient: dgx_ge_orient, mirrored and turned; a bool flip as before), sent an event (dropped: its kind's matrix makes
  * it lie, or break; -1 none), from now on: onto a stack of the same lying
  * within reach, else at the nearest free place (x, then a step right, left,
  * two right... while within reach, where nothing lies nearer than a step and
@@ -139,7 +140,7 @@ typedef struct {
  * -1 when it could not (the world or the boxes full).
  */
 int32_t dgx_ge_world_lay(dgx_ge_world_t *world, struct dgx_ge_kinds *kinds, const struct dgx_ge_pocket *thing, int count, int scene, int x, int y,
-                         bool flip, int event, uint32_t now_ms, const dgx_ge_lay_t *how);
+                         unsigned orient, int event, uint32_t now_ms, const dgx_ge_lay_t *how);
 
 /* A heap after it was searched: empty, it is gone; one thing left, the heap is that thing lying where it was. Not a heap: nothing. */
 void dgx_ge_world_tidy(dgx_ge_world_t *world, int32_t handle, int heap, uint32_t now_ms);

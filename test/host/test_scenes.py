@@ -37,7 +37,7 @@ with open(os.path.join(out, "rules.anim"), "w") as f:
     f.write("event death\nscript rest\n    hold\n")
 
 doc = {
-    "format": "dgx-ge-sprites", "formatVersion": 1, "name": "layout",
+    "format": "dgx-ge-sprites", "formatVersion": 1, "name": "layout", "synth": "chip",
     "masks": [{"index": 1, "name": "body", "color": "#ff0000"}],
     "sets": [{"name": "hero", "defaultMask": 1, "frames": [{"image": "stand-1.png", "width": 4, "height": 3, "origin": {"x": 1, "y": 2}}]}],
     "tilesets": [{"name": "tiles", "cellWidth": 8, "cellHeight": 8, "tiles": [
@@ -45,16 +45,18 @@ doc = {
         {"name": "wall", "kind": 2, "solid": {"top": True, "left": True}, "pieces": [{"set": "hero", "image": "stand-1.png", "layer": "front"}]}]}],
     "screen": {"width": 64, "height": 32},
     "scenes": [
-        {"name": "room1", "width": 64, "height": 32, "map": "level", "index": 1, "kind": "room", "onEnter": "", "leave": {"down": "fell"},
+        {"name": "room1", "width": 64, "height": 32, "background": "#14142a", "music": "theme", "musicFade": 300, "map": "level", "index": 1, "kind": "room", "onEnter": "", "leave": {"down": "fell"},
          "layers": [
              {"name": "back", "factor": 256, "order": "added", "objects": [
                  {"type": "picture", "name": "torch", "set": "hero", "image": "stand-1.png", "x": 10, "y": 20, "key": 0, "flip": True,
                   "clip": {"x": 0, "y": 0, "width": 32, "height": 32}},
-                 {"type": "actor", "name": "guard", "set": "hero", "script": "walk", "x": 30, "y": 28, "flip": False, "params": {"hp": 5}},
+                 {"type": "actor", "name": "guard", "set": "hero", "script": "walk", "x": 30, "y": 28, "flip": False, "rotation": 270,
+                  "params": {"hp": 5}},
                  {"type": "zone", "name": "door", "kind": "exit", "x": 50, "y": 10, "width": 8, "height": 16},
                  {"type": "entry", "name": "start", "x": 4, "y": 28, "flip": False, "arrive": ""}]},
              {"name": "front", "factor": 128, "order": "key", "objects": [
-                 {"type": "picture", "name": "", "set": "hero", "image": "stand-1.png", "x": 40, "y": 30, "key": 3, "flip": False, "clip": None},
+                 {"type": "picture", "name": "", "set": "hero", "image": "stand-1.png", "x": 40, "y": 30, "key": 3, "flip": False, "rotation": -180,
+                  "clip": None},
                  {"type": "zone", "name": "pit", "kind": "trap", "x": 0, "y": 30, "width": 64, "height": 2}]}],
          "grids": [{"name": "grid", "tileset": "tiles", "x": 0, "y": 8, "cols": 3, "rows": 3, "cells": [[0, 1, 2], [1, 1, 0], [0, 0, 1]],
                     "mods": {"1,0": 7}, "variants": {"2,0": 70000}}],
@@ -77,11 +79,17 @@ doc = {
     "game": [{"name": "kinds", "value": 8}, {"name": "lives", "value": 3}],
     "timers": [{"name": "clock", "every": "1s", "reset": "never", "event": "second", "start": "game"}],
     "sounds": ["step"],
+    "music": ["theme"],
     "crops": [{"name": "HEAD", "set": "hero", "image": "stand-1.png", "x": 0, "y": 0, "width": 2, "height": 1, "originX": 0, "originY": 0}],
     "shows": [{"name": "TITLE", "pictures": [{"picture": "HERO_STAND_1", "x": 0, "y": 10, "layer": 0, "flip": False, "color": 0}], "actors": [],
                "cues": [{"at": "1s", "role": "end", "event": ""}]}],
     "chases": [{"kind": "HERO", "sense": "always", "sides": ["left", "right"], "hearing": 0, "near": {"left": 4}, "steps": 0, "calm": ""}],
 }
+
+
+os.makedirs(os.path.join(out, "music"), exist_ok=True)
+with open(os.path.join(out, "music", "theme.mml"), "w") as f:
+    f.write("@1 = square 25%\nA t120 o4 @1 $ c e g\n")
 
 
 def packed(d):
@@ -97,15 +105,30 @@ blobs = {n: i for i, (n, _) in enumerate(pack.blobs)}
 images = {im[0]: i for i, im in enumerate(pack.images)}
 check("SCENE_ROOM1" in blobs and "SCENE_ROOM2" in blobs, f"the blobs of the scenes {list(blobs)}")
 b = pack.blobs[blobs["SCENE_ROOM1"]][1]
-magic, version, layers, grids, width, height, npic, nact, nzone, nentry, nsrc, zero, grids_at = struct.unpack_from("<IHBBhhHHHHHHI", b, 0)
-check((magic, version, layers, grids, width, height, npic, nact, nzone, nentry, nsrc, zero) == (0x43534744, 2, 2, 1, 64, 32, 2, 1, 2, 1, 3, 0),
-      f"the head {(magic, version, layers, grids, width, height, npic, nact, nzone, nentry, nsrc, zero)}")
-at = 28
+magic, version, layers, grids, width, height, npic, nact, nzone, nentry, nsrc, zero, grids_at, paper, has = struct.unpack_from("<IHBBhhHHHHHHI3sB", b, 0)
+check((magic, version, layers, grids, width, height, npic, nact, nzone, nentry, nsrc, zero, paper, has) ==
+      (0x43534744, 5, 2, 1, 64, 32, 2, 1, 2, 1, 3, 0, bytes((20, 20, 42)), 1),
+      f"the head {(magic, version, layers, grids, width, height, npic, nact, nzone, nentry, nsrc, zero, paper, has)}")
+# silence named, the fade as the engine's when not said (500 ms); a name new to the pack named by the scene
+quiet = copy.deepcopy(doc)
+quiet["scenes"][1]["music"] = "stop"
+quiet["scenes"][0]["music"] = "dungeon"
+del quiet["scenes"][0]["musicFade"]
+qp = packed(quiet)
+qb = {n: blob for n, blob in qp.blobs}
+check(struct.unpack_from("<BBH", qb["SCENE_ROOM2"], 32) == (0, 2, 500), f"silence: {struct.unpack_from('<BBH', qb['SCENE_ROOM2'], 32)}")
+check(struct.unpack_from("<BBH", qb["SCENE_ROOM1"], 32) == (qp.musics.index("dungeon"), 1, 500) and "dungeon" in qp.musics, "a new name, the fade unsaid")
+# the scene's music: theme (its notes from music/theme.mml beside the document), its fade; room2 names none
+check(struct.unpack_from("<BBH", b, 32) == (pack.musics.index("theme"), 1, 300), f"the music of room1 {struct.unpack_from('<BBH', b, 32)}")
+check(struct.unpack_from("<BBH", pack.blobs[blobs["SCENE_ROOM2"]][1], 32) == (0, 0, 0), "room2 names no music")
+check(pack.music_data[pack.musics.index("theme")] is not None, "the document's music, its notes beside it")
+at = 36
 check(struct.unpack_from("<hBBhBB", b, at) == (256, 0, 0, 128, 1, 0), "the layers: factor, order")
 at += 4 * layers
 stand = images["HERO_STAND_1"]
 check(struct.unpack_from("<HhhhBBhhhh", b, at) == (stand, 10, 20, 0, 0, 1, 0, 0, 32, 32), f"the torch {struct.unpack_from('<HhhhBBhhhh', b, at)}")
-check(struct.unpack_from("<HhhhBBhhhh", b, at + 18) == (stand, 40, 30, 3, 1, 0, 0, 0, 0, 0), "the picture of the front layer, its key, no clip")
+check(struct.unpack_from("<HhhhBBhhhh", b, at + 18) == (stand, 40, 30, 3, 1, 2 << 1, 0, 0, 0, 0),
+      "the picture of the front layer, its key, turned (-180: 180, two quarter turns, bits 1-2 of its flags), no clip")
 at += 18 * npic
 check(struct.unpack_from("<Hhhhh", b, at) == (0, 50, 10, 8, 16) and struct.unpack_from("<Hhhhh", b, at + 10) == (1, 0, 30, 64, 2), "the zones: exit 0, trap 1")
 at += 10 * nzone
@@ -117,7 +140,8 @@ check([struct.unpack_from("<BBHH", b, at + 6 * i) for i in range(3)] == [(0, 0, 
 at += 6 * nsrc
 actor_at = struct.unpack_from("<H", b, at)[0]
 hero = [a for a in pack.anims if a[0] == "HERO"][0]
-check(struct.unpack_from("<HBBhhBB", b, actor_at) == (blobs["HERO"], hero[1].index("walk"), 0, 30, 28, 0, 1), "the guard: kind, script, layer, place")
+check(struct.unpack_from("<HBBhhBB", b, actor_at) == (blobs["HERO"], hero[1].index("walk"), 0, 30, 28, 3 << 1, 1),
+      "the guard: kind, script, layer, place, turned 270 (bits 1-2 of its flags)")
 check(struct.unpack_from("<BBh", b, actor_at + 10) == (hero[3].index("hp"), 0, 5), "the guard's hp")
 # the grid: its head 14, its 2 slots, 9 cells (34), 9 modifiers (43), 1 to a multiple of 4, the variants (36): 80
 check(grids_at % 4 == 0 and grids_at == len(b) - 80, f"the grids from a multiple of 4: {grids_at} of {len(b)}")
@@ -135,8 +159,9 @@ g += -g % 4
 check(list(struct.unpack_from("<9I", b, g)) == [0, 0, 70000] + [0] * 6, "the variants, from a multiple of 4")
 # room2: its grid's cells numbered after room1's 9, its plate (cell 12) from link 4
 b2 = pack.blobs[blobs["SCENE_ROOM2"]][1]
-head2 = struct.unpack_from("<IHBBhhHHHHHHI", b2, 0)
-check(head2[3] == 1 and head2[10] == 1 and struct.unpack_from("<BBHH", b2, 28 + 4 + 6) == (0, 0, 12, 4), f"room2: a grid, a source {head2}")
+head2 = struct.unpack_from("<IHBBhhHHHHHHI3sB", b2, 0)
+check(head2[3] == 1 and head2[10] == 1 and struct.unpack_from("<BBHH", b2, 36 + 4 + 6) == (0, 0, 12, 4), f"room2: a grid, a source {head2}")
+check(head2[13:15] == (bytes(3), 0), f"room2: no background, no paper {head2[13:15]}")
 check(struct.unpack_from("<HhhHHHBB", b2, head2[12])[3:6] == (2, 2, 9), "room2's grid: 2 x 2, its first cell 9")
 # the links of the map, one list: the plate's two, the guard's (the event the source fires), the pit's, room2's plate's
 lb = pack.blobs[blobs["WORLD_LEVEL_LINKS"]][1]
@@ -197,6 +222,22 @@ cases["links outside a map"] = bad
 bad = copy.deepcopy(doc)
 bad["scenes"][1]["layers"][0]["objects"][0]["fires"] = {"scene": "room1", "grid": "grid", "col": 0, "row": 0}
 cases["fires of a source of no links"] = bad
+for music, fade in (("the theme", 300), (3, 300), ("theme", -1), ("theme", 70000), ("theme", "1s"), ("theme", True)):
+    bad = copy.deepcopy(doc)
+    bad["scenes"][0]["music"], bad["scenes"][0]["musicFade"] = music, fade
+    cases[f"a music {music!r}, fade {fade!r}"] = bad
+# a rotation: degrees clockwise, a multiple of 90; another, or not a number, refused
+for rotation in (45, "90", 90.0, True):
+    bad = copy.deepcopy(doc)
+    bad["scenes"][0]["layers"][0]["objects"][1]["rotation"] = rotation
+    cases[f"an actor's rotation {rotation!r}"] = bad
+    bad = copy.deepcopy(doc)
+    bad["scenes"][0]["layers"][0]["objects"][0]["rotation"] = rotation
+    cases[f"a picture's rotation {rotation!r}"] = bad
+for background in ("#14142", "14142a", "#14142g", 0x14142a):
+    bad = copy.deepcopy(doc)
+    bad["scenes"][0]["background"] = background
+    cases[f"a background {background!r}"] = bad
 for what, d in cases.items():
     try:
         packed(d)

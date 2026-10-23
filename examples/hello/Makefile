@@ -9,6 +9,7 @@ GAME_SRCS     := main/main.c
 GAME_INCLUDES := main
 GAME_EMBED    := main/assets/hello.pack
 GAME_PACK_H   := main/assets/hello_pack.h
+GAME_DEFINES  := DGX_GE_ANIM_NOW_EVENTS=4 DGX_GE_SYNTH_FM=1 # as dgx_ge_now_events, dgx_ge_synths in main/CMakeLists.txt
 # the engine's build for the computer: the engine this example lies in, or the one ESP-IDF downloaded; HOST_MK=<path>
 HOST_MK       ?= $(firstword $(wildcard ../../boards/host/host.mk managed_components/jef-sure__dgx-ge/boards/host/host.mk))
 ifeq ($(wildcard $(HOST_MK)),)
@@ -17,6 +18,7 @@ endif
 
 # the pack again when its art or its script changes (host.mk runs it before it reads the pack's header)
 GAME_PACK_MAKE   := python3 tools/hello_assets.py
-GAME_PACK_INPUTS := tools/hello_assets.py anim/bot.anim $(wildcard art/*.png)
+# and the engine's packer: a new version of a blob of it makes the pack again (= : HOST_MK is known only further down)
+GAME_PACK_INPUTS  = tools/hello_assets.py anim/bot.anim $(wildcard art/*.png) $(wildcard $(dir $(HOST_MK))../../tools/dgx_ge_*.py)
 
 include $(HOST_MK)

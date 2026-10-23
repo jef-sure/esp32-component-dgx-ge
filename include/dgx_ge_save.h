@@ -31,9 +31,11 @@ extern "C" {
  *
  * Version 3 keeps params (of records of the world, pockets, lives of cells)
  * in 32 bits, as they are; a save of version 2 kept them in 16 and is read
- * as it was made (dgx_ge_load_param).
+ * as it was made (dgx_ge_load_param). Version 4 keeps the turn of a record
+ * of the world beside its mirror (bits 2-3 of its flags); a save before it
+ * has none there, its things faced as they were saved, and is read so.
  */
-#define DGX_GE_SAVE_VERSION 3
+#define DGX_GE_SAVE_VERSION 4
 
 typedef struct dgx_ge_save {
     uint8_t *data;

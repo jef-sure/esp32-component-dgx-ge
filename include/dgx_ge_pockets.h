@@ -127,7 +127,7 @@ bool dgx_ge_pockets_stow(dgx_ge_actor_t *holder, int point);
 
 /*
  * So many things of a place laid out into the world at x, y of a scene
- * (points), facing so, sent an event (the kind's matrix: it falls, it lies,
+ * (points), facing so (orient, as dgx_ge_world_lay), sent an event (the kind's matrix: it falls, it lies,
  * it breaks; -1 none): onto a stack, beside others or into a heap as how
  * says (dgx_ge_world_lay; NULL: just there, a new object). The handle of the
  * object they went to, -1 when the world had no room (they stay in the
@@ -149,7 +149,7 @@ void dgx_ge_pockets_save(const dgx_ge_pockets_t *pockets, struct dgx_ge_save *s,
 bool dgx_ge_pockets_load(dgx_ge_pockets_t *pockets, struct dgx_ge_load *l, const char tag[4]);
 bool dgx_ge_pockets_load_check(const dgx_ge_pockets_t *pockets, const struct dgx_ge_load *l, const char tag[4]);
 
-int32_t dgx_ge_pockets_lay(dgx_ge_pockets_t *pockets, int place, int count, dgx_ge_world_t *world, int scene, int x, int y, bool flip, int event,
+int32_t dgx_ge_pockets_lay(dgx_ge_pockets_t *pockets, int place, int count, dgx_ge_world_t *world, int scene, int x, int y, unsigned orient, int event,
                            uint32_t now_ms, const dgx_ge_lay_t *how);
 
 #ifdef __cplusplus

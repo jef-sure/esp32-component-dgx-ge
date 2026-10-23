@@ -56,14 +56,14 @@ the CYD with ESP-IDF 6.0.1. The output quoted below comes from those runs
 | the scene graph and maps | which scene leads where; a map's rules (a script); its links (a plate opens a gate) | blobs `<GRAPH>`, `<GRAPH>_<MAP>_RULES`, `<GRAPH>_<MAP>_LINKS` | `dgx_ge_graph.h`, `dgx_ge_links.h` |
 | dialogs and translations | `.dlg` texts; `.po` files of the language chosen | a blob a dialog, the strings in one blob `STRINGS` | `dgx_ge_dialog.h`, `dgx_ge_talk_view.h` |
 | styles, fonts | how a dialog looks; which fonts the game needs | a blob `STYLES`; the font requests in a file beside the pack | `dgx_ge_talk_view.h`; DGX's `dgx_font_<name>()` |
-| the game's numbers | constants, timers, sounds, shows, chases, crops, crowds, text fields | blobs `GAME`, `TIMERS`, `SOUNDS`, `CHASE`, one a show, one a crowd; crops are pictures | `dgx_ge_game.h`, `dgx_ge_timers.h`, `dgx_ge_mixer.h`, `dgx_ge_show.h`, `dgx_ge_chase.h`, `dgx_ge_crowd.h` |
+| the game's numbers | constants, variables, timers, sounds, shows, chases, crops, crowds, text fields | blobs `GAME`, `VARIABLES`, `TIMERS`, `SOUNDS`, `CHASE`, one a show, one a crowd; crops are pictures | `dgx_ge_game.h`, `dgx_ge_timers.h`, `dgx_ge_mixer.h`, `dgx_ge_show.h`, `dgx_ge_chase.h`, `dgx_ge_crowd.h` |
 | raw blobs | bytes only the game makes sense of | a blob | `dgx_ge_pack_blob` |
 
 The code of a game is C, and the engine's rule is to keep it small: as much as
 possible as data, as little special C as possible. What typically stays C:
 
 - the board and the frame: which display, how large the frame is shown
-  (`dgx_ge_board.h`, `dgx_ge_frame_create`, `dgx_ge_frame_scale`);
+  (`dgx_ge_board.h`, `dgx_ge_frame_fit`);
 - the loop and the clock: read the input, move the actors on to now, draw;
 - what the input means: buttons and touches made events of actors;
 - the answers to what scripts say (`say`): play a sound, count a signal,
@@ -199,9 +199,9 @@ The methods, each described in full in its docstring:
 | Method | What it adds |
 | --- | --- |
 | `Pack("MYGAME")` | a pack; the prefix begins every name of the header (capitals, digits, `_`) |
-| `add_set(name, colors)` | a set of colors, RGB; returns its number |
-| `add_png(name, set, path, origin=…)` | a picture from a PNG of a palette: its colors found in the set by RGB (a color the set lacks: the nearest, with a warning), or `by_index=True` as they are; origin `"bottom-left"` (default), `"top-left"` or `(x, y)` |
-| `add_image(name, set, w, h, values, bits)` | a picture from values, made by the script itself |
+| `add_set(name, colors)`, `add_set(name, palette=…)` | a set of colors, RGB; returns its number. `palette`: instead of colors, a ready palette by name (`nes`, `gameboy`, `pico8` of the engine's `tools/palettes/`, or a document's `palettes`, which go first) or as colors: the set holds those of its colors its pictures take, in the palette's order |
+| `add_png(name, set, path, origin=…)` | a picture from a PNG of a palette: its colors found in the set by RGB (a color the set lacks: the nearest, with a warning), or `by_index=True` as they are; in a set of a ready palette every color is brought to the palette's nearest (CIE76) and `write` warns how many were and the farthest; origin `"bottom-left"` (default), `"top-left"` or `(x, y)` |
+| `add_image(name, set, w, h, values, bits)` | a picture from values, made by the script itself; in a set of a ready palette they are the numbers of the palette's colors, 1 its first |
 | `add_mask`, `name_mask`, `add_meets` | collision masks of a picture, their names, which of them meet |
 | `add_point(image, name, x, y, z)` | a named point of a picture (a hand) |
 | `add_constants(**names)` | names of numbers the scripts and dialogs write; the C reads them as `<P>_<NAME>` |
@@ -209,8 +209,12 @@ The methods, each described in full in its docstring:
 | `add_tileset(name, w, h, tiles, slots)` | a set of tiles and their rules |
 | `add_links`, `add_graph(Graph)` | a map's links; a graph of scenes (`tools/dgx_ge_graph.py`) |
 | `add_game(**numbers)` | the game's constants, read in C by place |
+| `add_variable(name, value)` | a variable of the game and the value it begins with: `game_var.<name>` in scripts and dialogs, `<P>_GAME_VAR_<NAME>` in C; before the scripts and dialogs that name it |
 | `add_timer(name, once=/every=/until=…)` | a timer of the game |
 | `add_sound(name, wav= or samples=, rate=…)` | a sound by name and number; with no samples, a name only |
+| `add_music(name, text, path, synth=None)` | a music by notes, its text in MML (overview-en.md, 2.16), by name and number (`<P>_MUSIC_<NAME>`); with no text, a name only. `synth`: its synthesizer (`chip`, `nes`, `fm`) unless the text says its own (`#synth`); not given, the project's |
+| `set_music_synth(synth)` | the project's synthesizer of music, `fm` unless said (a document's `synth`) |
+| `add_music_set(name, text, path)` | a set of instruments of the project (`#synth` and instruments only), which a song takes by `#set <name>`; before the engine's sets (`tools/music_sets/`) of the same name |
 | `add_show`, `add_crowd`, `add_chase`, `add_crop` | a cut scene, a crowd, how a kind chases, a part of a picture as a picture |
 | `translate(po)`, `add_dialog(text, path)` | the language of the pack; a dialog |
 | `add_style(name, **fields)`, `add_font(name, …)`, `add_field(name, size)` | how dialogs look; a font the game needs; a text field a dialog edits |
@@ -251,6 +255,9 @@ mygame/game_data/
   HERO.anim                the script of the set HERO (a kind), by the set's name
   dialogs/hello.dlg        the dialogs, every .dlg of this folder
   po/ru.po                 the translation, when the pack's language is ru
+  sounds/step.wav          the samples of a sound the document names, by its name
+  music/theme.mml          the notes of a music the document names (its music)
+  music/sets/bells.mml     a set of instruments the songs may take (#set bells)
 ```
 
 A small document of a whole scene:
@@ -291,13 +298,16 @@ The format in outline, key by key:
 | `format`, `formatVersion` | `"dgx-ge-sprites"`, 1; anything else is refused |
 | `masks`, `meets` | the names of mask indices (`<PREFIX>_MASK_<NAME>`); which masks meet, as `add_meets` text |
 | `constants` | `add_constants`: names of numbers for the scripts and dialogs, and `<PREFIX>_<NAME>` for the C |
-| `sets` | a set of colors each; its `frames` pictures `<SET>_<FILE>` (or a frame's `packName`) with `origin`, drawn `masks` (rows of hex), `points`; `defaultMask`: a mask made of a picture's own pixels where none is drawn |
-| `palettes` | sets of colors with no pictures, named as sets |
+| `variables` | `[{"name", "value"}]`, numbered in this order: `add_variable` each, before the dialogs and scripts of the document |
+| `sets` | a set of colors each, or of a ready palette when it says `palette` (`"nes"`, `"gameboy"`, `"pico8"`, or the name of one of the document's `palettes`); its `frames` pictures `<SET>_<FILE>` (or a frame's `packName`) with `origin`, drawn `masks` (rows of hex), `points`; `defaultMask`: a mask made of a picture's own pixels where none is drawn |
+| `palettes` | sets of colors with no pictures, named as sets; a set's `palette` may name one |
 | `tilesets` | `add_tileset`: tiles and their pieces, which name pictures by set and file; a piece's `layer` becomes a slot |
 | `styles` | `add_style`, in the editor's key names (`scrollMs`, `letterMs`, `colors.fill`, …) |
-| `game`, `timers`, `sounds`, `crops`, `shows`, `chases` | `add_game`, `add_timer`, `add_sound` (names only), `add_crop`, `add_show`, `add_chase` |
+| `game`, `timers`, `sounds`, `crops`, `shows`, `chases` | `add_game`, `add_timer`, `add_sound` (a name, its samples from `sounds/<name>.wav` beside the document if there is one), `add_crop`, `add_show`, `add_chase` |
+| `music` | the names of the musics: `add_music` with the text of `music/<name>.mml` beside the document, a name only when there is no such file; a song's `#set <name>` takes the set `music/sets/<name>.mml` beside the document, or the engine's |
+| `synth` | the project's synthesizer of music: `"fm"` (unless said), `"chip"` or `"nes"` (`set_music_synth`); a song may say its own (`#synth`) |
 | `screen` | `<PREFIX>_SCREEN_WIDTH`, `_HEIGHT` |
-| `scenes` | a blob `SCENE_<NAME>` each: layers, objects of type `picture`, `actor`, `zone`, `entry`, grids of tiles; exits, links, a map |
+| `scenes` | a blob `SCENE_<NAME>` each: its paper (`background`, `"#rrggbb"`; none when not given), its music (`music`: a music's name, or `"stop"` for silence; none: what plays goes on; `musicFade`, ms, 500 when not given), layers, objects of type `picture`, `actor` (each with `flip` and `rotation`), `zone`, `entry`, grids of tiles; exits, links, a map |
 | `graph`, `maps` | the graph of scenes and its maps (`add_graph`), a map's rules from `<rules>.anim` beside the document |
 
 Keys the packer does not know are left alone, so an editor may keep its own
@@ -307,23 +317,35 @@ there. A few rules a writer of such documents should know:
   they are, its palette gives their colors, and the frames of one set must
   agree: a value that is red in one PNG and green in another is refused. Value
   0 is transparent. A set whose pictures use no value above 15 is 4-bit, else
-  8-bit.
+  8-bit. A set of a ready palette (`palette`) is the other way: there the
+  colors count, not the values. Every color a frame uses is brought to the
+  nearest of the palette, the frames need not agree on their values, and the
+  set holds the palette's colors they took, in the palette's order (its color
+  numbers, which a tile's piece may name, are those). The packer warns once
+  for the set how many colors of its frames were not the palette's and the
+  farthest, by picture.
 - **Names.** A picture is `<SET>_<FILE>` in capitals (`HERO/stand.png` is
   `HERO_STAND`, `MYGAME_IMG_HERO_STAND` in the header), the name the scripts use
   too. Scene objects are named in the header by scene and kind:
   `MYGAME_SCENE_ROOM_ACTOR_HERO`.
 - **Scripts.** A set with a `<SET>.anim` beside the document is a kind; all
   of them are added together, so they know each other whatever their order.
+- **Facing.** A scene's `picture` and `actor`, and a show's pictures and
+  actors, say how they lie: `"flip": true` mirrored (an actor faces left),
+  `"rotation"` then turned clockwise, 0, 90, 180 or 270 degrees (any whole
+  multiple of 90, -90 being 270; none: 0). Any other rotation is refused. A
+  crowd's group (`add_crowd`) takes a `"rotation"` too, or `"any"` for one of
+  the four by the crowd's dice.
 - **The language.** `pack.language = "ru"` before `add_sprites` makes it read
   `po/ru.po` before the dialogs; with no language the dialogs keep their
   msgids.
 
 ### 2.3. Both: a document and a script
 
-An editor does not hold everything. `add_sprites` takes no sound samples (a
-document names sounds, but has no samples for them), no font requests, no text
-fields, no crowds and no blobs of the game's own. The third way is a script
-that reads the document first and adds what the document lacks. That is what a
+An editor does not hold everything. `add_sprites` takes no font requests, no
+text fields, no crowds and no blobs of the game's own, and of the sounds' samples
+only those whose files lie in `sounds/` beside the document. The third way is a
+script that reads the document first and adds what the document lacks. That is what a
 game made in an editor normally has, `tools/pack.py`:
 
 ```python
@@ -357,11 +379,19 @@ size = pack.write(os.path.join(out, "mygame.pack"), os.path.join(out, "mygame_pa
 print(f"mygame.pack: {size} bytes")
 ```
 
-A sound the document only names (its `sounds`) gets its samples from the
-script: a later `add_sound` of the same name gives them to it, at the number
-the document gave it, so `sound 0` of a script still means the same sound. A
-sound that already has samples is refused a second time (`ValueError: sound
-STEP twice`).
+A sound the document names (its `sounds`) takes its samples from
+`sounds/<name>.wav` beside the document when that file is there, read as
+`add_sound(name, wav=…)` reads it with nothing more: mono, IMA ADPCM, played
+once, at the loudness of the recording. A sound with no such file is only a
+name, and the script may give it samples: a later `add_sound` of the same
+name gives them to it, at the number the document gave it, so `sound 0` of a
+script still means the same sound. A sound whose file was taken from
+`sounds/` is refused a later `add_sound` (`ValueError: sound STEP: its samples
+are taken from …/sounds/STEP.wav beside the document already`): two sources
+for one sound would leave it unclear which one plays. A sound that has to go
+round or be quieter keeps its file elsewhere and is given by the script with
+those options. A sound that already has samples is refused a second time
+too (`ValueError: sound STEP twice`).
 
 ### 2.4. Why not write the pack directly
 
@@ -402,15 +432,21 @@ translation that shows a `{name}` its line does not have. Others: a
 picture whose value has no color in its set, the frames of a set that disagree
 on a color, two names that make the same name of the header (`stand-1` and
 `stand_1`), a blob named like one the packer makes itself (`STRINGS`, `GAME`,
-`TIMERS`, `STYLES`, `CHASE`, `SOUNDS`), a constant whose header name is
-another thing's or whose value is not a whole number, a sound given samples
-twice, a timer read and never described.
+`TIMERS`, `STYLES`, `CHASE`, `SOUNDS`, `VARIABLES`), a constant whose header name is
+another thing's or whose value is not a whole number, a variable named like a
+constant, a number of the game or a question, a `game_var.` never declared, a
+sound given samples twice, a timer read and never described.
 Every one of them would otherwise be a game misbehaving on a board; here it is
 a line to fix before anything is built.
 
 What is only likely to be a mistake is a warning, printed by `write`, and the
 pack is made anyway: a color of a PNG that its set does not have, taken as the
-nearest one.
+nearest one; the colors of a set of a ready palette its pictures were not
+drawn in, once for the set, with how many there were and the farthest
+(`set SHIP: 3 colors of its pictures not in palette nes, each taken as the
+nearest; the farthest (200, 0, 0) of …/one.png as (163, 24, 0), distance
+16.7 (CIE76)`). A distance under 5 is hard to see; one of 20 and more is
+another color, which the artist should draw again in a color of the palette.
 
 ---
 
@@ -430,7 +466,7 @@ nearest one.
 kilobytes of RAM and megabytes of flash, so nothing of the pack is copied:
 `dgx_ge_pack_open` checks its header and keeps a pointer, a picture is a
 pointer to its pixels, a blob a pointer and a size. The pack of `mygame` with
-the scene, a dialog and a sound is 3512 bytes. Its fingerprint,
+the scene, a dialog and a sound is 3520 bytes. Its fingerprint,
 `dgx_ge_pack_id`, is what a saved game is tied to: a save made with one pack
 is refused by a game with another, so a changed picture makes old saves
 unreadable, rightly, since their numbers may mean other things now.
@@ -464,14 +500,19 @@ begins so:
 #define MYGAME_BLOB_COUNT 7
 ```
 
-The families of names:
+(After `MYGAME_SET_COUNT` the header also gives `MYGAME_SET_COLOR_COUNT`:
+the colors of all the sets together, the bytes their maps take; section 5.)
+
+The kinds of names:
 
 | Name | What |
 | --- | --- |
 | `<P>_SET_<NAME>`, `<P>_IMG_<NAME>`, `<P>_BLOB_<NAME>`, each with `_COUNT` | sets, pictures, blobs (a kind's script, a dialog, a scene, a tileset are blobs) |
+| `<P>_SET_COLOR_COUNT` | the colors of all the sets together: the bytes of their maps (`dgx_ge_frame_pack_colors`) |
 | `<P>_<KIND>_SCRIPT_<s>`, `_EVENT_<e>`, `_PARAM_<p>`, `_GAME_<q>` | a kind's scripts, events, params, questions to the game |
 | `<P>_EVENT_<e>` | the pack's events, one number for every kind |
 | `<P>_GAME_<NAME>`, `<P>_TIMER_<NAME>`, `<P>_SOUND_<NAME>` | the game's constants, timers, sounds |
+| `<P>_GAME_VAR_<NAME>`, `<P>_GAME_VAR_COUNT` | the game's variables: their numbers in its store (`dgx_ge_vars_t`), how many |
 | `<P>_<NAME>` | the names of numbers the scripts write (`add_constants`, a document's `constants`), with the number itself |
 | `<P>_MASK_<NAME>`, `<P>_POINT_<NAME>` | masks and points |
 | `<P>_<TILESET>_TILE_<t>`, `_SLOT_<s>` | tiles (from 1; 0 is empty) and slots |
@@ -564,7 +605,7 @@ After one changed line of `HERO.anim`, `idf.py build` showed:
 
 ```text
 [0/1] Re-running CMake...
-mygame.pack: 3512 bytes
+mygame.pack: 3520 bytes
 …
 [7/13] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj
 ```
@@ -578,7 +619,7 @@ it includes `host.mk`:
 ```make
 # the pack made again, before its header is read, whenever one of its inputs is newer than the header
 GAME_PACK_MAKE   := python3 tools/mygame_pack.py $(ENGINE)
-GAME_PACK_INPUTS := tools/mygame_pack.py $(wildcard anim/*.anim art/*.png)
+GAME_PACK_INPUTS := tools/mygame_pack.py $(wildcard anim/*.anim art/*.png $(ENGINE)/tools/dgx_ge_*.py)
 
 include $(ENGINE)/boards/host/host.mk
 ```
@@ -587,6 +628,9 @@ When one of `GAME_PACK_INPUTS` is newer than `GAME_PACK_H` (or there is no
 header yet), `host.mk` runs `GAME_PACK_MAKE` as it is read, then takes the
 params from the new header; `make clean` never runs it. For a document the
 inputs are its folder, `$(shell find game_data -type f)`, and the script.
+The engine's packer (`$(ENGINE)/tools/dgx_ge_*.py`) is an input too: a new
+engine that writes a blob in a new version makes the pack again, and the
+engine reads only its own version.
 After four params were added to `hero.anim`, one `make` did it all:
 
 ```text
@@ -623,11 +667,12 @@ the engine (the whole of the loop and its reasons are in
 2. **The pack**: the build embeds it, and the game takes its bytes by the
    symbols of the file's name, `_binary_mygame_pack_start` and `_end`, then
    `dgx_ge_pack_open`.
-3. **The frame**: `dgx_ge_frame_create` on the screen, at the game's own size
-   (320x200 points), `dgx_ge_frame_scale` to show it larger on a large
-   display, `dgx_ge_frame_band` as the board asks. Every set's colors go into
-   the frame once (`dgx_ge_frame_add_colors`), which gives a map of each set's
-   values to the frame's indices.
+3. **The frame**: `dgx_ge_frame_fit(board.lcd, 320, 200, 0, board_band)`
+   makes it at the game's own size (320x200 points), as large as the display
+   shows it whole, in the middle of the display, sent as the board asks. The
+   colors of all the sets go into the frame at once
+   (`dgx_ge_frame_pack_colors`), which gives each set a map of its values to
+   the frame's indices, `map_of[set]`.
 4. **The scene**: `dgx_ge_scene_create(frame, layers, set, actors)`; its set
    (what does not move) given once, by hand (`dgx_ge_scene_add`) or as a
    document laid it (`dgx_ge_layout_open`, `dgx_ge_layout_scene`).
@@ -640,10 +685,11 @@ the engine (the whole of the loop and its reasons are in
 6. **The loop**: the input (`dgx_ge_input_update(&input, board_buttons())`),
    then every actor moved on to now (`dgx_ge_actor_advance`), then the
    decisions, sent as events (`dgx_ge_actor_event`), then the frame's actors
-   (`dgx_ge_scene_actors_begin`, `dgx_ge_scene_actor`) and
+   (`dgx_ge_scene_actors_begin`, `dgx_ge_scene_show_actor`) and
    `dgx_ge_scene_render`, which draws what changed and sends it. At the end
-   `vTaskDelay`, at least one tick: on a board other tasks need it, and on
-   the computer that is where the window is shown and the input read.
+   `board_pace`: the rest of the step waited, and at least one tick given up
+   (on a board other tasks need it, and on the computer that is where the
+   window is shown and the input read).
 7. **`say`**: what scripts tell the game as their steps are made comes to one
    function of the game, `say(actor, what, value, at_ms, ctx)`: a sound
    (`DGX_GE_ANIM_SOUND`), a signal (`DGX_GE_ANIM_SIGNAL`), a shot, an actor
@@ -659,7 +705,7 @@ about 150 lines):
 #include "dgx_ge_layout.h"
 #include "dgx_ge_pockets.h"
 #include "dgx_ge_talk_view.h"
-/* … the other headers of the engine, esp_timer.h, freertos/task.h */
+/* … the other headers of the engine (dgx_ge_glue.h among them), esp_timer.h */
 
 extern const uint8_t pack_start[] asm("_binary_mygame_pack_start");
 extern const uint8_t pack_end[] asm("_binary_mygame_pack_end");
@@ -675,7 +721,7 @@ void app_main(void)
     board_t board;
     if (!board_display_init(&board)) return;
     if (!dgx_ge_pack_open(&pack, pack_start, (size_t)(pack_end - pack_start))) return;
-    /* … the frame, the scene of 3 layers, every set's colors into the frame: maps[set], map_of[set] */
+    /* … the frame (dgx_ge_frame_fit), the scene of 3 layers, every set's colors into the frame (dgx_ge_frame_pack_colors: map_of[set]) */
 
     /* the scene as the document lays it: its layers and pictures, its actor started by its name */
     size_t         size;
@@ -700,24 +746,25 @@ void app_main(void)
     dgx_ge_talk_view_init(&view, styles, size, frame, fonts, MYGAME_FONT_COUNT);
     /* … dgx_ge_strings_open (MYGAME_BLOB_STRINGS), dgx_ge_dialog_open (MYGAME_BLOB_HELLO) */
     dgx_ge_actor_t *const cast[1] = {[MYGAME_HELLO_ROLE_HERO] = &hero};
-    dgx_ge_talk_start(&talk, &hello, &(dgx_ge_cast_t){.roles = cast}, MYGAME_STYLE_TALK, now, say, NULL);
+    /* the talk's moment and the world's: one and the same here, nothing stops the world */
+    dgx_ge_talk_start(&talk, &hello, &(dgx_ge_cast_t){.roles = cast}, MYGAME_STYLE_TALK, now, now, say, NULL);
 
     dgx_ge_input_t input = {0};
     for (;;) {
         const int64_t t0 = esp_timer_get_time();
         now              = (uint32_t)(t0 / 1000);
         dgx_ge_input_update(&input, board_buttons());
-        dgx_ge_talk_view_play(&view, &talk, &strings, now);
+        dgx_ge_talk_view_play(&view, &talk, &strings, now, now);
         dgx_ge_actor_advance(&hero, now, say, NULL);
         const bool on = (input.held & DGX_GE_KEY_RIGHT) && dgx_ge_actor_x(&hero) < FRAME_W - edge;
         dgx_ge_actor_event(&hero, on ? MYGAME_HERO_EVENT_GO : MYGAME_HERO_EVENT_HALT, now, say, NULL);
 
         dgx_ge_scene_actors_begin(scene);
-        /* … the hero as an item of the frame: its picture (hero.image), its place, the map of its set */
+        static dgx_image_t hero_picture; /* the hero as an item of the frame: its picture, its place, the map of its set */
+        dgx_ge_scene_show_actor(scene, &hero, LAYER_ACTORS, &pack, map_of, &hero_picture);
         dgx_ge_talk_view_show(&view, &talk, scene, LAYER_TALK);
         dgx_ge_scene_render(scene);
-        const int64_t spent = esp_timer_get_time() - t0;
-        vTaskDelay(spent < 20000 ? pdMS_TO_TICKS((20000 - spent) / 1000) + 1 : 1);
+        board_pace(t0, 20000); /* a pass every 20 ms at most, a tick given up at least */
     }
 }
 ```
@@ -759,7 +806,8 @@ idf.py add-dependency "jef-sure/dgx-ge"
 idf.py add-dependency "jef-sure/dgx-di"
 ```
 
-The version to ask for is the one the engine's [README](../README.md) names.
+With no version they are the newest; `dependencies.lock` keeps the versions taken until `idf.py
+update-dependencies`.
 The boards with an ESP32-P4 need two more components (their sound chip, the
 7"'s touch panel); `examples/hello/main/idf_component.yml` lists them.
 
@@ -809,6 +857,10 @@ idf_component_register(
 )
 # the params an actor keeps, as many as the pack's animations need
 dgx_ge_params_of_pack(assets/mygame_pack.h)
+# the events at once an actor's own step may send, waiting in turn: the engine's default, said aloud
+dgx_ge_now_events(4)
+# the synthesizers of music the firmware carries: the engine's default, said aloud
+dgx_ge_synths(fm)
 # the fonts the pack asks for, made by DGX for this board's display at the frame's scale
 dgx_ge_fonts(assets/mygame.fonts)
 dgx_fonts_board(PIXELS ${BOARD_PIXELS} MM ${BOARD_MM})
@@ -825,6 +877,8 @@ Why each piece:
 | `board.cmake` | the board's file (`BOARD_SRCS`: a file of `main`'s build directory that includes the board's file, so that `main` builds no file of the engine's directory, which ESP-IDF 6 would warn of), the components it needs (`BOARD_REQUIRES`), its display in pixels and millimetres. `dgx_ge_board.h` comes with the engine itself; `BOARD_INCLUDE_DIRS` is empty and kept only for games that name it |
 | `EMBED_FILES` | the pack in the firmware's flash; `mygame.pack` gives the symbols `_binary_mygame_pack_start` and `_end` |
 | `dgx_ge_params_of_pack` | `DGX_GE_ANIM_PARAMS` for the whole build, from the header (section 3) |
+| `dgx_ge_now_events` | `DGX_GE_ANIM_NOW_EVENTS` for the whole build: how many `now` events the game may send to an actor from that actor's own step, taken in turn (animation-en.md, section 4); 2 bytes a place in every actor; 1 to 255, 4 if not said. The number is written out so the reader sees where it is set |
+| `dgx_ge_synths` | `DGX_GE_SYNTH_<NAME>=1` for the whole build: the synthesizers of music the firmware carries (`chip`, `nes`, `fm`, those the songs play on; overview-en.md, 2.16); the others are not in the flash, a song of one of them plays nothing. FM alone if not said; written out so the reader sees where it is set |
 | `dgx_ge_fonts` and DGX's `dgx_fonts_*` | the game's font requests handed to DGX with the display, the frame's scale and the rules of which faces may be taken; DGX makes them at build time, `dgx_font_<name>()` each. A game without fonts of its own leaves these out |
 
 Then:
@@ -852,7 +906,7 @@ that picks the target and the list of defaults, handed to
 `examples/hello/CMakeLists.txt` does with `HELLO_BOARD`
 (`idf.py -B build-p4 -D SDKCONFIG=build-p4/sdkconfig -D HELLO_BOARD=jc8012p4a1c build`).
 A board the engine does not have is the game's own: a file that implements
-`dgx_ge_board.h`, or a DGX screen given straight to `dgx_ge_frame_create`.
+`dgx_ge_board.h`, or a DGX screen given straight to `dgx_ge_frame_fit`.
 
 **The engine from a checkout.** To build against a clone of the engine
 instead of the registry's, name it in `main/idf_component.yml`
@@ -874,6 +928,7 @@ GAME_SRCS        := main/main.c
 GAME_INCLUDES    := main
 GAME_EMBED       := main/assets/mygame.pack
 GAME_PACK_H      := main/assets/mygame_pack.h
+GAME_DEFINES     := DGX_GE_ANIM_NOW_EVENTS=4 DGX_GE_SYNTH_FM=1 # as dgx_ge_now_events, dgx_ge_synths in main/CMakeLists.txt
 GAME_FONTS       := main/assets/mygame.fonts
 GAME_FONT_RULES  := fonts.rules
 HOST_DISPLAY     ?= 320x240
@@ -881,7 +936,7 @@ HOST_MM          ?= 58x43
 ENGINE           ?= managed_components/jef-sure__dgx-ge
 # the pack made again before its header is read (section 4)
 GAME_PACK_MAKE   := python3 tools/pack.py $(ENGINE) ru
-GAME_PACK_INPUTS := tools/pack.py $(shell find game_data -type f)
+GAME_PACK_INPUTS := tools/pack.py $(shell find game_data -type f) $(wildcard $(ENGINE)/tools/dgx_ge_*.py)
 
 include $(ENGINE)/boards/host/host.mk
 ```
@@ -988,7 +1043,9 @@ after a change of the data.
 | --- | --- | --- |
 | the packer | `AnimError`, `DialogError`, `ValueError` with a file and a line | a name that does not exist, two rules in conflict, a missing picture (2.5); fix the data |
 | the packer | `ModuleNotFoundError: No module named 'PIL'` | the pack script ran under ESP-IDF's Python; run it with the system's `python3`, and let the build find that one (section 4) |
+| the packer | `ValueError: set SHIP: no palette 'c64'; there are gameboy, nes, pico8` | a set names a palette neither the project (a document's `palettes`) nor the engine (`tools/palettes/`) has: take one of those named, or add it to the document's `palettes` |
 | the packer | `ValueError: sound STEP twice` | samples given to one sound twice (by two `add_sound` calls with samples); a sound the document only names takes them once (2.3) |
+| the packer | `ValueError: sound STEP: its samples are taken from …/sounds/STEP.wav beside the document already` | the script gives samples to a sound whose file `add_sprites` took from `sounds/`: drop that `add_sound`, or keep the file elsewhere (2.3) |
 | the build, configuring | `the pack could not be made (tools/mygame_pack.py, see above)` | the game's own message: the packer's error is printed above it |
 | the build, configuring | `include could not find requested file: …/boards/cyd/board.cmake` | the engine is not where `MYGAME_ENGINE` points, or the engine downloaded is older than this document, whose boards had another layout |
 | the build, configuring | `CMake Warning`s: `Source file '…/boards/cyd/cyd.c' belongs to component dgx-ge but is being built by component main` | ESP-IDF 6 says so when `main`'s build directory lies inside the engine's directory: an example built inside the engine's own repository. A game with the engine in `managed_components/`, or an example made from the registry, has none: `board.cmake` hands `main` a file of its own build directory that includes the board's file. Harmless either way |

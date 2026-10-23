@@ -13,23 +13,45 @@ The language, a statement a line, '#' to the end of a line is a comment:
                                     (0 outside the table); declared before they are read
     game distance sees              questions to the game, by number in this order: game.distance in expressions,
                                     the game's answer at the moment of the step (dgx_ge_expr_ask)
+    (the game's variables are the pack's, Pack.add_variable: game_var.score in expressions, the engine's store of
+    them as it is at the moment of the step, dgx_ge_game_vars; none is declared here)
 
     script stand                    an entry point: a row of the matrix
         set action 0                a param of the actor given a value
         add hp -1                   a param changed by so much (it stops at the ends of 16 bits)
+        set game_var.volume 3       a variable of the game (Pack.add_variable) given a value, worked out now;
+        add game_var.score 10       changed by so much (both stop at the ends of 32 bits, as params): the game
+                                    is told (DGX_GE_ANIM_VAR); goto best if game_var.score > 1000 reads one
         frame KID_415 83ms          a picture for a time: a name of the pack, or a number the game draws by
         frame KID_416 83ms at 2,-1  the picture moved from the actor: forward, down
         frame none 100ms            nothing shown for a time (the actor's picture -1: hidden)
         frame (DAGGERS_1 + amount - 1) 1000ms   the picture worked out now, an expression in
                                     parentheses (pictures of the pack are names in it); amount:
                                     how many the actor is, a stack lying
+        frame none (speed)ms        the time an expression too, worked out as the frame begins (a step of
+                                    the speed it has then): below 1 it is 1 ms, above 65535 it is 65535;
+                                    of constants it is a number, as always (frame KID_415 TICK_MS)
         dx 3                        move forward (back when negative), pixels
         dy -2                       move down (up when negative)
-        flip                        turn round
+        flip                        turn round (mirrored: facing the other way than its pictures)
+        rotate 90                   turned by so many degrees clockwise (anticlockwise when negative), an expression:
+                                    to the nearest multiple of 90 (a half away from zero: 45 is 90, -45 is -90), round
+                                    the circle (-90 is 270); rotate to 180: into that turn (rotate to (dir * 90), rotate
+                                    to game_var.facing). The picture is drawn so, and everything said in the actor's
+                                    axes turns with it: x forward, y down of its pictures (dx, dy, velocity, accel, a
+                                    path, frame ... at, points, masks, front and back, sense); the scene does not.
+                                    rotation: the turn now, 0, 90, 180 or 270 (goto up if rotation == 270)
         velocity 40 0               pixels a second, x forward
         accel 0 300                 pixels a second a second
         signal 3                    tell the game, 0..255
         sound 1                     a sound, 0..255
+        music theme                 a music of the pack for the game to play (Pack.add_music; the same one
+                                    playing goes on); music stop: none; music theme 500ms: the one playing
+                                    fades out over 500 ms, then theme comes in as long (music stop 1s too)
+        music volume 30% 500ms      the music's level by design, of its volume (the player's), reached over
+                                    the time (none: at once); music volume 100% 500ms: back
+        goto waiting if music >= 0  music: the music playing now, its number, -1 none (the game gives
+                                    its output of sounds, dgx_ge_expr_sound): wait for one to end
         masks 0 2                   the masks of collisions active from now, 0..15; a mask, here as in contact
                                     and hit, may be named as the pack names it (masks BODY TIP, as in its meets)
         carry hand SWORD_3          what is held at a point of the pictures from now (none: nothing):
@@ -113,7 +135,7 @@ import struct
 from collections import namedtuple
 
 MAGIC = 0x4E414744  # "DGAN"
-VERSION = 10
+VERSION = 11
 PARAMS_MAX = 255  # the blob; the runtime keeps DGX_GE_ANIM_PARAMS of them an actor
 
 OP = {
@@ -122,7 +144,11 @@ OP = {
     "PATH": 17, "VELOCITY_X": 18, "ACCEL_X": 19, "SET_X": 20, "ADD_X": 21, "CONTACT": 22, "HITS": 23, "CARRY": 24, "RELEASE": 25, "TELL": 26, "SHOOT": 27,
     "STOW": 28, "DRAW": 29, "GOTO_IF": 30, "KEEP": 31, "FRAME_X": 32, "TIMER": 33, "CELL": 34, "PRESS": 35, "CLEAR": 36,
     "APPEAR": 37, "VANISH": 38, "CONTACT_MASK": 39, "SENSE": 40, "STEER": 41, "APPEAR_WITH": 42, "CONTACT_FIRST": 43,
+    "FRAME_MS": 44,
+    "MUSIC": 45, "MUSIC_LEVEL": 46, "SET_VAR": 47, "ADD_VAR": 48, "ROTATE": 49, "ROTATE_X": 50,
 }
+ROTATE_TO = 4  # the bit of ROTATE and ROTATE_X: into the turn, not by it
+MUSIC_STOP = 255  # music stop: the number of no music
 # the ways of steer: its number, how many numbers before to/from (speed, force[, radius or spread]), the word, how many after it
 STEER = {"seek": (0, 2, "to", 2), "flee": (1, 2, "from", 2), "arrive": (2, 3, "to", 2), "pursue": (3, 2, "to", 4),
          "evade": (4, 2, "from", 4), "wander": (5, 3, "angle", 1)}
@@ -135,7 +161,8 @@ EXPR = {"num": 1, "param": 2, "t": 3, "+": 4, "-": 5, "*": 6, "/": 7, "neg": 8,
         "<": 19, "<=": 20, ">": 21, ">=": 22, "==": 23, "!=": 24, "and": 25, "or": 26, "not": 27, "now": 28, "count": 29, "amount": 30,
         "%": 31, "&": 32, "|": 33, "rnd": 34, "timer": 35, "?": 36, "x": 37, "y": 38, "smoothstep": 39,
         "xor": 40, "bits": 41, "bit": 42, "bitfield": 43, "table": 44, "its": 45, "game": 46,
-        "and_then": 47, "or_else": 48, "truth": 49, "if_not": 50, "jump": 51, "axis": 52}
+        "and_then": 47, "or_else": 48, "truth": 49, "if_not": 50, "jump": 51, "axis": 52, "music": 53, "game_var": 54,
+        "rotation": 55}
 COMPARE = ("<", "<=", ">", ">=", "==", "!=")
 VELOCITY_NAMES = ("vx", "vy")  # the velocity of the actor now, points a second, x forward
 POSITION_NAMES = ("x", "y")    # where the actor is now, points of the scene (x not forward: as it stands in the scene)
@@ -144,9 +171,9 @@ FUNCS = {"min": 2, "max": 2, "abs": 1, "sin": 1, "cos": 1, "sqrt": 1, "exp": 1, 
 FUNC_OPS = {"field": "bitfield"}  # a name of the language whose step is named otherwise ("field" is the step of a word's field)
 UNFOLDED = ("rnd",)  # never worked out at assembly: the dice of the game, cast anew every time
 AXES = ("lx", "ly", "rx", "ry", "lt", "rt")  # axis(NAME): the axes of a pad in the order of DGX_GE_AXIS_* (dgx_ge_input.h)
-WORDS = ("and", "or", "not", "its", "game")  # of the language: no name may be one
+WORDS = ("and", "or", "not", "its", "game", "game_var")  # of the language: no name may be one
 # what its. names beyond the params of the one a sense found, by what it is: a body (an actor) or a cell
-ITS_BODY = {"vx": 0xF0, "vy": 0xF1, "image": 0xF2, "script": 0xF3, "flip": 0xF4}
+ITS_BODY = {"vx": 0xF0, "vy": 0xF1, "image": 0xF2, "script": 0xF3, "flip": 0xF4, "rotation": 0xF8}
 ITS_CELL = {"tile": 0xF5, "mod": 0xF6, "cell": 0xF7}
 STACK_MAX = 16  # the runtime's stack of an expression
 
@@ -195,7 +222,8 @@ class Expr:
     One of constants alone is worked out here.
     """
 
-    def __init__(self, text, defines, params, allow_t, where, fields=None, actor=True, kinds=None, timers=None, tables=None, its=None, games=None):
+    def __init__(self, text, defines, params, allow_t, where, fields=None, actor=True, kinds=None, timers=None, tables=None, its=None, games=None,
+                 game_vars=None):
         """
         kinds: names of kinds (animations of the pack) to their numbers, for count(KIND).
         timers: the names of the pack's timers, for timer(NAME): known names keep their numbers, new ones are added.
@@ -203,6 +231,8 @@ class Expr:
         tables: the constant tables of the animation by name: (their offset after the code, their values).
         its: in a sense, what its.<name> may be: {name: number} (the params of the kind looked for, and ITS_BODY or ITS_CELL).
         games: the questions to the game the animation declares (game.<name>), in order: their numbers.
+        game_vars: the game's variables (Pack.add_variable: game_var.<name>), in order: their numbers; None where they are
+        not read (a piece of a tile).
         actor: False where there is no actor (a piece of a tile): its velocity and the moment of its step are no names there.
         """
         self.where = where
@@ -213,6 +243,7 @@ class Expr:
         self.tables = tables or {}
         self.its = its
         self.games = games or []
+        self.game_vars = game_vars
         self.animation = games is not None  # an expression of an animation's own (games given): not of a tile, a dialog, the pack
         self.tokens = re.findall(r"0[xX][0-9a-fA-F]+|\d+\.?\d*|\.\d+|[A-Za-z_]\w*|<=|>=|==|!=|[-+*/%&|(),<>]|\S", text)
         self.i = 0
@@ -369,6 +400,18 @@ class Expr:
                 # a path works out the place by t alone: what the game says changes as it plays
                 raise AnimError(f"{self.where}: game. is not for a path: its formula gives the place by t alone")
             return ("game", self.games.index(name))
+        if tok == "game_var" and self.peek() == ".":
+            self.take(".")
+            name = self.take()
+            if self.game_vars is None:
+                # a tile is laid again only when its cell changes: a variable in it would be seen as it was then, stale
+                raise AnimError(f"{self.where}: game_var.{name}: the game's variables are read by scripts and dialogs, not here")
+            if name not in self.game_vars:
+                raise AnimError(f"{self.where}: game_var.{name}: no such variable of the game (Pack.add_variable)")
+            if self.allow_t:
+                # a path works out the place by t alone: a variable changes as the game plays
+                raise AnimError(f"{self.where}: game_var. is not for a path: its formula gives the place by t alone")
+            return ("game_var", self.game_vars.index(name))
         if tok in self.tables and self.peek() == "[":
             self.take("[")
             index = self.choice()
@@ -384,6 +427,19 @@ class Expr:
             if len(args) != FUNCS[tok]:
                 raise AnimError(f"{self.where}: {tok} takes {FUNCS[tok]}")
             return ("op", FUNC_OPS.get(tok, tok), args)
+        if tok == "music" and tok not in self.defines and tok not in self.fields and not (self.params and tok in self.params):
+            if self.allow_t:
+                # a path works out the place by t alone: the music changes as the game plays
+                raise AnimError(f"{self.where}: music is not for a path: its formula gives the place by t alone")
+            return ("music",)
+        if tok == "rotation" and tok not in self.defines and tok not in self.fields and not (self.params and tok in self.params):
+            # the actor's turn, degrees clockwise: 0, 90, 180, 270
+            if not self.actor or self.params is None:
+                raise AnimError(f"{self.where}: rotation is the turn of an actor, there is none here")
+            if self.allow_t:
+                # a path is of the axes it began in: it works out the place by t alone
+                raise AnimError(f"{self.where}: rotation is not for a path: its formula gives the place by t alone")
+            return ("rotation",)
         if tok == "amount" and tok not in self.defines and not (self.params and tok in self.params):
             if not self.actor or self.params is None:
                 raise AnimError(f"{self.where}: amount is how many an actor is, there is none here")
@@ -508,7 +564,7 @@ class Expr:
             elif node[0] == "param":
                 out.extend(struct.pack("<BB", EXPR["param"], node[1]))
                 depth += 1
-            elif node[0] in ("t", "vx", "vy", "now", "amount", "x", "y"):
+            elif node[0] in ("t", "vx", "vy", "now", "amount", "x", "y", "music", "rotation"):
                 out.append(EXPR[node[0]])
                 depth += 1
             elif node[0] == "count":
@@ -523,7 +579,7 @@ class Expr:
             elif node[0] == "field":
                 out.extend(struct.pack("<BBBB", EXPR["field"], node[1], node[2], node[3]))
                 depth += 1
-            elif node[0] in ("its", "game"):
+            elif node[0] in ("its", "game", "game_var"):
                 out.extend(struct.pack("<BB", EXPR[node[0]], node[1]))
                 depth += 1
             elif node[0] == "table":
@@ -572,6 +628,18 @@ def half_away(value):
     return int(math.floor(abs(value) + 0.5)) * (1 if value >= 0 else -1)
 
 
+def without_ms(text):
+    """The time of a frame without its unit: 83ms, (speed)ms, TICK ms; fall_ms is a name, not fall_ and ms."""
+    text = text.strip()
+    m = re.search(r"([A-Za-z0-9_]*)ms$", text)
+    return text[:-2].rstrip() if m and (not m.group(1) or m.group(1)[0].isdigit()) else text
+
+
+def number_code(value):
+    """An expression of one number, as Expr.code gives it."""
+    return bytes([5]) + struct.pack("<Bf", EXPR["num"], value)
+
+
 def whole(value, low, high, where):
     v = half_away(value)
     if not low <= v <= high:
@@ -579,7 +647,8 @@ def whole(value, low, high, where):
     return v
 
 
-def assemble(text, images=None, points=None, events=None, kinds=None, timers=None, kind_params=None, own=None, constants=None, masks=None):
+def assemble(text, images=None, points=None, events=None, kinds=None, timers=None, kind_params=None, own=None, constants=None, masks=None,
+             musics=None, game_vars=None):
     """
     The blob of a text, and the names of its scripts, events and params in
     order: Assembled(blob, scripts, events, params, games).
@@ -601,6 +670,10 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
     as if it defined them; it may not define them again.
     masks: the masks of the pack by their names (BODY: 1), as in its meets: the text may name a mask where one goes
     (masks, hit, contact).
+    musics: the names of the pack's musics (music <name>), given on as timers are: new names are added (the pack gives
+    them their notes, Pack.add_music).
+    game_vars: the names of the game's variables (Pack.add_variable), by their numbers: game_var.<name> reads one, set and
+    add game_var.<name> write it; a question to the game (game <name>) may not be named as one.
     """
     images = images or {}
     points = points or {}
@@ -609,6 +682,8 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
     if own:
         kinds.setdefault(own[0], own[1])
     timers = timers if timers is not None else []  # one list for the whole text: a name, one number
+    musics = musics if musics is not None else []
+    game_vars = list(game_vars or [])
     code = bytearray()
     scripts = []          # names, in order
     script_at = {}        # name -> offset
@@ -640,10 +715,17 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
         return masks[text] if text in masks else const(text, 0, 15, where)
 
     def constant(text, where):
-        value = Expr(text, defines, None, False, where, tables=tables, games=games).constant()
+        value = Expr(text, defines, None, False, where, tables=tables, games=games, game_vars=game_vars).constant()
         if value is None:
             raise AnimError(f"{where}: '{text}' must be a constant")
         return value
+
+    def frame_time(text, where):
+        """The time of a frame: (ms, None) of constants, (None, its code) worked out as the frame begins."""
+        e = Expr(without_ms(text), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
+        if e.constant() is not None:
+            return whole(e.constant(), 1, 65535, where), None
+        return None, e.code()
 
     def operands(text):
         """The operands of a statement: by commas when it has them, else by spaces."""
@@ -685,6 +767,8 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
             for name in rest.split():
                 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name in games:
                     raise AnimError(f"{where}: game <name> <name> ..., new names")
+                if name in game_vars:
+                    raise AnimError(f"{where}: game {name}: {name} is a variable of the game (game_var.{name}), not a question to it")
                 if len(games) == 255:
                     raise AnimError(f"{where}: 255 questions to the game at most")
                 games.append(name)
@@ -737,9 +821,13 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                         break
                 if end is None:
                     raise AnimError(f"{where}: frame (<expression>) <ms>: a parenthesis is not closed")
-                ms = const(re.sub(r"\s*ms$", "", rest[end + 1:].strip()), 1, 65535, where)
-                e = Expr(rest[1:end], {**defines, **images}, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
-                if e.constant() is not None:
+                ms, timed = frame_time(rest[end + 1:], where)
+                e = Expr(rest[1:end], {**defines, **images}, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
+                if timed is not None:
+                    # the time worked out as the frame begins: the picture an expression too (a constant one a number)
+                    pic = number_code(whole(e.constant(), 0, 65535, where)) if e.constant() is not None else e.code()
+                    code += struct.pack("<Bbb", OP["FRAME_MS"], 0, 0) + pic + timed
+                elif e.constant() is not None:
                     code += struct.pack("<BHH", OP["FRAME"], whole(e.constant(), 0, 65535, where), ms)
                 else:
                     code += struct.pack("<BH", OP["FRAME_X"], ms) + e.code()
@@ -756,13 +844,17 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     image = images[pic]
                 else:
                     raise AnimError(f"{where}: no picture '{pic}'")
-                ms = const(re.sub(r"\s*ms$", "", m.group(2)), 1, 65535, where)
-                if m.group(3) is None:
+                ms, timed = frame_time(m.group(2), where)
+                at = split_top(m.group(3)) if m.group(3) is not None else ["0", "0"]
+                if len(at) != 2:
+                    raise AnimError(f"{where}: at <dx>, <dy>")
+                if timed is not None:
+                    # the time worked out as the frame begins; the picture a number (none: -1, hidden)
+                    code += (struct.pack("<Bbb", OP["FRAME_MS"], const(at[0], -128, 127, where), const(at[1], -128, 127, where))
+                             + number_code(-1 if image == 0xFFFF else image) + timed)
+                elif m.group(3) is None:
                     code += struct.pack("<BHH", OP["FRAME"], image, ms)
                 else:
-                    at = split_top(m.group(3))
-                    if len(at) != 2:
-                        raise AnimError(f"{where}: at <dx>, <dy>")
                     code += struct.pack("<BHHbb", OP["FRAME_AT"], image, ms, const(at[0], -128, 127, where), const(at[1], -128, 127, where))
             elif word in ("dx", "dy"):
                 code += struct.pack("<Bb", OP[word.upper()], const(rest, -128, 127, where))
@@ -781,12 +873,34 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 code.append(OP["KEEP"])
             elif word in ("flip", "branch", "hold"):
                 code.append(OP[word.upper()])
+            elif word == "rotate":
+                # degrees clockwise, by them or (to) into them: a constant in quarter turns, an expression worked out at the step
+                m = re.fullmatch(r"(to\s+)?(.+)", rest)
+                if not rest or not m:
+                    raise AnimError(f"{where}: rotate <degrees>, or rotate to <degrees>")
+                to = ROTATE_TO if m.group(1) else 0
+                e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
+                if e.constant() is not None:
+                    code += struct.pack("<BB", OP["ROTATE"], to | half_away(e.constant() / 90.0) % 4)
+                else:
+                    code += struct.pack("<BB", OP["ROTATE_X"], to) + e.code()
+            elif word in ("set", "add") and rest.startswith("game_var."):
+                # a variable of the game, the pack's: always worked out as an expression
+                m = re.fullmatch(r"game_var\.(\w+)\s+(.+)", rest)
+                if not m:
+                    raise AnimError(f"{where}: {word} game_var.<name> <value>")
+                if m.group(1) not in game_vars:
+                    raise AnimError(f"{where}: {word} game_var.{m.group(1)}: no such variable of the game (Pack.add_variable)")
+                e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
+                if e.constant() is not None:
+                    whole(e.constant(), -(1 << 24), 1 << 24, where)  # beyond, a float has it no more exactly
+                code += struct.pack("<BB", OP[word.upper() + "_VAR"], game_vars.index(m.group(1))) + e.code()
             elif word in ("set", "add"):
                 m = re.fullmatch(r"(\w+)\s+(.+)", rest)
                 if not m or m.group(1) not in params:
                     raise AnimError(f"{where}: {word} <param> <value>, of a param given before")
                 index = params[m.group(1)][0]
-                e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
+                e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
                 if e.constant() is not None and -32768 <= half_away(e.constant()) <= 32767:
                     code += struct.pack("<BBh", OP[word.upper()], index, half_away(e.constant()))
                 else:
@@ -795,11 +909,33 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     code += struct.pack("<BB", OP[word.upper() + "_X"], index) + e.code()
             elif word in ("signal", "sound"):
                 code += struct.pack("<BB", OP[word.upper()], const(rest, 0, 255, where))
+            elif word == "music":
+                words = rest.split()
+
+                def ms_of(text):
+                    m = re.fullmatch(r"(\d+)(ms|s)", text)
+                    if not m or int(m.group(1)) * (1000 if m.group(2) == "s" else 1) > 65535:
+                        raise AnimError(f"{where}: a time of 0..65535 ms (500ms, 2s), not {text}")
+                    return int(m.group(1)) * (1000 if m.group(2) == "s" else 1)
+                if words[:1] == ["volume"]:
+                    m = re.fullmatch(r"(\d+)%", words[1]) if len(words) in (2, 3) else None
+                    if not m or int(m.group(1)) > 100:
+                        raise AnimError(f"{where}: music volume <0..100>% [<time>]")
+                    code += struct.pack("<BBH", OP["MUSIC_LEVEL"], int(m.group(1)), ms_of(words[2]) if len(words) == 3 else 0)
+                elif len(words) not in (1, 2) or not re.fullmatch(r"[A-Za-z_]\w*", words[0]):
+                    raise AnimError(f"{where}: music <name> [<fade>], music stop [<fade>], or music volume <percent>% [<time>]")
+                else:
+                    name = words[0]
+                    if name != "stop" and name not in musics:
+                        musics.append(name)
+                    if name != "stop" and musics.index(name) >= MUSIC_STOP:
+                        raise AnimError(f"{where}: {MUSIC_STOP} musics at most")
+                    code += struct.pack("<BBH", OP["MUSIC"], MUSIC_STOP if name == "stop" else musics.index(name), ms_of(words[1]) if len(words) == 2 else 0)
             elif word in ("velocity", "accel"):
                 xy = operands(rest)
                 if len(xy) != 2:
                     raise AnimError(f"{where}: {word} <x> <y>, or <x>, <y> with expressions")
-                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games) for v in xy)
+                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars) for v in xy)
                 # whole numbers as such; one with a fraction (a speed of a game's own pace) kept exact as an expression
                 if all(e.constant() is not None and e.constant() == half_away(e.constant()) for e in (ex, ey)):
                     code += struct.pack("<Bhh", OP[word.upper()], whole(ex.constant(), -32768, 32767, where),
@@ -858,8 +994,8 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 xy = split_top(m.group(1)) if m else []
                 if len(xy) != 2 or not re.match(r"y\s*:", xy[1]):
                     raise AnimError(f"{where}: path x: <expression of t>, y: <expression of t>")
-                ex = Expr(xy[0], defines, params, True, where, tables=tables, games=games)
-                ey = Expr(re.sub(r"^y\s*:\s*", "", xy[1]), defines, params, True, where, tables=tables, games=games)
+                ex = Expr(xy[0], defines, params, True, where, tables=tables, games=games, game_vars=game_vars)
+                ey = Expr(re.sub(r"^y\s*:\s*", "", xy[1]), defines, params, True, where, tables=tables, games=games, game_vars=game_vars)
                 code += bytes([OP["PATH"]]) + ex.code() + ey.code()
             elif word == "hit":
                 # hit <mask> on <mask> [<mask>...] [damage <n>] [event <e>] [recoil <e>]
@@ -916,7 +1052,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 xy = operands(words[1]) if len(words) > 1 else ["0", "0"]
                 if len(xy) != 2:
                     raise AnimError(f"{where}: release <point> <vx> <vy>, or <vx>, <vy> with expressions")
-                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games) for v in xy)
+                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars) for v in xy)
                 code += struct.pack("<BB", OP["RELEASE"], points[words[0]]) + ex.code() + ey.code()
             elif word == "shoot":
                 m = re.fullmatch(r"(\w+)\s+(\w+)\s*(.*)", rest)
@@ -931,7 +1067,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 xy = operands(m.group(3)) if m.group(3).strip() else ["0", "0"]
                 if len(xy) != 2:
                     raise AnimError(f"{where}: shoot <point> <kind> <vx> <vy>")
-                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games) for v in xy)
+                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars) for v in xy)
                 code += struct.pack("<BBH", OP["SHOOT"], points[m.group(1)], kind) + ex.code() + ey.code()
             elif word in ("stow", "draw"):
                 if not args or args[0] not in points or len(args) != (1 if word == "stow" else 2):
@@ -951,8 +1087,8 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 xs = split_top(rest[4:].strip())
                 if len(xs) not in (2, 3) or not re.fullmatch(r"\w+", xs[1].strip()):
                     raise AnimError(f"{where}: tell cell <cell>, <event>[, <value>]")
-                cell = Expr(xs[0], defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
-                value = Expr(xs[2] if len(xs) == 3 else "0", defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
+                cell = Expr(xs[0], defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
+                value = Expr(xs[2] if len(xs) == 3 else "0", defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
                 at = len(code)
                 code += struct.pack("<BB", OP["CELL"], 0xFF) + cell.code() + value.code()
                 event_fixups.append((at + 1, xs[1].strip(), where))
@@ -971,7 +1107,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     kind = kinds[xs[0]]
                 else:
                     raise AnimError(f"{where}: no kind '{xs[0]}' to appear")
-                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games) for v in xs[2:4])
+                ex, ey = (Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars) for v in xs[2:4])
                 at = len(code)
                 if given is None:
                     code += struct.pack("<BHBB", OP["APPEAR"], kind, 0xFF, 1 if left else 0) + ex.code() + ey.code()
@@ -990,7 +1126,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                             raise AnimError(f"{where}: appear ... with <param> = <expression>, ...")
                         if name not in child:
                             raise AnimError(f"{where}: appear {xs[0]} with: '{name}' is no param of it")
-                        pairs.append(bytes([child.index(name)]) + Expr(value.strip(), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games).code())
+                        pairs.append(bytes([child.index(name)]) + Expr(value.strip(), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars).code())
                     if not pairs or len(pairs) > 255:
                         raise AnimError(f"{where}: appear ... with <param> = <expression>, ...")
                     code += (struct.pack("<BHBB", OP["APPEAR_WITH"], kind, 0xFF, 1 if left else 0) + ex.code() + ey.code()
@@ -1017,7 +1153,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     names = sorted(params, key=lambda n: params[n][0]) if own and target == own[0] else kind_params.get(target, [])
                     its = dict(ITS_BODY, **{n: i for i, n in enumerate(names)})
                 # the radius: a number as it always was, or an expression of its own worked out at the step (flag 4, after where)
-                rexpr = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
+                rexpr = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
                 if rexpr.constant() is not None:
                     radius, rcode = const(m.group(2), 0, 65535, where), b""
                 else:
@@ -1025,7 +1161,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     flags |= 4
                 if m.group(3):
                     flags |= 2  # only one the look reaches, as the terrain veils it
-                cond = Expr(m.group(4), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, its=its, games=games).code() if m.group(4) else b"\x00"
+                cond = Expr(m.group(4), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, its=its, games=games, game_vars=game_vars).code() if m.group(4) else b"\x00"
                 outs, copies = [], []
                 for item in split_top(m.group(5)):
                     name, eq, value = item.partition("=")
@@ -1035,7 +1171,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     if eq:
                         if name == "_":
                             raise AnimError(f"{where}: sense: a copy goes into a param, not _")
-                        copies.append(bytes([params[name][0]]) + Expr(value.strip(), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, its=its, games=games).code())
+                        copies.append(bytes([params[name][0]]) + Expr(value.strip(), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, its=its, games=games, game_vars=game_vars).code())
                     elif copies or len(outs) == 3:
                         raise AnimError(f"{where}: sense into: d, dx, dy first, then <param> = <expression>")
                     else:
@@ -1066,7 +1202,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                     if second[0] not in params:
                         raise AnimError(f"{where}: steer wander: angle <param>, no param '{second[0]}'")
                     angle, second = params[second[0]][0], []
-                exprs = [Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games).code() for v in first + second]
+                exprs = [Expr(v, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars).code() for v in first + second]
                 code += struct.pack("<BBBB", OP["STEER"], number, angle, len(exprs)) + b"".join(exprs)
             elif word == "vanish":
                 if rest:
@@ -1076,7 +1212,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 # a button of the map pressed as if trodden on; what lies in a cell gone: the game's world does it
                 if not rest:
                     raise AnimError(f"{where}: {word} <cell>")
-                code += bytes([OP[word.upper()]]) + Expr(rest, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games).code()
+                code += bytes([OP[word.upper()]]) + Expr(rest, defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars).code()
             elif word == "tell":
                 words = rest.split()
                 if len(words) != 2 or words[0] != "holder":
@@ -1093,7 +1229,7 @@ def assemble(text, images=None, points=None, events=None, kinds=None, timers=Non
                 m = re.fullmatch(r"(\w+)\s+if\s+(.+)", rest)
                 if not m:
                     raise AnimError(f"{where}: goto <label or script> if <expression>")
-                e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games)
+                e = Expr(m.group(2), defines, params, False, where, kinds=kinds, timers=timers, tables=tables, games=games, game_vars=game_vars)
                 fixups.append((len(code), m.group(1), where, True))
                 code += b"\0\0\0\0" + e.code()
             elif word == "goto":

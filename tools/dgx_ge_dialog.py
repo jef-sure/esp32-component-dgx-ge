@@ -11,8 +11,9 @@ The language, a statement a line, '#' to the end of a line is a comment:
                                     conditions read), the name it is shown by (a msgid; none: no
                                     name) and its portrait (face <picture>, a picture of the pack;
                                     none: no portrait). The role game is always there: the game itself
-    game SETTINGS                   the kind of the game's actor (its params are the game's settings:
-                                    what conditions and controls of its choices read and change)
+    game SETTINGS                   the kind of the game's actor, where the game gives one: its params are
+                                    what the game's lines, conditions and controls name without game_var.
+                                    (the game's own numbers are rather its variables, Pack.add_variable)
     style talk                      how its lines look from here on (a style of the pack, by name)
     pause                           the game stands while the dialog is open (a page of settings): its
                                     world does not go on; the dialog's own lines, times and controls do
@@ -23,7 +24,8 @@ The language, a statement a line, '#' to the end of a line is a comment:
         say game "Found!" 3s        a line that goes on by itself so long after it is seen whole
                                     (3s, 500ms); none: it waits for a button
         say game "{left} minute left" "{left} minutes left" 2s   a line of a number: {left}, a param of
-                                    the one saying it, is shown as its number; two strings: msgid and
+                                    the one saying it, is shown as its number ({game_var.left}: a variable
+                                    of the game; a line shows the one or the other); two strings: msgid and
                                     msgid_plural, the form the language gives that number (its .po).
                                     Up to four {names} in a line: a translation shows the same names,
                                     in any order (the form goes by the msgid's first)
@@ -31,12 +33,14 @@ The language, a statement a line, '#' to the end of a line is a comment:
         choose kid                  the answers of a role (the player's), one a line below,
             "A friend." -> friend   the msgid and where it leads;
             "Have a drink." if count(WINE) > 0 -> drink   shown only where the expression is not 0,
-                                    of the params and pockets of the one playing the role and the
-                                    game's constants (Pack.add_constants: board & BOARD_PAD)
+                                    of the params and pockets of the one playing the role, the game's
+                                    variables (game_var.volume > 2) and its constants (Pack.add_constants:
+                                    game_var.board & BOARD_PAD)
         choose game                 a page of settings: answers with controls
-            "Sound" control SWITCH sound   a control (a kind: its first param is its value) of a
-                                    param of the one choosing; activate, more, less go to it (the
-                                    pack's events of those names); without -> the choice stays
+            "Sound" control SWITCH game_var.sound   a control (a kind: its first param is its value) of a
+                                    variable of the game (or of a param of the one choosing: control
+                                    SWITCH sound); activate, more, less go to it (the pack's events of
+                                    those names); without -> the choice stays
             "Name" field name -> back      a field of the game (Pack.add_field): its text shown at the
                                     right of the line; activate edits it (typed, a keyboard on the
                                     display or of wires); with -> on from there when it is done
@@ -60,7 +64,7 @@ from dgx_ge_anim import AnimError, Expr
 
 MAGIC = 0x4C444744  # "DGDL"
 PAUSE = 1  # the flags of a dialog (DGX_GE_DIALOG_PAUSE): the game stands while it is open
-VERSION = 6
+VERSION = 7
 OP = {"SAY": 1, "CHOOSE": 2, "TELL": 3, "GIVE": 4, "GOTO": 5, "END": 6, "STYLE": 7, "SAY_N": 8, "SAY_NS": 9}
 TALK_NUMBERS = 4  # so many numbers a line shows at most (dgx_ge_dialog.h)
 GAME_ROLE = 0xFF  # the game itself, no actor
@@ -68,6 +72,9 @@ NO_KIND = 0xFFFF
 FIELD = 0xFFFE  # the kind of a control that is a field of the game (DGX_GE_DIALOG_FIELD): its param, the field's number
 STAYS = 0xFFFF  # an answer that leads nowhere: its control changed, the choice stays
 UI_EVENTS = ("activate", "more", "less")  # the events of the interface a control is told
+SAY_VARS = 2  # the flags of a line (1: important): its numbers are the game's variables
+ANSWER_VAR = 1  # the flags of an answer: its control edits a variable of the game
+SHOWN = r"\{((?:game_var\.)?\w+)\}"  # a number a line shows: {name}, a param of the one saying it; {game_var.name}, a variable of the game
 
 Dialog = namedtuple("Dialog", "blob name roles labels")
 
@@ -103,17 +110,18 @@ def _numbers_by_name(order, where):
     {i}, its place in that order (the engine shows that number), so a language may put them in its own order.
     """
     def shape(text):
-        shown = re.findall(r"\{(\w+)\}", text)
+        shown = re.findall(SHOWN, text)
         for name in shown:
             if name not in order:
                 raise DialogError(f"{where}: '{text}' shows {{{name}}}, a number the line has not")
         if all(name == order[min(k, len(order) - 1)] for k, name in enumerate(shown)):
             return text
-        return re.sub(r"\{(\w+)\}", lambda m: "{%d}" % order.index(m.group(1)), text)
+        return re.sub(SHOWN, lambda m: "{%d}" % order.index(m.group(1)), text)
     return shape
 
 
-def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=None, images=None, timers=None, constants=None, fields=None):
+def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=None, images=None, timers=None, constants=None, fields=None,
+                    game_vars=None):
     """
     The blob of a dialog: Dialog(blob, name, roles, labels).
     strings: a Strings of the pack (msgid in a context to a number).
@@ -124,8 +132,11 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
     images: names of the pictures of the pack to their numbers, for portraits;
     timers: the names of the pack's timers, for timer(NAME) in conditions (a list given on: a new name is added);
     constants: the game's names of numbers (Pack.add_constants), for conditions: board & BOARD_PAD;
-    fields: the names of the game's text fields to their numbers (Pack.add_field), for answers with a field.
+    fields: the names of the game's text fields to their numbers (Pack.add_field), for answers with a field;
+    game_vars: the names of the game's variables (Pack.add_variable), by their numbers: game_var.<name> in conditions, a
+    control of one, {game_var.<name>} in a line.
     """
+    game_vars = list(game_vars or [])
     images = images or {}
     kinds = kinds or {}
     params = params or {}
@@ -172,7 +183,7 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
         if choosing is not None and indent > choosing[1] and body.startswith('"'):
             # an answer of the choose above: "msgid" [if expr] [control KIND param | field NAME] [-> label]
             msgid, rest = _string(body, where)
-            m = re.fullmatch(r"\s*(?:if\s+(.+?))?\s*(?:control\s+(\w+)\s+(\w+)|field\s+(\w+))?\s*(?:->\s*(\w+))?\s*", rest)
+            m = re.fullmatch(r"\s*(?:if\s+(.+?))?\s*(?:control\s+(\w+)\s+((?:game_var\.)?\w+)|field\s+(\w+))?\s*(?:->\s*(\w+))?\s*", rest)
             if not m or not (m.group(2) or m.group(4) or m.group(5)):
                 raise DialogError(f'{where}: "<msgid>" [if <expression>] [control <kind> <param> | field <name>] [-> <label>]: '
                                   'a control, a field or a label at least')
@@ -180,14 +191,19 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
                 kind_name = game_kind
             else:
                 kind_name = next((n for n, v in kinds.items() if v == role_kinds[choosing[2]]), None)
-            control, param = NO_KIND, 0
+            control, param, answer_flags = NO_KIND, 0, 0
             if m.group(2):
                 if m.group(2) not in kinds:
                     raise DialogError(f"{where}: no kind '{m.group(2)}'")
                 own = params.get(kind_name, {})
-                if m.group(3) not in own:
+                if m.group(3).startswith("game_var."):
+                    if m.group(3)[9:] not in game_vars:
+                        raise DialogError(f"{where}: {m.group(3)}: no such variable of the game (Pack.add_variable)")
+                    control, param, answer_flags, controls = kinds[m.group(2)], game_vars.index(m.group(3)[9:]), ANSWER_VAR, True
+                elif m.group(3) not in own:
                     raise DialogError(f"{where}: no param '{m.group(3)}' of {kind_name or 'the one choosing'}")
-                control, param, controls = kinds[m.group(2)], own[m.group(3)][0], True
+                else:
+                    control, param, controls = kinds[m.group(2)], own[m.group(3)][0], True
             if m.group(4):
                 if m.group(4) not in (fields or {}):
                     raise DialogError(f"{where}: no field '{m.group(4)}' (Pack.add_field)")
@@ -195,14 +211,15 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
             expr = b"\0"
             if m.group(1):
                 try:
-                    expr = Expr(m.group(1), dict(constants or {}), params.get(kind_name, {}), False, where, kinds=kinds, timers=timers).code()
+                    expr = Expr(m.group(1), dict(constants or {}), params.get(kind_name, {}), False, where, kinds=kinds, timers=timers,
+                                game_vars=game_vars).code()
                 except AnimError as e:
                     raise DialogError(str(e))
             code[choosing[0]] += 1
             if code[choosing[0]] == 0:
                 raise DialogError(f"{where}: 255 answers at most")
             at = len(code)
-            code += struct.pack("<HHHB", strings.id(name, msgid), STAYS, control, param)
+            code += struct.pack("<HHHBB", strings.id(name, msgid), STAYS, control, param, answer_flags)
             if m.group(5):
                 fixups.append((at + 2, m.group(5), where))
             code += expr
@@ -266,25 +283,36 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
                 plural, tail = _string(tail, where)
             ms = _ms(tail, where) if tail.strip() else 0
             r = role_of(m.group(1), where)
-            shows = set(re.findall(r"\{(\w+)\}", msgid + (plural or "")))
+            shows = set(re.findall(SHOWN, msgid + (plural or "")))
             if plural is None and not shows:
                 code += struct.pack("<BBBHH", OP["SAY"], r, 1 if word == "say!" else 0, strings.id(name, msgid), ms)
                 continue
             kind_name = game_kind if r == GAME_ROLE else next((n for n, v in kinds.items() if v == role_kinds[r]), None)
             own = params.get(kind_name, {})
-            order = re.findall(r"\{(\w+)\}", msgid)
+            # the numbers a line shows: params of the one saying it, or the game's variables ({game_var.<name>}), not both
+            of_vars = {n.startswith("game_var.") for n in shows}
+            if len(of_vars) > 1:
+                raise DialogError(f"{where}: a line shows params of the one saying it or variables of the game, not both")
+            line_flags = (1 if word == "say!" else 0) | (SAY_VARS if of_vars == {True} else 0)
+            if of_vars == {True}:
+                own = {}
+                for n in shows:
+                    if n[9:] not in game_vars:
+                        raise DialogError(f"{where}: {{{n}}}: no such variable of the game (Pack.add_variable)")
+                    own[n] = (game_vars.index(n[9:]), 0)
+            order = re.findall(SHOWN, msgid)
             if len(order) > 1:
                 # a line of several numbers: each {name} in order, the form by the first; its plural the same names in order
                 if len(order) > TALK_NUMBERS:
                     raise DialogError(f"{where}: a line shows {TALK_NUMBERS} numbers at most")
-                if plural is not None and re.findall(r"\{(\w+)\}", plural) != order:
+                if plural is not None and re.findall(SHOWN, plural) != order:
                     raise DialogError(f"{where}: the forms of a line show the same numbers in the same order")
                 for shown in order:
                     if shown not in own:
                         raise DialogError(f"{where}: no param '{shown}' of {kind_name or 'the one saying it'}")
                 shape = _numbers_by_name(order, where)
                 first, forms = strings.id_plural(name, msgid, plural, shape) if plural is not None else (strings.id(name, msgid, shape), 1)
-                code += struct.pack("<BBBHHBB", OP["SAY_NS"], r, 1 if word == "say!" else 0, first, ms, forms, len(order))
+                code += struct.pack("<BBBHHBB", OP["SAY_NS"], r, line_flags, first, ms, forms, len(order))
                 code += bytes(own[shown][0] for shown in order)
                 continue
             # a line of a number: the param of the one saying it, the forms of the language
@@ -295,7 +323,7 @@ def assemble_dialog(text, strings, kinds=None, params=None, events=None, styles=
                 raise DialogError(f"{where}: no param '{shown}' of {kind_name or 'the one saying it'}")
             shape = _numbers_by_name([shown], where)
             first, forms = strings.id_plural(name, msgid, plural, shape) if plural is not None else (strings.id(name, msgid, shape), 1)
-            code += struct.pack("<BBBHHBB", OP["SAY_N"], r, 1 if word == "say!" else 0, first, ms, forms, own[shown][0])
+            code += struct.pack("<BBBHHBB", OP["SAY_N"], r, line_flags, first, ms, forms, own[shown][0])
         elif word == "choose":
             m = re.fullmatch(r"(\w+)(?:\s+(\S+)\s*->\s*(\w+))?", rest)
             if not m:
@@ -390,7 +418,7 @@ class Strings:
         if isinstance(text, list):
             raise ValueError(f"{context}: '{msgid}' is translated as a string of a number (msgid_plural)")
         # a line of no numbers shows its {names} as they are written: a translation may not show one the line has not
-        unknown = shape is None and next((n for n in re.findall(r"\{(\w+)\}", text) if n not in re.findall(r"\{(\w+)\}", msgid)), None)
+        unknown = shape is None and next((n for n in re.findall(SHOWN, text) if n not in re.findall(SHOWN, msgid)), None)
         if unknown:
             raise DialogError(f"{context}: '{text}' shows {{{unknown}}}, a number the line '{msgid}' has not")
         text = shape(text) if shape else text

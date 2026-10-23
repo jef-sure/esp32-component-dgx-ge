@@ -10,7 +10,7 @@ static const char *TAG = "dgx-ge";
 #define HEADER_BYTES 24u
 #define KIND_BYTES   8u
 #define GROUP_BYTES  16u
-#define VERSION      1u
+#define VERSION      2u
 #define NO_PARAM     0xFF
 #define WALL         4096 /* how thick the solid beyond the bounds is, points */
 
@@ -83,8 +83,10 @@ static uint32_t cast(dgx_ge_crowd_t *c, uint32_t n)
 /* Where an actor's picture stands: as it is drawn. */
 static void origin_of(const dgx_ge_actor_t *a, int32_t x, int32_t y, int *ox, int *oy)
 {
-    *ox = (x >> 8) + (a->flip ? -a->image_dx : a->image_dx);
-    *oy = (y >> 8) + a->image_dy;
+    int32_t dx = a->image_dx, dy = a->image_dy;
+    dgx_ge_orient_apply(dgx_ge_actor_orient(a), &dx, &dy);
+    *ox = (x >> 8) + dx;
+    *oy = (y >> 8) + dy;
 }
 
 /* The solid beyond the bounds: four slabs round it. */
@@ -119,7 +121,8 @@ static uint8_t sides(const dgx_ge_actor_t *a, int32_t x, int32_t y, int mask, in
     if (a->image < 0) return 0;
     int ox, oy;
     origin_of(a, x, y, &ox, &oy);
-    const dgx_ge_body_t body = {c->pack, a->image, ox, oy, a->flip, (uint16_t)(1u << (mask & 15))};
+    const unsigned      o    = dgx_ge_actor_orient(a);
+    const dgx_ge_body_t body = {c->pack, a->image, ox, oy, (uint8_t)o, (uint16_t)(1u << (mask & 15))};
     unsigned            s    = c->grid ? dgx_ge_grid_touch_sides(c->grid, &body, mask, reach) : 0;
     /* the bounds as walls: the mask of that number of its picture against the slabs round them */
     dgx_ge_mask_t masks[16];
@@ -128,9 +131,9 @@ static uint8_t sides(const dgx_ge_actor_t *a, int32_t x, int32_t y, int mask, in
         if (masks[i].index != mask) continue;
         dgx_ge_rect_t       w[4];
         dgx_ge_area_t       areas[DGX_GE_TOUCH_SIDES];
-        const dgx_ge_rect_t place = dgx_ge_mask_place(&masks[i], ox, oy, a->flip);
+        const dgx_ge_rect_t place = dgx_ge_mask_place(&masks[i], ox, oy, o);
         walls_of(c, w);
-        for (int k = 0; k < 4; ++k) s |= dgx_ge_mask_touch_rect_among(&masks[i], place, a->flip, w[k], reach, w, 4, areas);
+        for (int k = 0; k < 4; ++k) s |= dgx_ge_mask_touch_rect_among(&masks[i], place, o, w[k], reach, w, 4, areas);
     }
     return (uint8_t)s;
 }
@@ -150,7 +153,7 @@ static bool sense(const dgx_ge_actor_t *a, const dgx_ge_sense_t *query, dgx_ge_s
 /* ---- places ---- */
 
 /* An actor of a kind of the crowd into a free place, at x, y (points), in a script, from a moment; NULL: none free. */
-static dgx_ge_member_t *add(dgx_ge_crowd_t *c, int entry, int script, int x, int y, bool flip, uint32_t at_ms)
+static dgx_ge_member_t *add(dgx_ge_crowd_t *c, int entry, int script, int x, int y, bool flip, unsigned turn, uint32_t at_ms)
 {
     const dgx_ge_anim_t *anim = dgx_ge_kind(c->kinds, u16_at(kind_at(c, entry)));
     if (!anim) return NULL;
@@ -160,6 +163,7 @@ static dgx_ge_member_t *add(dgx_ge_crowd_t *c, int entry, int script, int x, int
         memset(m, 0, sizeof(*m));
         dgx_ge_actor_start(&m->actor, anim, script < anim->scripts ? script : 0, x, y, at_ms);
         m->actor.flip    = flip;
+        m->actor.turn    = (uint8_t)(turn & 3u);
         m->actor.terrain = &c->terrain;
         m->kind          = u16_at(kind_at(c, entry));
         m->entry         = (uint8_t)entry;
@@ -181,7 +185,7 @@ static void said(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, uint3
             ESP_LOGW(TAG, "crowd: kind %d is not of it, none appears", (int)dgx_ge_anim_said(2));
             return;
         }
-        dgx_ge_member_t *m = add(c, entry, 0, dgx_ge_anim_said(0), dgx_ge_anim_said(1), dgx_ge_anim_said(3) != 0, at_ms);
+        dgx_ge_member_t *m = add(c, entry, 0, dgx_ge_anim_said(0), dgx_ge_anim_said(1), dgx_ge_anim_said(3) != 0, 0, at_ms);
         if (!m) return;
         dgx_ge_anim_said_params(&m->actor); /* its params and those it entered its script with */
         dgx_ge_actor_event(&m->actor, value, at_ms, said, c);
@@ -221,8 +225,9 @@ bool dgx_ge_crowd_start(dgx_ge_crowd_t *c, const dgx_ge_pack_t *pack, dgx_ge_kin
         const int      x = i16_at(r + 4), y = i16_at(r + 6), w = u16_at(r + 8), h = u16_at(r + 10);
         for (int n = 0; n < u16_at(r + 2); ++n) {
             const int px = x + (w ? (int)cast(c, (uint32_t)w) : 0), py = y + (h ? (int)cast(c, (uint32_t)h) : 0);
-            const bool flip = r[12] == 2 ? cast(c, 2) != 0 : r[12] == 1;
-            if (!add(c, r[0], r[1], px, py, flip, now_ms)) break;
+            const bool     flip = r[12] == 2 ? cast(c, 2) != 0 : r[12] == 1;
+            const unsigned turn = r[13] == 4 ? cast(c, 4) : r[13];
+            if (!add(c, r[0], r[1], px, py, flip, turn, now_ms)) break;
         }
     }
     /* their first steps, and their bodies from the start: what the first play senses is where they began */
@@ -314,6 +319,7 @@ bool dgx_ge_crowd_items(dgx_ge_crowd_t *c, const uint8_t *const *maps, dgx_ge_sc
                               .key   = (int16_t)(k[7] ? oy : 0),
                               .layer = k[4],
                               .flags = m->actor.flip ? DGX_GE_BLIT_FLIP_X : 0,
+                              .turn  = m->actor.turn,
                               .color = k[6]};
         item.map = m->image.format == 1 || !maps || set < 0 ? NULL : maps[set];
         /* one of 1 bit: in a color of its set, as the frame has it */

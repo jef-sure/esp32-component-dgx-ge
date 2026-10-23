@@ -13,17 +13,19 @@ extern "C" {
  * Dialogs: who says what, the answers to choose from, what follows in the
  * world. A dialog is a script of data (tools/dgx_ge_dialog.py, the blob
  * "DGDL"): lines (say), choices (choose, an answer shown only where its
- * condition holds, of the params and pockets of the one choosing), events
+ * condition holds, of the params and pockets of the one choosing and the game's variables), events
  * for the ones taking part (tell), things from pockets into pockets (give),
  * labels and goto, end. It speaks; the matrices of those told decide.
  *
  * Roles: the script is written about roles; the game says, when a talk
  * begins, which actors play them. The role game is the game itself (it says
- * that something happened; a page of settings): its actor, if the game gives
- * one, holds the game's settings in its params.
+ * that something happened; a page of settings): what it shows and edits are
+ * the game's variables (game_var.<name>, dgx_ge_game.h); an actor of it, if the
+ * dialog names its kind (game <KIND>) and the game gives one, has params too.
  *
- * Controls: an answer may carry one, a kind (an animation of the pack) and a
- * param of the one choosing that it changes. Its first param is its value;
+ * Controls: an answer may carry one, a kind (an animation of the pack) and
+ * what it changes: a variable of the game (control SLIDER game_var.volume) or
+ * a param of the one choosing (control SLIDER volume). Its first param is its value;
  * activate, more, less are told it as the events of the pack of those names
  * (an actor of it made for the moment: from script 0 with the value, told,
  * moved on to now, the value given back); its picture is that of script 0
@@ -47,10 +49,14 @@ extern "C" {
  * blob "DGSS" (dgx_ge_strings_*).
  *
  * Pause: a dialog may stop the game while it is open (a page of settings): the
- * game does not play its world meanwhile (dgx_ge_talk_pauses tells it). The
- * talk's own time goes on (its lines with a time, letters, controls), what it
- * does to the world (tell, give, conditions) lands at the moment the world
- * stands at: the game says how far ahead of it the talk is (ahead_ms).
+ * game does not play its world meanwhile (dgx_ge_talk_pauses tells it).
+ *
+ * Two clocks: every call that moves a talk on takes two moments. The talk's
+ * own (now_ms, real time) goes on while the world stands: its lines with a
+ * time, a choice with a time, letters, controls. The world's (world_ms) is
+ * where the world is: what the talk does to it (tell, give, the conditions of
+ * answers) lands there. A game that never stops its world gives the same
+ * moment twice.
  *
  * A talk is where one is in a dialog: a few bytes. It is moved on by events
  * of the interface, which the game makes of its buttons (input is apart):
@@ -67,16 +73,17 @@ extern "C" {
  * names they are shown by (u16 each: strings, 0xFFFF none); their portraits
  * (u16 each: pictures of the pack, 0xFFFF none); the code:
  *
- *   SAY     role u8, important u8, string u16, ms u16 (0: it waits for a button)
+ *   SAY     role u8, flags u8 (1: important), string u16, ms u16 (0: it waits for a button)
  *   SAY_N   as SAY, then forms u8, param u8: a line of a number, the param of
- *           the one saying it; its forms are so many strings in a row, the
+ *           the one saying it (flags 2: a variable of the game, {game_var.<name>}); its forms are so many strings in a row, the
  *           language's rule chooses (dgx_ge_strings_form); {name} in it shows the number
  *   SAY_NS  as SAY, then forms u8, count u8 (up to DGX_GE_TALK_NUMBERS), params u8 each: a line of
  *           several numbers, its {names} in order, the form by the first; a translation that
- *           shows them in another order has {i} instead, the number of param i
+ *           shows them in another order has {i} instead, the number of param i (flags 2: all
+ *           of them variables of the game)
  *   CHOOSE  role u8, count u8, ms u16 (0: no limit), label u16 (where silence leads);
  *           each answer: string u16, label u16 (0xFFFF: it stays), control kind u16 (0xFFFF none),
- *           param u8, expr (its length 0: none)
+ *           param u8, flags u8 (1: the param is a variable of the game), expr (its length 0: none)
  *   TELL    role u8, event u8
  *   GIVE    from u8, to u8, kind u16, count u8
  *   GOTO    label u16
@@ -84,7 +91,7 @@ extern "C" {
  *   STYLE   style u16
  */
 #define DGX_GE_DIALOG_MAGIC   0x4C444744u /* "DGDL" */
-#define DGX_GE_DIALOG_VERSION 6u
+#define DGX_GE_DIALOG_VERSION 7u
 #define DGX_GE_DIALOG_ROLES   8
 #define DGX_GE_ROLE_GAME      0xFF
 #define DGX_GE_DIALOG_PAUSE   1u /* flags: the game stands while it is open */
@@ -166,12 +173,13 @@ typedef struct {
 } dgx_ge_field_t;
 
 /*
- * Who plays a talk: the actors of its roles (one a role, NULL nobody), the game's actor (its settings), the kinds of
- * controls, the game's text fields (by the packer's numbers, <PREFIX>_FIELD_<name>).
+ * Who plays a talk: the actors of its roles (one a role, NULL nobody), the game's actor (a dialog that names its kind:
+ * game <KIND>), the kinds of controls, the game's text fields (by the packer's numbers, <PREFIX>_FIELD_<name>). The
+ * game's variables are dgx_ge_game_vars, given once.
  */
 typedef struct {
     dgx_ge_actor_t *const *roles;  /* NULL: nobody */
-    dgx_ge_actor_t        *game;   /* NULL: none (conditions of the game read 0, controls change nothing) */
+    dgx_ge_actor_t        *game;   /* NULL: none (its params in conditions read 0, controls of them change nothing) */
     struct dgx_ge_kinds   *kinds;  /* the animations of controls; NULL: no controls */
     const dgx_ge_field_t  *fields; /* NULL: none (an answer with a field is shown, never edited) */
     uint8_t                field_count;
@@ -207,9 +215,8 @@ typedef struct {
     bool                   seen;   /* the line is seen whole: its time runs from seen_ms */
     uint16_t               wait_ms; /* the time of the line or the choice shown, 0 none */
     uint32_t               since_ms, seen_ms;
-    uint32_t               now_ms; /* the moment of the last event, the talk's own time */
-    uint32_t               ahead_ms; /* how far that is ahead of the world's (a dialog that pauses: the world stands, the talk
-                                        goes on); tell, give and conditions land at now_ms - ahead_ms. The game's; 0 at start */
+    uint32_t               now_ms;   /* the talk's own time at the last call */
+    uint32_t               world_ms; /* the world's at the last call: tell, give and conditions land at it */
     uint8_t                changes; /* counted up whenever a control or a field changed a value: for the one showing it, the game */
     uint8_t                choices; /* counted up whenever a choice is shown, again too (its answers as the conditions are then): for the one showing it */
     dgx_ge_anim_say_fn     say;    /* what the actors told say, as the game hears them; NULL nothing */
@@ -219,21 +226,21 @@ typedef struct {
 /*
  * A talk begins at the start of a dialog: who plays it (NULL: nobody), the
  * style its lines are shown in until it says another. It goes on to the
- * first line or choice.
+ * first line or choice: what it does on the way lands at world_ms.
  */
 void dgx_ge_talk_start(dgx_ge_talk_t *talk, const dgx_ge_dialog_t *dialog, const dgx_ge_cast_t *cast, uint16_t style, uint32_t now_ms,
-                       dgx_ge_anim_say_fn say, void *ctx);
+                       uint32_t world_ms, dgx_ge_anim_say_fn say, void *ctx);
 
-/* An event of the interface at a moment: the talk goes on as it says. */
-void dgx_ge_talk_event(dgx_ge_talk_t *talk, dgx_ge_ui_t event, uint32_t now_ms);
+/* An event of the interface at a moment (the talk's, the world's): the talk goes on as it says. */
+void dgx_ge_talk_event(dgx_ge_talk_t *talk, dgx_ge_ui_t event, uint32_t now_ms, uint32_t world_ms);
 
 /*
  * Time goes on to now: a line with a time goes on so long after it is seen
  * whole (seen: as the one showing it says now: an important text scrolled to
  * its end; an unimportant one at once); a choice with a time, unanswered, goes
- * where its silence leads.
+ * where its silence leads. Both by the talk's own time; the world at world_ms.
  */
-void dgx_ge_talk_play(dgx_ge_talk_t *talk, uint32_t now_ms, bool seen);
+void dgx_ge_talk_play(dgx_ge_talk_t *talk, uint32_t now_ms, uint32_t world_ms, bool seen);
 
 /* A talk going on whose dialog stops the game while it is open (DGX_GE_DIALOG_PAUSE): the game plays no world meanwhile. */
 bool dgx_ge_talk_pauses(const dgx_ge_talk_t *talk);
@@ -252,9 +259,10 @@ const dgx_ge_field_t *dgx_ge_talk_field(const dgx_ge_talk_t *talk, int shown);
 
 /*
  * The editing of the field of the answer chosen is over (the one showing it typed into the field, or left it as it
- * was): changed, the talk's changes counted up; then on to the answer's label, if it has one, else the choice stays.
+ * was), at a moment (the talk's, the world's): changed, the talk's changes counted up; then on to the answer's label,
+ * if it has one, else the choice stays.
  */
-void dgx_ge_talk_field_done(dgx_ge_talk_t *talk, bool changed);
+void dgx_ge_talk_field_done(dgx_ge_talk_t *talk, bool changed, uint32_t now_ms, uint32_t world_ms);
 
 #ifdef __cplusplus
 }

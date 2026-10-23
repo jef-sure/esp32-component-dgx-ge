@@ -152,10 +152,10 @@ p = assemble_dialog(PAGE + '        "Sound" control SWITCH sound\n        "Loud"
                     '        "Back" -> b\nlabel b\n    end\n', Strings(), KINDS, PARAMS, events)
 check(events == ["hit", "activate", "more", "less"] and p.blob[12:16] == bytes([1, 2, 3, 0xFF]), f"ui events {events} {p.blob[12:16].hex()}")
 code = p.blob[16:]
-first = struct.unpack_from("<HHHB", code, 7)
-check(first[1:] == (0xFFFF, 7, 0) and code[14] == 0, f"a control of sound, staying: {first} {code[14]}")
-second = struct.unpack_from("<HHHB", code, 15)
-check(second[1:] == (0, 7, 1) and code[22] > 0, f"a control of volume leading to a, a condition: {second}")
+first = struct.unpack_from("<HHHBB", code, 7)
+check(first[1:] == (0xFFFF, 7, 0, 0) and code[15] == 0, f"a control of sound, staying: {first} {code[15]}")
+second = struct.unpack_from("<HHHBB", code, 16)
+check(second[1:] == (0, 7, 1, 0) and code[24] > 0, f"a control of volume leading to a, a condition: {second}")
 check(d.blob[12:16] == b"\xff" * 4, "no controls: no events named")
 # .po in (with a multi-line msgstr and an untranslated entry), .pot out
 po = tempfile.NamedTemporaryFile("w", suffix=".po", delete=False, encoding="utf-8")
@@ -219,7 +219,7 @@ for what, args in (("a name not of C", ("the text", {"points": 12})), ("made and
 FIELDS = {"name": 0, "motto": 1}
 f = assemble_dialog(PAGE + '        "x" field motto -> a\n        "y" field name\n', Strings(), KINDS, PARAMS, fields=FIELDS)
 answers = f.blob[f.blob.index(bytes([2, 0xFF, 2])) + 7:]  # CHOOSE game, two answers, no time, silence nowhere: then each answer
-check(struct.unpack_from("<HB", answers, 4) == (0xFFFE, 1) and struct.unpack_from("<HB", answers, 4 + 8) == (0xFFFE, 0),
+check(struct.unpack_from("<HB", answers, 4) == (0xFFFE, 1) and struct.unpack_from("<HB", answers, 4 + 9) == (0xFFFE, 0),
       f"answers with fields {answers[:16].hex()}")
 for what, text in (("a field the game has not", PAGE + '        "x" field nope\n'),
                    ("a control and a field at once", PAGE + '        "x" control SWITCH sound field name\n'),

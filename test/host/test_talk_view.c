@@ -103,21 +103,21 @@ int main(int argc, char **argv)
 
     /* the first line of post in the style talk: its place (10 from the left, 10 from the bottom), its fields inside the padding */
     dgx_ge_talk_t t;
-    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, NULL, NULL);
-    CHECK(dgx_ge_talk_view_play(&v, &t, &strings, 0));
+    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, 0, NULL, NULL);
+    CHECK(dgx_ge_talk_view_play(&v, &t, &strings, 0, 0));
     CHECK(v.box.x == 10 && v.box.y == 200 - 10 - 43 && v.box.w == 200 && v.box.h == 43 && v.line.width == 200 && v.line.height == 26);
     CHECK(v.name.height == 13 && v.name_string >= 0 && !strcmp(dgx_ge_string(&strings, v.name_string), "Guard"));
     CHECK(dgx_ge_textbox_appearing(&v.line));                                 /* letter by letter */
     /* the fields change in place (the same picture, the same spot): the view marks them for the frame to draw anew */
     CHECK(covers(frame, v.box));                                               /* a new line: the whole box */
     frame->dirty_count = 0;
-    dgx_ge_talk_view_play(&v, &t, &strings, 10);                               /* no letter more yet: nothing */
+    dgx_ge_talk_view_play(&v, &t, &strings, 10, 10);                               /* no letter more yet: nothing */
     CHECK(frame->dirty_count == 0);
-    dgx_ge_talk_view_play(&v, &t, &strings, 20);                               /* a letter more: the line, not the name */
+    dgx_ge_talk_view_play(&v, &t, &strings, 20, 20);                               /* a letter more: the line, not the name */
     CHECK(covers(frame, dgx_ge_rect(12, 149 + 13, 196, 26)) && !covers(frame, dgx_ge_rect(12, 149, 1, 1)));
     frame->dirty_count = 0;
-    dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_ACTIVATE, 0);                     /* a button: all of it, not on */
-    dgx_ge_talk_view_play(&v, &t, &strings, 0);                                /* seen whole from now: its time runs */
+    dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_ACTIVATE, 0, 0);                     /* a button: all of it, not on */
+    dgx_ge_talk_view_play(&v, &t, &strings, 0, 0);                                /* seen whole from now: its time runs */
     CHECK(!dgx_ge_textbox_appearing(&v.line) && t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Halt! Who goes there?"));
     CHECK(v.line.lines == 1 && v.line.scale == 1 && t.wait_ms == 4000); /* 252 points at 2: at 1; no time of its own: the style's */
     const uint16_t first = t.at;
@@ -139,12 +139,12 @@ int main(int argc, char **argv)
         dgx_ge_talk_view_init(&v3, styles, styles_size, frame3, fonts, 1);
         dgx_ge_talk_view_pixels(&v3, true, NULL);
         dgx_ge_talk_t t3;
-        dgx_ge_talk_start(&t3, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, NULL, NULL);
-        CHECK(dgx_ge_talk_view_play(&v3, &t3, &strings, 0));
+        dgx_ge_talk_start(&t3, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, 0, NULL, NULL);
+        CHECK(dgx_ge_talk_view_play(&v3, &t3, &strings, 0, 0));
         CHECK(v3.unit == 3 && v3.box.x == 30 && v3.box.y == 600 - 30 - 129 && v3.box.w == 600 && v3.box.h == 129);
         CHECK(v3.line.width == 592 && v3.line.height == 78 && v3.name.height == 39 && v3.text_style.scale_max == 6 && v3.text_style.scale_min == 3); /* 588 wide, made whole bytes */
         frame3->dirty_count = 0;
-        dgx_ge_talk_view_play(&v3, &t3, &strings, 20);                  /* a letter more: the text's place, in points of the frame */
+        dgx_ge_talk_view_play(&v3, &t3, &strings, 20, 20);                  /* a letter more: the text's place, in points of the frame */
         CHECK(covers(frame3, dgx_ge_rect(12, 149 + 13, 196, 26)));
         dgx_ge_scene_actors_begin(scene3);
         dgx_ge_talk_view_show(&v3, &t3, scene3, 1);
@@ -157,26 +157,26 @@ int main(int argc, char **argv)
 
     /* the pointer: the view's widgets cover the box with a button; a tap on it (down, then up inside) goes on, as activate; off the box nothing */
     dgx_ge_talk_t tp;
-    dgx_ge_talk_start(&tp, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, NULL, NULL);
+    dgx_ge_talk_start(&tp, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, 0, NULL, NULL);
     const uint16_t tp_at = tp.at;
     CHECK(v.widgets.count == 2 && v.widget_store[1].kind == DGX_GE_WIDGET_BUTTON && v.widget_store[1].w == 200 && v.widget_store[1].y == 147);
     dgx_ge_input_t in = {0};
-    dgx_ge_input_pointer(&in, 5, 5, true), dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10); /* off the box: nothing */
+    dgx_ge_input_pointer(&in, 5, 5, true), dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10, 10); /* off the box: nothing */
     dgx_ge_input_pointer(&in, 5, 5, false);
-    CHECK(!dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10) && tp.at == tp_at && tp.state == DGX_GE_TALK_SAYING);
+    CHECK(!dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10, 10) && tp.at == tp_at && tp.state == DGX_GE_TALK_SAYING);
     dgx_ge_input_pointer(&in, 20, 170, true);
-    CHECK(dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10) && tp.at == tp_at);
+    CHECK(dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10, 10) && tp.at == tp_at);
     dgx_ge_input_pointer(&in, 20, 170, false);
-    CHECK(dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10) && (tp.at != tp_at || tp.state != DGX_GE_TALK_SAYING));
+    CHECK(dgx_ge_talk_view_pointer(&v, &tp, &in.pointer, 10, 10) && (tp.at != tp_at || tp.state != DGX_GE_TALK_SAYING));
 
     /* its time from the style: on by itself 4 s after it is seen */
-    CHECK(dgx_ge_talk_view_play(&v, &t, &strings, 3999) && t.at == first);
-    dgx_ge_talk_view_play(&v, &t, &strings, 4000);
+    CHECK(dgx_ge_talk_view_play(&v, &t, &strings, 3999, 3999) && t.at == first);
+    dgx_ge_talk_view_play(&v, &t, &strings, 4000, 4000);
     CHECK(t.important && !strcmp(dgx_ge_string(&strings, t.string), "Read this."));
 
     /* the answers: a line each, the bar under the one chosen, moving with it */
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 5000);
-    dgx_ge_talk_view_play(&v, &t, &strings, 5000);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 5000, 5000);
+    dgx_ge_talk_view_play(&v, &t, &strings, 5000, 5000);
     CHECK(t.state == DGX_GE_TALK_CHOOSING && v.answers.lines == t.shown);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
@@ -187,22 +187,22 @@ int main(int argc, char **argv)
     if (t.shown > 1) {
         const uint16_t was_at = t.at;
         dgx_ge_input_pointer(&in, 20, 162 + 13 + 6, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &in.pointer, 5000) && t.pick == 1);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &in.pointer, 5000, 5000) && t.pick == 1);
         dgx_ge_input_pointer(&in, 20, 162 + 13 + 6, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &in.pointer, 5000) && (t.at != was_at || t.state != DGX_GE_TALK_CHOOSING));
-        dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, NULL, NULL); /* as it was for the rest */
-        dgx_ge_talk_view_play(&v, &t, &strings, 0);
-        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_ACTIVATE, 0);
-        dgx_ge_talk_view_play(&v, &t, &strings, 0);
-        dgx_ge_talk_view_play(&v, &t, &strings, 4000);
-        dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 5000);
-        dgx_ge_talk_view_play(&v, &t, &strings, 5000);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &in.pointer, 5000, 5000) && (t.at != was_at || t.state != DGX_GE_TALK_CHOOSING));
+        dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, 0, NULL, NULL); /* as it was for the rest */
+        dgx_ge_talk_view_play(&v, &t, &strings, 0, 0);
+        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_ACTIVATE, 0, 0);
+        dgx_ge_talk_view_play(&v, &t, &strings, 0, 0);
+        dgx_ge_talk_view_play(&v, &t, &strings, 4000, 4000);
+        dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 5000, 5000);
+        dgx_ge_talk_view_play(&v, &t, &strings, 5000, 5000);
         dgx_ge_scene_actors_begin(scene);
         dgx_ge_talk_view_show(&v, &t, scene, 1);
     }
     if (t.shown > 1) {
-        dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 5100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 5100);
+        dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 5100, 5100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 5100, 5100);
         dgx_ge_scene_actors_begin(scene);
         dgx_ge_talk_view_show(&v, &t, scene, 1);
         CHECK(scene->actors[3].clip.y == 162 + 13 * v.answers.scale && scene->actors[3].clip.x == 12 && scene->actors[3].clip.w == 196); /* a line lower, inside the frame */
@@ -210,31 +210,31 @@ int main(int argc, char **argv)
     CHECK(t.shown == 2 && t.pick == 1);
     /* six knives: three answers in a box of two lines; the third chosen, the list goes up a line, the bar on it */
     dgx_ge_pockets_put(kid.pockets, &(dgx_ge_pocket_t){.kind = TEST_BLOB_KNIFE}, 3);
-    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 6000, NULL, NULL);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 6000);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 6000);
-    dgx_ge_talk_view_play(&v, &t, &strings, 6000);
+    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 6000, 6000, NULL, NULL);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 6000, 6000);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 6000, 6000);
+    dgx_ge_talk_view_play(&v, &t, &strings, 6000, 6000);
     CHECK(t.shown == 3 && v.answers.lines == 3 && v.answers.shown == 2 && !v.answers.cut && v.answers.top == 0);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 6100);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 6100);
-    dgx_ge_talk_view_play(&v, &t, &strings, 6100);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 6100, 6100);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 6100, 6100);
+    dgx_ge_talk_view_play(&v, &t, &strings, 6100, 6100);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(t.pick == 2 && v.answers.top == 1 && scene->actors[3].clip.y == 162 + 13); /* the second line seen */
-    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 6200);
-    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 6200);
-    dgx_ge_talk_view_play(&v, &t, &strings, 6200);
+    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 6200, 6200);
+    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 6200, 6200);
+    dgx_ge_talk_view_play(&v, &t, &strings, 6200, 6200);
     CHECK(t.pick == 0 && v.answers.top == 0);
     dgx_ge_talk_view_free(&v);
     dgx_ge_pockets_destroy(&kid.pockets);
 
     /* the default style: along the bottom, the frame's width less 8 */
     dgx_ge_talk_view_init(&v, NULL, 0, frame, fonts, 1);
-    dgx_ge_talk_start(&t, &post, NULL, 0, 0, NULL, NULL);
-    CHECK(dgx_ge_talk_view_play(&v, &t, &strings, 0) && v.box.x == 4 && v.box.w == 312 && v.box.y == 200 - 4 - 44 && !t.wait_ms);
+    dgx_ge_talk_start(&t, &post, NULL, 0, 0, 0, NULL, NULL);
+    CHECK(dgx_ge_talk_view_play(&v, &t, &strings, 0, 0) && v.box.x == 4 && v.box.w == 312 && v.box.y == 200 - 4 - 44 && !t.wait_ms);
     t.state = DGX_GE_TALK_OVER;
     dgx_ge_scene_actors_begin(scene);
-    dgx_ge_talk_view_play(&v, &t, &strings, 10);
+    dgx_ge_talk_view_play(&v, &t, &strings, 10, 10);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(scene->actor_count == 0); /* over: nothing shown */
 
@@ -247,8 +247,8 @@ int main(int argc, char **argv)
     static const uint8_t hero_map[4] = {0, 1, 2, 3}, wide_map[256] = {0};
     const uint8_t *const maps[2] = {hero_map, wide_map};
     dgx_ge_talk_view_pictures(&v, &pack, maps);
-    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
-    dgx_ge_talk_view_play(&v, &t, &strings, 0);
+    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, 0, NULL, NULL);
+    dgx_ge_talk_view_play(&v, &t, &strings, 0, 0);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(v.answers.shown == 2 && v.control_ids[0] == TEST_IMG_FOUR && v.control_ids[1] == TEST_IMG_EIGHT); /* sound on, volume 2 (loud not shown) */
@@ -276,58 +276,58 @@ int main(int argc, char **argv)
      * a tap on the down arrow (its button the right margin, right of the controls' pictures, half a line high, at the
      * bottom of the lines): the choice to the line below those seen, the lines a line on; on the up arrow, back up
      */
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 26 - 2, .down = true, .pressed = true}, 50);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 26 - 2, .released = true}, 60);
-    dgx_ge_talk_view_play(&v, &t, &strings, 60);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 26 - 2, .down = true, .pressed = true}, 50, 50);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 26 - 2, .released = true}, 60, 60);
+    dgx_ge_talk_view_play(&v, &t, &strings, 60, 60);
     CHECK(t.pick == 2 && v.answers.top == 1 && t.state == DGX_GE_TALK_CHOOSING);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 1, .down = true, .pressed = true}, 70);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 1, .released = true}, 80);
-    dgx_ge_talk_view_play(&v, &t, &strings, 80);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 1, .down = true, .pressed = true}, 70, 70);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 1, .released = true}, 80, 80);
+    dgx_ge_talk_view_play(&v, &t, &strings, 80, 80);
     CHECK(t.pick == 0 && v.answers.top == 0 && t.state == DGX_GE_TALK_CHOOSING);
     /*
      * the bar is one button the frame's height, past the frame's right edge too (to the display's): a tap on the track
      * below the knob (169 on), away from the ends (6 from each: half a line), a page down: the choice to the last line
      * of the next page, the lines a page on; at the top end, out right of the frame (318), a line up
      */
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 16, .down = true, .pressed = true}, 82);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 16, .released = true}, 84);
-    dgx_ge_talk_view_play(&v, &t, &strings, 84);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 16, .down = true, .pressed = true}, 82, 82);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 16, .released = true}, 84, 84);
+    dgx_ge_talk_view_play(&v, &t, &strings, 84, 84);
     CHECK(t.pick == 3 && v.answers.top == 2 && t.state == DGX_GE_TALK_CHOOSING);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 318, .y = 152 + 2, .down = true, .pressed = true}, 86);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 318, .y = 152 + 2, .released = true}, 88);
-    dgx_ge_talk_view_play(&v, &t, &strings, 88);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 318, .y = 152 + 2, .down = true, .pressed = true}, 86, 86);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 318, .y = 152 + 2, .released = true}, 88, 88);
+    dgx_ge_talk_view_play(&v, &t, &strings, 88, 88);
     CHECK(t.pick == 1 && v.answers.top == 1);
     /* on the knob (at 8 for the lines from the second: nothing); the track above it, past the top end: a page up, to the first line */
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 10, .down = true, .pressed = true}, 89);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 10, .released = true}, 89);
-    dgx_ge_talk_view_play(&v, &t, &strings, 89);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 10, .down = true, .pressed = true}, 89, 89);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 10, .released = true}, 89, 89);
+    dgx_ge_talk_view_play(&v, &t, &strings, 89, 89);
     CHECK(t.pick == 1 && v.answers.top == 1);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 7, .down = true, .pressed = true}, 90);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 7, .released = true}, 92);
-    dgx_ge_talk_view_play(&v, &t, &strings, 92);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 7, .down = true, .pressed = true}, 90, 90);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 7, .released = true}, 92, 92);
+    dgx_ge_talk_view_play(&v, &t, &strings, 92, 92);
     CHECK(t.pick == 0 && v.answers.top == 0);
     /*
      * dragged on the bar (past half its width up or down: 13 wide, 7): the knob follows, the lines seen as many on as the
      * way is of the 18 of the track times the 4 lines: 9 down, 2 lines (the choice to the last line seen); let go, no
      * tap; dragged back up 9, the first line again
      */
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 12, .down = true, .pressed = true}, 93);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 12 + 9, .down = true}, 94);
-    dgx_ge_talk_view_play(&v, &t, &strings, 94);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 12, .down = true, .pressed = true}, 93, 93);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 12 + 9, .down = true}, 94, 94);
+    dgx_ge_talk_view_play(&v, &t, &strings, 94, 94);
     CHECK(t.pick == 3 && v.answers.top == 2);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 12 + 9, .released = true}, 95);
-    dgx_ge_talk_view_play(&v, &t, &strings, 95);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 12 + 9, .released = true}, 95, 95);
+    dgx_ge_talk_view_play(&v, &t, &strings, 95, 95);
     CHECK(t.pick == 3 && v.answers.top == 2 && t.state == DGX_GE_TALK_CHOOSING);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 20, .down = true, .pressed = true}, 96);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 11, .down = true}, 97);
-    dgx_ge_talk_view_play(&v, &t, &strings, 97);
-    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 11, .released = true}, 98);
-    dgx_ge_talk_view_play(&v, &t, &strings, 98);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 20, .down = true, .pressed = true}, 96, 96);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 11, .down = true}, 97, 97);
+    dgx_ge_talk_view_play(&v, &t, &strings, 97, 97);
+    dgx_ge_talk_view_pointer(&v, &t, &(dgx_ge_pointer_t){.x = 4 + 312 - 3, .y = 152 + 4 + 11, .released = true}, 98, 98);
+    dgx_ge_talk_view_play(&v, &t, &strings, 98, 98);
     CHECK(t.pick == 0 && v.answers.top == 0);
     /* the switch: its picture anew, the frame marked */
     frame->dirty_count = 0;
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 100);
-    dgx_ge_talk_view_play(&v, &t, &strings, 100);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 100, 100);
+    dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
     CHECK(v.control_ids[0] == TEST_IMG_ONE && covers(frame, v.box));
     /*
      * the pointer on the controls: the slider has a range (0..3 by 1): a tap at the right end of its picture puts the
@@ -335,7 +335,7 @@ int main(int argc, char **argv)
      * widgets laid anew between and the swipe going on; up or down first: the list swiped instead; the switch a tap flips
      */
     {
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         int slider = -1, row = -1, sw = -1;
         for (int i = 0; i < v.widgets.count; ++i) {
             const dgx_ge_widget_t *w = &v.widget_store[i];
@@ -349,96 +349,96 @@ int main(int argc, char **argv)
         CHECK(s->h == r->h && s->w == 2 && s->x > r->x && s->x + s->w <= r->x + r->w); /* the picture's across (2 wide here), the row's down */
         dgx_ge_input_t pin = {0};
         dgx_ge_input_pointer(&pin, s->x + s->w - 1, s->y, true); /* the picture of the slider is 2x1 here: its row */
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 3);
-        dgx_ge_input_pointer(&pin, s->x + s->w - 1, s->y, false), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100); /* a frame between: volume 3 shows "Loud", the rows move, the widgets are placed anew */
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 3);
+        dgx_ge_input_pointer(&pin, s->x + s->w - 1, s->y, false), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100); /* a frame between: volume 3 shows "Loud", the rows move, the widgets are placed anew */
         for (int i = 0; i < v.widgets.count; ++i)
             if (v.widget_store[i].kind == DGX_GE_WIDGET_SLIDER && !(v.widget_store[i].flags & DGX_GE_WIDGET_SWIPE)) s = &v.widget_store[i];
         CHECK(s->min_row == 2 && s->value == 3);
         dgx_ge_input_pointer(&pin, s->x, s->y, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 0); /* the left end: 0 */
-        dgx_ge_input_pointer(&pin, s->x, s->y, false), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 0); /* the left end: 0 */
+        dgx_ge_input_pointer(&pin, s->x, s->y, false), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         /* the row swiped: down at its left, nothing; a third of it across: 1; a frame between (laid anew), on: 2; back: 0; let go */
         for (int i = 0; i < v.widgets.count; ++i)
             if (v.widget_store[i].kind == DGX_GE_WIDGET_SLIDER && (v.widget_store[i].flags & DGX_GE_WIDGET_SWIPE)) r = &v.widget_store[i];
         const int rx = r->x + 10, ry = r->y + 1, rw = r->w;
         dgx_ge_input_pointer(&pin, rx, ry, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 0);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 0);
         dgx_ge_input_pointer(&pin, rx + rw / 3, ry, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 1);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100); /* its picture anew, the widgets laid anew: the press kept */
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 1);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100); /* its picture anew, the widgets laid anew: the press kept */
         CHECK(v.widgets.pressed >= 0 && (v.widget_store[v.widgets.pressed].flags & DGX_GE_WIDGET_SWIPE));
         dgx_ge_input_pointer(&pin, rx + rw * 2 / 3, ry, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 2);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 2);
         dgx_ge_input_pointer(&pin, rx - rw, ry, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 0);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 0);
         dgx_ge_input_pointer(&pin, rx - rw, ry, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == 0 && t.state == DGX_GE_TALK_CHOOSING);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == 0 && t.state == DGX_GE_TALK_CHOOSING);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         const int32_t sound = settings.params[0];
         w = NULL;
         for (int i = 0; i < v.widgets.count && !w; ++i)
             if (v.widget_store[i].kind == DGX_GE_WIDGET_SWITCH) w = &v.widget_store[i];
-        dgx_ge_input_pointer(&pin, w->x + 1, w->y + 1, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
+        dgx_ge_input_pointer(&pin, w->x + 1, w->y + 1, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
         dgx_ge_input_pointer(&pin, w->x + 1, w->y + 1, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[0] == 1 - sound);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[0] == 1 - sound);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         /* the list swiped up: the choice down a row for each row's height, the lines along; let go: nothing taken */
-        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100), dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100, 100), dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         CHECK(t.pick == 0 && v.answers.top == 0 && t.shown == 4);
         l = &v.widget_store[1];
         /* between the first two lines (the last 2 of the first, the first 2 of the second): no line taken, nothing chosen */
         dgx_ge_input_pointer(&pin, l->x + 20, l->y + 12, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 0 && v.widget_store[v.widgets.pressed].kind == DGX_GE_WIDGET_LIST);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 0 && v.widget_store[v.widgets.pressed].kind == DGX_GE_WIDGET_LIST);
         dgx_ge_input_pointer(&pin, l->x + 20, l->y + 12, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 0 && t.state == DGX_GE_TALK_CHOOSING);
-        dgx_ge_input_pointer(&pin, l->x + 20, l->y, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 0 && t.state == DGX_GE_TALK_CHOOSING);
+        dgx_ge_input_pointer(&pin, l->x + 20, l->y, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
         dgx_ge_input_pointer(&pin, l->x + 20, l->y, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 0 && t.state == DGX_GE_TALK_CHOOSING);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 0 && t.state == DGX_GE_TALK_CHOOSING);
         /* a tap on the slider's row (its text, not its picture): that row chosen, its value as it was, nothing taken */
         for (int i = 0; i < v.widgets.count; ++i)
             if (v.widget_store[i].kind == DGX_GE_WIDGET_SLIDER && (v.widget_store[i].flags & DGX_GE_WIDGET_SWIPE)) r = &v.widget_store[i];
         const int32_t level = settings.params[1];
-        dgx_ge_input_pointer(&pin, r->x + 20, r->y + 4, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
+        dgx_ge_input_pointer(&pin, r->x + 20, r->y + 4, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
         dgx_ge_input_pointer(&pin, r->x + 20, r->y + 4, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == r->min_row && settings.params[1] == level && t.state == DGX_GE_TALK_CHOOSING);
-        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == r->min_row && settings.params[1] == level && t.state == DGX_GE_TALK_CHOOSING);
+        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         CHECK(t.pick == 0);
         const int lx = l->x + 20, ly = l->y + 6; /* on the first line (the second is the slider's row: the swipe across its own) */
         dgx_ge_input_pointer(&pin, lx, ly, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 0); /* the row under it, as a tap */
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 0); /* the row under it, as a tap */
         dgx_ge_input_pointer(&pin, lx, ly - 5, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 0); /* less than half a row: still */
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 0); /* less than half a row: still */
         dgx_ge_input_pointer(&pin, lx, ly - 13, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 1);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 1);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         dgx_ge_input_pointer(&pin, lx, ly - 26, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 2);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100); /* the lines move along: the third answer in sight, the press kept */
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 2);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100); /* the lines move along: the third answer in sight, the press kept */
         CHECK(v.answers.top == 1 && v.widgets.pressed == 1);
         dgx_ge_input_pointer(&pin, lx, ly - 39, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 3);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 3);
         dgx_ge_input_pointer(&pin, lx, ly - 39, false);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && t.pick == 3 && t.state == DGX_GE_TALK_CHOOSING); /* swiped: not taken */
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && t.pick == 3 && t.state == DGX_GE_TALK_CHOOSING); /* swiped: not taken */
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         CHECK(v.answers.top == 2);
         /* a swipe begun on the slider's row going up: the list takes it, the slider as it was */
-        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100), dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100);
-        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100, 100), dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100, 100);
+        dgx_ge_talk_view_event(&v, &t, DGX_GE_UI_PREV, 100, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
         for (int i = 0; i < v.widgets.count; ++i)
             if (v.widget_store[i].kind == DGX_GE_WIDGET_SLIDER && (v.widget_store[i].flags & DGX_GE_WIDGET_SWIPE)) r = &v.widget_store[i];
         const int32_t volume = settings.params[1];
         const int     sx = r->x + 10, sy = r->y + 6, picked = t.pick;
-        dgx_ge_input_pointer(&pin, sx, sy, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
+        dgx_ge_input_pointer(&pin, sx, sy, true), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
         dgx_ge_input_pointer(&pin, sx + 3, sy - 13, true);
-        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100) && settings.params[1] == volume && t.pick != picked &&
+        CHECK(dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100) && settings.params[1] == volume && t.pick != picked &&
               v.widget_store[v.widgets.pressed].kind == DGX_GE_WIDGET_LIST);
-        dgx_ge_input_pointer(&pin, sx + 3, sy - 13, false), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100);
-        dgx_ge_talk_view_play(&v, &t, &strings, 100);
+        dgx_ge_input_pointer(&pin, sx + 3, sy - 13, false), dgx_ge_talk_view_pointer(&v, &t, &pin.pointer, 100, 100);
+        dgx_ge_talk_view_play(&v, &t, &strings, 100, 100);
     }
     /* in pixels of a display three times the frame: the pictures of the controls three times larger, at the right padding; the slider's widget as wide; a tap at the right end of its larger picture: at most */
     {
@@ -453,8 +453,8 @@ int main(int argc, char **argv)
         dgx_ge_talk_view_pictures(&v3, &pack, maps);
         settings.params[0] = 1, settings.params[1] = 2; /* sound on, volume 2: FOUR and EIGHT */
         dgx_ge_talk_t t3;
-        dgx_ge_talk_start(&t3, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
-        CHECK(dgx_ge_talk_view_play(&v3, &t3, &strings, 0));
+        dgx_ge_talk_start(&t3, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, 0, NULL, NULL);
+        CHECK(dgx_ge_talk_view_play(&v3, &t3, &strings, 0, 0));
         dgx_ge_scene_actors_begin(scene3);
         dgx_ge_talk_view_show(&v3, &t3, scene3, 1);
         const dgx_ge_item_t *c = NULL;
@@ -476,15 +476,15 @@ int main(int argc, char **argv)
         CHECK(sl && sl->w == v3.control_images[1].width * 3); /* EIGHT, 2 wide: 6 */
         dgx_ge_input_t pin3 = {0};
         dgx_ge_input_pointer(&pin3, sl->x + sl->w - 1, sl->y, true);
-        CHECK(dgx_ge_talk_view_pointer(&v3, &t3, &pin3.pointer, 10) && settings.params[1] == 3);
-        dgx_ge_input_pointer(&pin3, sl->x + sl->w - 1, sl->y, false), dgx_ge_talk_view_pointer(&v3, &t3, &pin3.pointer, 10);
+        CHECK(dgx_ge_talk_view_pointer(&v3, &t3, &pin3.pointer, 10, 10) && settings.params[1] == 3);
+        dgx_ge_input_pointer(&pin3, sl->x + sl->w - 1, sl->y, false), dgx_ge_talk_view_pointer(&v3, &t3, &pin3.pointer, 10, 10);
         dgx_ge_talk_view_free(&v3);
         dgx_ge_scene_destroy(&scene3);
         dgx_ge_frame_destroy(&frame3);
         dgx_screen_destroy(&big3);
     }
     frame->dirty_count = 0;
-    dgx_ge_talk_view_play(&v, &t, &strings, 200); /* nothing changed: nothing marked */
+    dgx_ge_talk_view_play(&v, &t, &strings, 200, 200); /* nothing changed: nothing marked */
     CHECK(frame->dirty_count == 0);
     /* a frame of a picture: the fill, its corners as they are, its edges and middle repeated between them; no pictures: a fill */
     dgx_ge_dialog_t other;
@@ -492,15 +492,15 @@ int main(int argc, char **argv)
     CHECK(blob && dgx_ge_dialog_open(&other, blob, n));
     /* a talk started after the view's play this frame: nothing shown until played (not the fields of the talk before, in its style, at its place) */
     dgx_ge_talk_t fresh;
-    dgx_ge_talk_start(&fresh, &other, NULL, TEST_STYLE_BOXED, 1000, NULL, NULL);
+    dgx_ge_talk_start(&fresh, &other, NULL, TEST_STYLE_BOXED, 1000, 1000, NULL, NULL);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &fresh, scene, 1);
     CHECK(scene->actor_count == 0 && v.style_number >= 0);
     dgx_ge_talk_view_free(&v);
     dgx_ge_talk_view_init(&v, styles, styles_size, frame, fonts, 1);
     dgx_ge_talk_view_pictures(&v, &pack, maps);
-    dgx_ge_talk_start(&t, &other, NULL, TEST_STYLE_BOXED, 1000, NULL, NULL);
-    dgx_ge_talk_view_play(&v, &t, &strings, 1000);
+    dgx_ge_talk_start(&t, &other, NULL, TEST_STYLE_BOXED, 1000, 1000, NULL, NULL);
+    dgx_ge_talk_view_play(&v, &t, &strings, 1000, 1000);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(v.frame_pieces && scene->actor_count == 11 && (scene->actors[0].flags & DGX_GE_ITEM_FILL) && dgx_ge_rect_equal(scene->actors[0].clip, v.box));
@@ -513,7 +513,7 @@ int main(int argc, char **argv)
     CHECK(pc[8].x == 49 && pc[8].y == 49 && !(pc[8].flags & DGX_GE_ITEM_REPEAT));                                            /* bottom right */
     CHECK(scene->actors[10].image == &v.line.image && scene->actors[10].x == 13 && scene->actors[10].y == 23);
     dgx_ge_talk_view_pictures(&v, NULL, NULL);
-    dgx_ge_talk_view_play(&v, &t, &strings, 1100);
+    dgx_ge_talk_view_play(&v, &t, &strings, 1100, 1100);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(!v.frame_pieces && scene->actor_count == 3 && scene->actors[2].image == &v.line.image); /* border, fill, the line: laid again */
@@ -529,8 +529,8 @@ int main(int argc, char **argv)
         dgx_ge_talk_view_pixels(&v3, true, NULL);
         dgx_ge_talk_view_pictures(&v3, &pack, maps);
         dgx_ge_talk_t t3;
-        dgx_ge_talk_start(&t3, &other, NULL, TEST_STYLE_BOXED, 1000, NULL, NULL);
-        dgx_ge_talk_view_play(&v3, &t3, &strings, 1000);
+        dgx_ge_talk_start(&t3, &other, NULL, TEST_STYLE_BOXED, 1000, 1000, NULL, NULL);
+        dgx_ge_talk_view_play(&v3, &t3, &strings, 1000, 1000);
         dgx_ge_scene_actors_begin(scene3);
         dgx_ge_talk_view_show(&v3, &t3, scene3, 1);
         CHECK(v3.frame_pieces && v3.style.frame == 2 && v3.box.x == 30 && v3.box.y == 60 && v3.box.w == 120 && v3.box.h == 90);
@@ -550,8 +550,8 @@ int main(int argc, char **argv)
     dgx_ge_dialog_t faces;
     blob = dgx_ge_pack_blob(&pack, TEST_BLOB_FACES, &n);
     CHECK(blob && dgx_ge_dialog_open(&faces, blob, n) && dgx_ge_dialog_role_face(&faces, 0) == TEST_IMG_FACE && dgx_ge_dialog_role_face(&faces, 1) < 0);
-    dgx_ge_talk_start(&t, &faces, NULL, 0, 2000, NULL, NULL);
-    dgx_ge_talk_view_play(&v, &t, &strings, 2000);
+    dgx_ge_talk_start(&t, &faces, NULL, 0, 2000, 2000, NULL, NULL);
+    dgx_ge_talk_view_play(&v, &t, &strings, 2000, 2000);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(v.style.portrait == 1 && v.style.portrait_w == 6 && v.line.width == 48 && v.face_id == TEST_IMG_FACE);
@@ -559,10 +559,10 @@ int main(int argc, char **argv)
     CHECK(scene->actors[2].x == 2 && scene->actors[2].y == 2 + 1 && dgx_ge_rect_equal(scene->actors[2].clip, dgx_ge_rect(2, 2, 6, 26)));
     CHECK(scene->actors[3].image == &v.line.image && scene->actors[3].x == 2 + 6 + 2);
     frame->dirty_count = 0;
-    dgx_ge_talk_view_play(&v, &t, &strings, 2020); /* a letter more: the text where it is drawn, beside the portrait */
+    dgx_ge_talk_view_play(&v, &t, &strings, 2020, 2020); /* a letter more: the text where it is drawn, beside the portrait */
     CHECK(frame->dirty_count > 0 && covers(frame, dgx_ge_rect(2 + 6 + 2, 2, v.line.width, v.line.height)));
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 2100); /* the kid chooses: no face */
-    dgx_ge_talk_view_play(&v, &t, &strings, 2100);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 2100, 2100); /* the kid chooses: no face */
+    dgx_ge_talk_view_play(&v, &t, &strings, 2100, 2100);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(v.face_id == -1 && scene->actor_count == 4 && scene->actors[3].image == &v.answers.image && scene->actors[3].x == 10); /* border, fill, bar, answers */
@@ -572,15 +572,15 @@ int main(int argc, char **argv)
     dgx_ge_talk_view_free(&v);
     dgx_font_t *const two_fonts[2] = {TerminusTTFMedium12(), font0ss()};
     dgx_ge_talk_view_init(&v, styles, styles_size, frame, two_fonts, 2);
-    dgx_ge_talk_start(&t, &other, NULL, TEST_STYLE_INKED, 3000, NULL, NULL);
-    dgx_ge_talk_view_play(&v, &t, &strings, 3000);
+    dgx_ge_talk_start(&t, &other, NULL, TEST_STYLE_INKED, 3000, 3000, NULL, NULL);
+    dgx_ge_talk_view_play(&v, &t, &strings, 3000, 3000);
     CHECK(v.style.soft && v.line.bits == 8 && v.answers.image.data == v.line.image.data && v.name.canvas == NULL);
     CHECK(frame->rgb[v.ink[0]][0] == (200 * 14 + 40) / 15 && frame->rgb[v.ink[14]][0] == 40 && frame->rgb[v.ink[14]][1] == 20);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(scene->actors[2].image == &v.line.image && scene->actors[2].map == v.ink);
-    dgx_ge_talk_start(&t, &other, NULL, TEST_STYLE_PIXELS_SOFT, 3100, NULL, NULL); /* a font of pixels: 1 bit, no shades */
-    dgx_ge_talk_view_play(&v, &t, &strings, 3100);
+    dgx_ge_talk_start(&t, &other, NULL, TEST_STYLE_PIXELS_SOFT, 3100, 3100, NULL, NULL); /* a font of pixels: 1 bit, no shades */
+    dgx_ge_talk_view_play(&v, &t, &strings, 3100, 3100);
     dgx_ge_scene_actors_begin(scene);
     dgx_ge_talk_view_show(&v, &t, scene, 1);
     CHECK(v.style.soft && v.line.bits == 1 && scene->actors[2].map == NULL);
@@ -602,8 +602,8 @@ int main(int argc, char **argv)
         char                 name[TEST_FIELD_NAME_SIZE] = "ab", motto[TEST_FIELD_MOTTO_SIZE] = "";
         const dgx_ge_field_t fields[TEST_FIELD_COUNT]   = {[TEST_FIELD_NAME] = {name, sizeof name}, [TEST_FIELD_MOTTO] = {motto, sizeof motto}};
         dgx_ge_talk_t        tn;
-        dgx_ge_talk_start(&tn, &names, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds, .fields = fields, .field_count = TEST_FIELD_COUNT}, 0, 0, NULL, NULL);
-        CHECK(dgx_ge_talk_view_play(&v, &tn, &strings, 0));
+        dgx_ge_talk_start(&tn, &names, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds, .fields = fields, .field_count = TEST_FIELD_COUNT}, 0, 0, 0, NULL, NULL);
+        CHECK(dgx_ge_talk_view_play(&v, &tn, &strings, 0, 0));
         CHECK(dgx_ge_talk_field(&tn, 0) == &fields[TEST_FIELD_NAME] && dgx_ge_talk_field(&tn, 1) == &fields[TEST_FIELD_MOTTO] && !dgx_ge_talk_field(&tn, 2));
         CHECK(v.fields->rows[0] == 0 && v.fields->rows[1] == 1 && v.fields->boxes[0] && v.fields->boxes[1] && v.fields->boxes[0]->text == name);
         dgx_ge_scene_actors_begin(scene);
@@ -623,73 +623,73 @@ int main(int argc, char **argv)
         CHECK(frames == 2 && texts == 2);
         CHECK(!dgx_ge_talk_view_editing(&v, &tn, NULL));
         /* activate on the name: edited, the caret after it */
-        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 100);
+        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 100, 100);
         CHECK(tn.editing && tn.state == DGX_GE_TALK_CHOOSING && tn.pick == 0);
-        dgx_ge_talk_view_play(&v, &tn, &strings, 100);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 100, 100);
         dgx_ge_rect_t field;
         CHECK(v.editing && !strcmp(v.fields->edit, "ab_") && v.fields->boxes[0]->text == v.fields->edit);
         CHECK(dgx_ge_talk_view_editing(&v, &tn, &field) && dgx_ge_rect_equal(field, dgx_ge_rect(fx, fy, v.line.width / 2, lh)));
         /* typed: a, an é of two bytes, d, e: 7 bytes, all the field holds (8, its 0 too); f no more, nor an é split */
         const uint8_t changes = tn.changes;
-        dgx_ge_talk_view_type(&v, &tn, 'c', 120);
-        dgx_ge_talk_view_type(&v, &tn, 0xE9, 130);
-        dgx_ge_talk_view_type(&v, &tn, 'd', 140);
+        dgx_ge_talk_view_type(&v, &tn, 'c', 120, 120);
+        dgx_ge_talk_view_type(&v, &tn, 0xE9, 130, 130);
+        dgx_ge_talk_view_type(&v, &tn, 'd', 140, 140);
         CHECK(!strcmp(v.fields->edit, "abc\xc3\xa9" "d_") && v.fields->edit_len == 6);
-        dgx_ge_talk_view_type(&v, &tn, 0xE9, 150); /* 6 + 2 > 7 */
+        dgx_ge_talk_view_type(&v, &tn, 0xE9, 150, 150); /* 6 + 2 > 7 */
         CHECK(v.fields->edit_len == 6);
-        dgx_ge_talk_view_type(&v, &tn, 'e', 160);
-        dgx_ge_talk_view_type(&v, &tn, 'f', 170);
-        dgx_ge_talk_view_type(&v, &tn, 0x07, 175); /* a control character: nothing */
+        dgx_ge_talk_view_type(&v, &tn, 'e', 160, 160);
+        dgx_ge_talk_view_type(&v, &tn, 'f', 170, 170);
+        dgx_ge_talk_view_type(&v, &tn, 0x07, 175, 175); /* a control character: nothing */
         CHECK(!strcmp(v.fields->edit, "abc\xc3\xa9" "de_") && v.fields->edit_len == 7 && !strcmp(name, "ab"));
         /* the talk's own events: nothing while it is edited (next stays), its choice's time waits */
-        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_NEXT, 180);
-        dgx_ge_talk_event(&tn, DGX_GE_UI_NEXT, 180), dgx_ge_talk_event(&tn, DGX_GE_UI_ACTIVATE, 180); /* the talk's own: nothing either */
-        dgx_ge_talk_play(&tn, 6000, true);
+        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_NEXT, 180, 180);
+        dgx_ge_talk_event(&tn, DGX_GE_UI_NEXT, 180, 180), dgx_ge_talk_event(&tn, DGX_GE_UI_ACTIVATE, 180, 180); /* the talk's own: nothing either */
+        dgx_ge_talk_play(&tn, 6000, 6000, true);
         CHECK(tn.pick == 0 && tn.editing && tn.state == DGX_GE_TALK_CHOOSING);
         /* the caret blinks: gone half a second after the last key, back after another */
-        dgx_ge_talk_view_play(&v, &tn, &strings, 680);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 680, 680);
         CHECK(!v.fields->caret && v.fields->edit[v.fields->edit_len] == 0);
-        dgx_ge_talk_view_play(&v, &tn, &strings, 1180);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 1180, 1180);
         CHECK(v.fields->caret && !strcmp(v.fields->edit, "abc\xc3\xa9" "de_"));
         /* erased: e, d, then the é whole */
-        dgx_ge_talk_view_type(&v, &tn, 0x08, 1200), dgx_ge_talk_view_type(&v, &tn, 0x08, 1210), dgx_ge_talk_view_type(&v, &tn, 0x08, 1220);
+        dgx_ge_talk_view_type(&v, &tn, 0x08, 1200, 1200), dgx_ge_talk_view_type(&v, &tn, 0x08, 1210, 1210), dgx_ge_talk_view_type(&v, &tn, 0x08, 1220, 1220);
         CHECK(!strcmp(v.fields->edit, "abc_") && v.fields->edit_len == 3);
         /* done: the game's field, the change counted; no label: the choice stays, its time from now */
-        dgx_ge_talk_view_type(&v, &tn, '\n', 1300);
+        dgx_ge_talk_view_type(&v, &tn, '\n', 1300, 1300);
         CHECK(!strcmp(name, "abc") && tn.changes == (uint8_t)(changes + 1) && !tn.editing && !v.editing && tn.state == DGX_GE_TALK_CHOOSING);
-        dgx_ge_talk_play(&tn, 6000, true);
+        dgx_ge_talk_play(&tn, 6000, 6000, true);
         CHECK(tn.state == DGX_GE_TALK_CHOOSING);
-        dgx_ge_talk_view_play(&v, &tn, &strings, 1310);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 1310, 1310);
         CHECK(v.fields->boxes[0]->text == name && !dgx_ge_talk_view_editing(&v, &tn, NULL));
         /* cancelled (back): as it was, nothing counted */
-        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 1400), dgx_ge_talk_view_play(&v, &tn, &strings, 1400);
-        dgx_ge_talk_view_type(&v, &tn, 'x', 1410);
-        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_BACK, 1420);
+        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 1400, 1400), dgx_ge_talk_view_play(&v, &tn, &strings, 1400, 1400);
+        dgx_ge_talk_view_type(&v, &tn, 'x', 1410, 1410);
+        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_BACK, 1420, 1420);
         CHECK(!strcmp(name, "abc") && tn.changes == (uint8_t)(changes + 1) && !tn.editing);
         /* a tap on the field edits it; a tap away from it is done */
-        dgx_ge_talk_view_play(&v, &tn, &strings, 1500);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 1500, 1500);
         const int cx = fx + v.line.width / 4, cy = fy + lh / 2;
-        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = cx, .y = cy, .down = true, .pressed = true}, 1500));
-        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = cx, .y = cy, .released = true}, 1550));
+        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = cx, .y = cy, .down = true, .pressed = true}, 1500, 1500));
+        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = cx, .y = cy, .released = true}, 1550, 1550));
         CHECK(tn.editing && tn.pick == 0);
-        dgx_ge_talk_view_play(&v, &tn, &strings, 1560);
-        dgx_ge_talk_view_type(&v, &tn, 'z', 1570);
-        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = cx, .y = cy, .down = true, .pressed = true}, 1580) && tn.editing); /* on it: still */
-        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = v.box.x + 2, .y = cy + lh, .down = true, .pressed = true}, 1600));
+        dgx_ge_talk_view_play(&v, &tn, &strings, 1560, 1560);
+        dgx_ge_talk_view_type(&v, &tn, 'z', 1570, 1570);
+        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = cx, .y = cy, .down = true, .pressed = true}, 1580, 1580) && tn.editing); /* on it: still */
+        CHECK(dgx_ge_talk_view_pointer(&v, &tn, &(dgx_ge_pointer_t){.x = v.box.x + 2, .y = cy + lh, .down = true, .pressed = true}, 1600, 1600));
         CHECK(!tn.editing && !strcmp(name, "abcz") && tn.changes == (uint8_t)(changes + 2));
         /* the motto: larger than the engine edits (40 > 32): 31 bytes typed, the box shows the end of it; done, on to its label */
-        dgx_ge_talk_view_play(&v, &tn, &strings, 1700);
-        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_NEXT, 1700), dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 1700);
-        dgx_ge_talk_view_play(&v, &tn, &strings, 1700);
-        for (int i = 0; i < 40; ++i) dgx_ge_talk_view_type(&v, &tn, (uint32_t)('a' + i % 26), 1710);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 1700, 1700);
+        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_NEXT, 1700, 1700), dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 1700, 1700);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 1700, 1700);
+        for (int i = 0; i < 40; ++i) dgx_ge_talk_view_type(&v, &tn, (uint32_t)('a' + i % 26), 1710, 1710);
         CHECK(v.fields->edit_len == DGX_GE_FIELD_BYTES - 1 && v.fields->boxes[1]->text > v.fields->edit && !v.fields->boxes[1]->cut && v.fields->boxes[1]->text[strlen(v.fields->boxes[1]->text) - 1] == '_');
-        dgx_ge_talk_view_type(&v, &tn, '\n', 1800);
+        dgx_ge_talk_view_type(&v, &tn, '\n', 1800, 1800);
         CHECK(strlen(motto) == DGX_GE_FIELD_BYTES - 1 && !strncmp(motto, "abcdefghijklmnopqrstuvwxyzabcde", 31) && tn.state == DGX_GE_TALK_SAYING);
         /* a field the game did not give: shown as an answer, never edited */
-        dgx_ge_talk_start(&tn, &names, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 2000, NULL, NULL);
-        dgx_ge_talk_view_play(&v, &tn, &strings, 2000);
+        dgx_ge_talk_start(&tn, &names, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 2000, 2000, NULL, NULL);
+        dgx_ge_talk_view_play(&v, &tn, &strings, 2000, 2000);
         CHECK(!dgx_ge_talk_field(&tn, 0) && (!v.fields || v.fields->rows[0] == -1));
-        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 2010);
+        dgx_ge_talk_view_event(&v, &tn, DGX_GE_UI_ACTIVATE, 2010, 2010);
         CHECK(!tn.editing && tn.state == DGX_GE_TALK_CHOOSING && tn.pick == 0);
         dgx_ge_talk_view_free(&v);
         CHECK(!v.fields);
@@ -705,16 +705,16 @@ int main(int argc, char **argv)
         dgx_ge_talk_view_t vb;
         dgx_ge_talk_view_init(&vb, styles, styles_size, frame, fonts, 1);
         dgx_ge_talk_t tb;
-        dgx_ge_talk_start(&tb, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, NULL, NULL);
+        dgx_ge_talk_start(&tb, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 0, 0, NULL, NULL);
         const uint16_t tb_at = tb.at;
-        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 0);
+        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 0, 0);
         CHECK(tb.at == tb_at && tb.state == DGX_GE_TALK_SAYING);
-        dgx_ge_talk_view_play(&vb, &tb, &strings, 0);
-        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 10); /* appearing: all of it */
+        dgx_ge_talk_view_play(&vb, &tb, &strings, 0, 0);
+        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 10, 10); /* appearing: all of it */
         CHECK(tb.at == tb_at && !dgx_ge_textbox_appearing(&vb.line));
-        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 20); /* seen: on */
+        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 20, 20); /* seen: on */
         const uint16_t tb_next = tb.at;
-        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 30); /* the next one not played yet: it stays */
+        dgx_ge_talk_view_event(&vb, &tb, DGX_GE_UI_ACTIVATE, 30, 30); /* the next one not played yet: it stays */
         CHECK(tb_next != tb_at && tb.at == tb_next && tb.state == DGX_GE_TALK_SAYING);
         dgx_ge_talk_view_free(&vb);
     }
@@ -736,16 +736,16 @@ int main(int argc, char **argv)
         dgx_ge_talk_view_t    vs;
         dgx_ge_talk_view_init(&vs, styles, styles_size, frame, fonts, 1);
         dgx_ge_talk_t ts;
-        dgx_ge_talk_start(&ts, &swap, &(dgx_ge_cast_t){.roles = sc}, TEST_STYLE_TALK, 0, NULL, NULL);
-        CHECK(dgx_ge_talk_view_play(&vs, &ts, &strings, 0));
+        dgx_ge_talk_start(&ts, &swap, &(dgx_ge_cast_t){.roles = sc}, TEST_STYLE_TALK, 0, 0, NULL, NULL);
+        CHECK(dgx_ge_talk_view_play(&vs, &ts, &strings, 0, 0));
         CHECK(ts.state == DGX_GE_TALK_CHOOSING && ts.shown == 3 && !strcmp(vs.answers.text, "Leave.\nTake the knife.\nWait."));
         const uint16_t ask = ts.at;
-        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 10);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 10);
-        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_ACTIVATE, 10); /* taken: the kid's now, the same choice again */
+        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 10, 10);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 10, 10);
+        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_ACTIVATE, 10, 10); /* taken: the kid's now, the same choice again */
         CHECK(ts.at == ask && ts.state == DGX_GE_TALK_CHOOSING && ts.shown == 3 && ts.pick == 0 && dgx_ge_pockets_count(boy.pockets, TEST_BLOB_KNIFE) == 1);
         frame->dirty_count = 0;
-        CHECK(dgx_ge_talk_view_play(&vs, &ts, &strings, 10));
+        CHECK(dgx_ge_talk_view_play(&vs, &ts, &strings, 10, 10));
         CHECK(!strcmp(vs.answers.text, "Leave.\nGive back the knife you took from the guard a moment ago.\nWait.") && covers(frame, vs.box));
         /*
          * a long answer, wrapped into two lines (four lines, two seen): chosen, the lines seen go up until all of it is
@@ -757,20 +757,20 @@ int main(int argc, char **argv)
         dgx_ge_scene_actors_begin(scene);
         dgx_ge_talk_view_show(&vs, &ts, scene, 1);
         CHECK(bar_under(&vs, scene, &under) && under.y == ty && under.h == 13);
-        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 20);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 20);
+        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 20, 20);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 20, 20);
         dgx_ge_scene_actors_begin(scene);
         dgx_ge_talk_view_show(&vs, &ts, scene, 1);
         CHECK(ts.pick == 1 && vs.answers.top == 1 && bar_under(&vs, scene, &under) && under.y == ty && under.h == 2 * 13);
-        CHECK(dgx_ge_talk_view_pointer(&vs, &ts, &(dgx_ge_pointer_t){.x = 20, .y = ty + 13 + 6, .down = true, .pressed = true}, 40) && ts.pick == 1);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 40);
-        CHECK(dgx_ge_talk_view_pointer(&vs, &ts, &(dgx_ge_pointer_t){.x = 20, .y = ty + 13 + 6, .released = true}, 50));
+        CHECK(dgx_ge_talk_view_pointer(&vs, &ts, &(dgx_ge_pointer_t){.x = 20, .y = ty + 13 + 6, .down = true, .pressed = true}, 40, 40) && ts.pick == 1);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 40, 40);
+        CHECK(dgx_ge_talk_view_pointer(&vs, &ts, &(dgx_ge_pointer_t){.x = 20, .y = ty + 13 + 6, .released = true}, 50, 50));
         CHECK(ts.state == DGX_GE_TALK_CHOOSING && ts.pick == 0 && dgx_ge_pockets_count(boy.pockets, TEST_BLOB_KNIFE) == 0); /* given back: the same choice again */
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 50);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 50, 50);
         CHECK(!strcmp(vs.answers.text, "Leave.\nTake the knife.\nWait.") && vs.answers.top == 0);
         /* the last one, a line: under it alone */
-        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 60), dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 60);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 60);
+        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 60, 60), dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_NEXT, 60, 60);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 60, 60);
         dgx_ge_scene_actors_begin(scene);
         dgx_ge_talk_view_show(&vs, &ts, scene, 1);
         CHECK(ts.pick == 2 && vs.answers.top == 1 && bar_under(&vs, scene, &under) && under.y == ty + 13 && under.h == 13);
@@ -780,28 +780,28 @@ int main(int argc, char **argv)
         blob = dgx_ge_pack_blob(&pack, TEST_BLOB_LOUD, &n);
         CHECK(blob && dgx_ge_dialog_open(&loud, blob, n));
         settings.params[1] = 2;
-        dgx_ge_talk_start(&ts, &loud, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 20, NULL, NULL);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 20);
+        dgx_ge_talk_start(&ts, &loud, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 20, 20, NULL, NULL);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 20, 20);
         CHECK(!strcmp(vs.answers.text, "Volume\nFine."));
-        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_MORE, 30);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 30);
+        dgx_ge_talk_view_event(&vs, &ts, DGX_GE_UI_MORE, 30, 30);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 30, 30);
         CHECK(settings.params[1] == 3 && ts.shown == 2 && !strcmp(vs.answers.text, "Volume\nToo loud."));
         /* a line of a number longer than 95 bytes: whole; a line without numbers after it gives its text back */
         dgx_ge_dialog_t tale;
         blob = dgx_ge_pack_blob(&pack, TEST_BLOB_TALE, &n);
         CHECK(blob && dgx_ge_dialog_open(&tale, blob, n));
         settings.params[1] = -12345;
-        dgx_ge_talk_start(&ts, &tale, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 35, NULL, NULL);
-        CHECK(dgx_ge_talk_view_play(&vs, &ts, &strings, 35) && vs.said && vs.line.text == vs.said);
+        dgx_ge_talk_start(&ts, &tale, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 35, 35, NULL, NULL);
+        CHECK(dgx_ge_talk_view_play(&vs, &ts, &strings, 35, 35) && vs.said && vs.line.text == vs.said);
         CHECK(!strcmp(vs.line.text, "The volume is -12345 now, and so it stays until somebody comes and turns the knob again, to the left or right."));
         /* numbers of 32 bits in a line whose {names} are short (a translation's {i}): whole */
         dgx_ge_dialog_t clock;
         blob = dgx_ge_pack_blob(&pack, TEST_BLOB_CLOCK, &n);
         CHECK(blob && dgx_ge_dialog_open(&clock, blob, n));
         settings.params[TEST_SETTINGS_PARAM_VOLUME] = settings.params[TEST_SETTINGS_PARAM_SOUND] = INT32_MIN;
-        dgx_ge_talk_start(&ts, &clock, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 36, NULL, NULL);
-        dgx_ge_talk_play(&ts, 36, true), dgx_ge_talk_play(&ts, 1036, true), dgx_ge_talk_play(&ts, 1036, true), dgx_ge_talk_play(&ts, 2036, true);
-        CHECK(ts.state == DGX_GE_TALK_SAYING && ts.count == 2 && dgx_ge_talk_view_play(&vs, &ts, &strings, 2036));
+        dgx_ge_talk_start(&ts, &clock, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 36, 36, NULL, NULL);
+        dgx_ge_talk_play(&ts, 36, 36, true), dgx_ge_talk_play(&ts, 1036, 1036, true), dgx_ge_talk_play(&ts, 1036, 1036, true), dgx_ge_talk_play(&ts, 2036, 2036, true);
+        CHECK(ts.state == DGX_GE_TALK_SAYING && ts.count == 2 && dgx_ge_talk_view_play(&vs, &ts, &strings, 2036, 2036));
         CHECK(!strcmp(vs.line.text, "Громкость -2147483648, звук -2147483648."));
         settings.params[TEST_SETTINGS_PARAM_SOUND] = 0;
         settings.params[1] = 2;
@@ -809,26 +809,61 @@ int main(int argc, char **argv)
         dgx_ge_dialog_t many;
         blob = dgx_ge_pack_blob(&pack, TEST_BLOB_MANY, &n);
         CHECK(blob && dgx_ge_dialog_open(&many, blob, n));
-        dgx_ge_talk_start(&ts, &many, &(dgx_ge_cast_t){.roles = sc}, TEST_STYLE_TALK, 40, NULL, NULL);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 40);
+        dgx_ge_talk_start(&ts, &many, &(dgx_ge_cast_t){.roles = sc}, TEST_STYLE_TALK, 40, 40, NULL, NULL);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 40, 40);
         CHECK(ts.shown == 3 && strlen(vs.answers.text) == 3 * 201 + 2 && vs.answers.text[strlen(vs.answers.text) - 1] == '2');
-        dgx_ge_talk_start(&ts, &swap, &(dgx_ge_cast_t){.roles = sc}, TEST_STYLE_TALK, 0, NULL, NULL);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 45);
-        dgx_ge_talk_start(&ts, &tale, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 50, NULL, NULL);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 50);
+        dgx_ge_talk_start(&ts, &swap, &(dgx_ge_cast_t){.roles = sc}, TEST_STYLE_TALK, 0, 0, NULL, NULL);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 45, 45);
+        dgx_ge_talk_start(&ts, &tale, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 50, 50, NULL, NULL);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 50, 50);
         CHECK(vs.said);
-        dgx_ge_talk_start(&ts, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 55, NULL, NULL);
-        dgx_ge_talk_view_play(&vs, &ts, &strings, 55);
+        dgx_ge_talk_start(&ts, &post, &(dgx_ge_cast_t){.roles = cast}, TEST_STYLE_TALK, 55, 55, NULL, NULL);
+        dgx_ge_talk_view_play(&vs, &ts, &strings, 55, 55);
         CHECK(!vs.said && !strcmp(vs.line.text, "Halt! Who goes there?"));
         dgx_ge_talk_view_free(&vs);
         CHECK(!vs.all && !vs.said);
         dgx_ge_pockets_destroy(&guard.pockets), dgx_ge_pockets_destroy(&boy.pockets);
     }
 
+    /*
+     * Two clocks through the view: a dialog that stops the game, the talk's own time from 10500, the world standing at
+     * 500. Its line goes on by the talk's time; on by its time, by a button, by a tap: the tells at the world's moment,
+     * nothing set in the talk by the game.
+     */
+    {
+        dgx_ge_dialog_t rest;
+        blob = dgx_ge_pack_blob(&pack, TEST_BLOB_REST, &n);
+        CHECK(blob && dgx_ge_dialog_open(&rest, blob, n));
+        dgx_ge_actor_t        hero;
+        dgx_ge_actor_t *const resting[1] = {&hero};
+        dgx_ge_talk_view_t    vr;
+        dgx_ge_talk_t         tr;
+        dgx_ge_talk_view_init(&vr, NULL, 0, frame, fonts, 1); /* the default style: the line at once */
+        for (int how = 0; how < 3; ++how) {
+            dgx_ge_actor_start(&hero, dgx_ge_kind(&kinds, TEST_BLOB_HERO), TEST_HERO_SCRIPT_RUN, 0, 0, 0);
+            dgx_ge_talk_start(&tr, &rest, &(dgx_ge_cast_t){.roles = resting}, 0, 10500, 500, NULL, NULL);
+            CHECK(hero.script == TEST_HERO_SCRIPT_HURT && hero.entered_ms == 500);
+            CHECK(dgx_ge_talk_view_play(&vr, &tr, &strings, 10500, 500) && tr.state == DGX_GE_TALK_SAYING);
+            dgx_ge_talk_view_play(&vr, &tr, &strings, 11499, 500);
+            CHECK(tr.state == DGX_GE_TALK_SAYING && hero.script == TEST_HERO_SCRIPT_HURT);
+            if (how == 0) dgx_ge_talk_view_play(&vr, &tr, &strings, 11500, 500); /* its second, by the talk's clock */
+            if (how == 1) dgx_ge_talk_view_event(&vr, &tr, DGX_GE_UI_ACTIVATE, 11000, 500);
+            if (how == 2) {
+                dgx_ge_input_t tap = {0};
+                dgx_ge_input_pointer(&tap, vr.box.x + vr.box.w / 2, vr.box.y + vr.box.h / 2, true);
+                dgx_ge_talk_view_pointer(&vr, &tr, &tap.pointer, 11000, 500);
+                dgx_ge_input_pointer(&tap, vr.box.x + vr.box.w / 2, vr.box.y + vr.box.h / 2, false);
+                dgx_ge_talk_view_pointer(&vr, &tr, &tap.pointer, 11010, 500);
+            }
+            CHECK(tr.state == DGX_GE_TALK_OVER && hero.script == TEST_HERO_SCRIPT_FALL && hero.entered_ms == 500);
+        }
+        dgx_ge_talk_view_free(&vr);
+    }
+
     /* no pack given: no pictures */
     dgx_ge_talk_view_pictures(&v, NULL, NULL);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 300);
-    dgx_ge_talk_view_play(&v, &t, &strings, 300);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 300, 300);
+    dgx_ge_talk_view_play(&v, &t, &strings, 300, 300);
     CHECK(v.control_ids[0] == -1 && v.control_ids[1] == -1);
     dgx_ge_talk_view_free(&v);
 

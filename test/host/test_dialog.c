@@ -69,37 +69,37 @@ int main(int argc, char **argv)
     CHECK(blob && dgx_ge_dialog_open(&post, blob, n) && post.roles == 3);
     blob = dgx_ge_pack_blob(&pack, TEST_BLOB_OTHER, &n);
     CHECK(blob && dgx_ge_dialog_open(&other, blob, n) && other.roles == 0);
-    CHECK(!strcmp(dgx_ge_string(&strings, 9999), "") && strings.count == 39); /* 7 of post, 2 names, 4 of other (Thanks. there), 6 of page, 2 of faces (Hi., Bye.), 3 of names (Back there), 4 of clock,
-                                                                             4 of swap, 2 of loud (Volume there), 1 of tale, 3 of many */
+    CHECK(!strcmp(dgx_ge_string(&strings, 9999), "") && strings.count == 43); /* 7 of post, 2 names, 4 of other (Thanks. there), 1 of rest, 6 of page, 2 of faces (Hi., Bye.), 3 of names (Back there), 4 of clock,
+                                                                             4 of swap, 2 of loud (Volume there), 1 of tale, 3 of many, 3 of tally_page (Back there) */
 
     /* times: a line on by itself, an important one only once seen whole, a choice unanswered where silence leads */
     dgx_ge_talk_t t;
-    dgx_ge_talk_start(&t, &other, NULL, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &other, NULL, 0, 0, 0, NULL, NULL);
     CHECK(t.state == DGX_GE_TALK_SAYING && t.role == DGX_GE_ROLE_GAME && !strcmp(dgx_ge_string(&strings, t.string), "Thanks.") && t.wait_ms == 2000);
-    dgx_ge_talk_play(&t, 0, true);
-    dgx_ge_talk_play(&t, 1999, true);
+    dgx_ge_talk_play(&t, 0, 0, true);
+    dgx_ge_talk_play(&t, 1999, 1999, true);
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Thanks."));
-    dgx_ge_talk_play(&t, 2000, true);
+    dgx_ge_talk_play(&t, 2000, 2000, true);
     CHECK(t.important && !strcmp(dgx_ge_string(&strings, t.string), "Long news."));
-    dgx_ge_talk_play(&t, 2500, false);
-    dgx_ge_talk_play(&t, 5000, false); /* not read yet: it waits */
+    dgx_ge_talk_play(&t, 2500, 2500, false);
+    dgx_ge_talk_play(&t, 5000, 5000, false); /* not read yet: it waits */
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Long news."));
-    dgx_ge_talk_play(&t, 5100, true); /* seen whole now */
-    dgx_ge_talk_play(&t, 6099, true);
+    dgx_ge_talk_play(&t, 5100, 5100, true); /* seen whole now */
+    dgx_ge_talk_play(&t, 6099, 6099, true);
     CHECK(t.state == DGX_GE_TALK_SAYING);
-    dgx_ge_talk_play(&t, 6100, true);
+    dgx_ge_talk_play(&t, 6100, 6100, true);
     CHECK(t.state == DGX_GE_TALK_CHOOSING && t.shown == 1 && !strcmp(answers(&t, &strings), "Again."));
-    dgx_ge_talk_play(&t, 9099, true);
+    dgx_ge_talk_play(&t, 9099, 9099, true);
     CHECK(t.state == DGX_GE_TALK_CHOOSING);
-    dgx_ge_talk_play(&t, 9100, true);
+    dgx_ge_talk_play(&t, 9100, 9100, true);
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Too late.") && !t.wait_ms);
-    dgx_ge_talk_play(&t, 60000, true); /* no time: it waits for a button */
+    dgx_ge_talk_play(&t, 60000, 60000, true); /* no time: it waits for a button */
     CHECK(t.state == DGX_GE_TALK_SAYING);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 60010);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 60010, 60010);
     CHECK(t.state == DGX_GE_TALK_OVER);
     /* a button goes on before the time */
-    dgx_ge_talk_start(&t, &other, NULL, 0, 0, NULL, NULL);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10);
+    dgx_ge_talk_start(&t, &other, NULL, 0, 0, 0, NULL, NULL);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10, 10);
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Long news."));
     /* a dialog that stops the game (the flags byte after the roles): its talk pauses while it goes on, not when over */
     {
@@ -111,9 +111,9 @@ int main(int argc, char **argv)
         dgx_ge_dialog_t paused;
         CHECK(dgx_ge_dialog_open(&paused, copy, n) && (paused.flags & DGX_GE_DIALOG_PAUSE));
         dgx_ge_talk_t p;
-        dgx_ge_talk_start(&p, &paused, NULL, 0, 0, NULL, NULL);
-        CHECK(dgx_ge_talk_pauses(&p) && p.ahead_ms == 0);
-        dgx_ge_talk_play(&p, 0, true), dgx_ge_talk_play(&p, 2000, true); /* its own time goes on: the line goes by its time */
+        dgx_ge_talk_start(&p, &paused, NULL, 0, 0, 0, NULL, NULL);
+        CHECK(dgx_ge_talk_pauses(&p));
+        dgx_ge_talk_play(&p, 0, 0, true), dgx_ge_talk_play(&p, 2000, 2000, true); /* its own time goes on: the line goes by its time */
         CHECK(dgx_ge_talk_pauses(&p) && !strcmp(dgx_ge_string(&strings, p.string), "Long news."));
         p.state = DGX_GE_TALK_OVER;
         CHECK(!dgx_ge_talk_pauses(&p));
@@ -121,8 +121,8 @@ int main(int argc, char **argv)
         CHECK(!dgx_ge_talk_pauses(&none)); /* no dialog: nothing pauses */
     }
     /* the post's lines have no time: they wait */
-    dgx_ge_talk_start(&t, &post, NULL, 0, 0, NULL, NULL);
-    dgx_ge_talk_play(&t, 100000, true);
+    dgx_ge_talk_start(&t, &post, NULL, 0, 0, 0, NULL, NULL);
+    dgx_ge_talk_play(&t, 100000, 100000, true);
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Halt! Who goes there?"));
 
     /* who plays: two who carry, and a hero */
@@ -138,51 +138,74 @@ int main(int argc, char **argv)
     dgx_ge_actor_t *const cast[3] = {&guard, &kid, &hero};
 
     /* lines, the important one marked; answers: no knife, only a friend */
-    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, 7, 0, said, NULL);
+    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, 7, 0, 0, said, NULL);
     CHECK(t.state == DGX_GE_TALK_SAYING && t.role == TEST_POST_ROLE_GUARD && !t.important && t.style == TEST_STYLE_TALK);
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Halt! Who goes there?"));
-    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 10); /* means nothing on a line */
+    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 10, 10); /* means nothing on a line */
     CHECK(t.state == DGX_GE_TALK_SAYING && !t.important);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 20);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 20, 20);
     CHECK(t.important && !strcmp(dgx_ge_string(&strings, t.string), "Read this."));
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 30);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 30, 30);
     CHECK(t.state == DGX_GE_TALK_CHOOSING && t.role == TEST_POST_ROLE_KID && t.shown == 1 && !strcmp(answers(&t, &strings), "A friend."));
 
     /* with three knives: the gift is shown, nobody (more than 5) is not */
     const dgx_ge_pocket_t knife = {.kind = TEST_BLOB_KNIFE, .script = TEST_KNIFE_SCRIPT_HELD};
     CHECK(dgx_ge_pockets_put(kid.pockets, &knife, 3) == 3);
-    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, 7, 0, said, NULL);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 20);
+    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = cast}, 7, 0, 0, said, NULL);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10, 10);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 20, 20);
     CHECK(t.shown == 2 && !strcmp(answers(&t, &strings), "A friend.|Have a knife."));
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30); /* no further */
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30, 30);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30, 30); /* no further */
     CHECK(t.pick == 1);
     said_events = 0;
-    t.ahead_ms  = 15; /* the talk 15 ms ahead of the world (a pause): what it does to the world lands at the world's moment */
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 40); /* the gift: two knives over, the hero told hit, thanks in the language */
+    /* the talk at 40, the world at 25 (behind it by a pause): what the talk does to the world lands at the world's moment */
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 40, 25); /* the gift: two knives over, the hero told hit, thanks in the language */
     CHECK(dgx_ge_pockets_count(kid.pockets, TEST_BLOB_KNIFE) == 1 && dgx_ge_pockets_count(guard.pockets, TEST_BLOB_KNIFE) == 2);
     CHECK(hero.script == TEST_HERO_SCRIPT_HURT && said_events > 0 && hero.entered_ms == 25);
-    t.ahead_ms = 0;
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Спасибо."));
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 50); /* back to the start */
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 50, 50); /* back to the start */
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Halt! Who goes there?"));
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 60);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 70);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 60, 60);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 70, 70);
     CHECK(t.pick == 0 && t.shown == 2);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 80); /* a friend: another style, the game says it */
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 80, 80); /* a friend: another style, the game says it */
     CHECK(t.state == DGX_GE_TALK_SAYING && t.role == DGX_GE_ROLE_GAME && t.style == TEST_STYLE_ALERT);
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "You may pass."));
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 90);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 90, 90);
     CHECK(t.state == DGX_GE_TALK_OVER);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 100); /* over stays over */
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 100, 100); /* over stays over */
     CHECK(t.state == DGX_GE_TALK_OVER);
+
+    /*
+     * Two clocks: a dialog that stops the game opened at the talk's 10500, the world standing at 500 (10 s of pauses
+     * before). Its line goes by the talk's own time while the world stands; both tells land at the world's moment, and
+     * the game sets nothing in the talk. The one before the first line runs inside the start: games once set the
+     * talk's lead over the world (a field) after dgx_ge_talk_start, which had cleared the talk and run it to its first
+     * line already, so such a tell landed at the talk's moment, 10 s ahead of the world. The start takes both moments now.
+     */
+    {
+        dgx_ge_dialog_t rest;
+        blob = dgx_ge_pack_blob(&pack, TEST_BLOB_REST, &n);
+        CHECK(blob && dgx_ge_dialog_open(&rest, blob, n) && (rest.flags & DGX_GE_DIALOG_PAUSE));
+        dgx_ge_actor_start(&hero, hero_anim, TEST_HERO_SCRIPT_RUN, 0, 0, 0);
+        dgx_ge_actor_advance(&hero, 400, NULL, NULL);
+        dgx_ge_actor_t *const resting[1] = {&hero};
+        dgx_ge_talk_start(&t, &rest, &(dgx_ge_cast_t){.roles = resting}, 0, 10500, 500, NULL, NULL);
+        CHECK(hero.script == TEST_HERO_SCRIPT_HURT && hero.entered_ms == 500); /* the tell before the line: the world's moment */
+        CHECK(dgx_ge_talk_pauses(&t) && t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Resting."));
+        dgx_ge_talk_play(&t, 10500, 500, true);
+        dgx_ge_talk_play(&t, 11499, 500, true); /* the world stands; the line's second, by the talk's clock, not yet */
+        CHECK(t.state == DGX_GE_TALK_SAYING && hero.script == TEST_HERO_SCRIPT_HURT);
+        dgx_ge_talk_play(&t, 11500, 500, true); /* its second gone: on, the second tell, still at the world's moment */
+        CHECK(t.state == DGX_GE_TALK_OVER && hero.script == TEST_HERO_SCRIPT_FALL && hero.entered_ms == 500);
+    }
 
     /* nobody plays the kid: answers by the expression alone (count is 0) */
     dgx_ge_actor_t *const alone[3] = {&guard, NULL, NULL};
-    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = alone}, 0, 0, NULL, NULL);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 20);
+    dgx_ge_talk_start(&t, &post, &(dgx_ge_cast_t){.roles = alone}, 0, 0, 0, NULL, NULL);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10, 10);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 20, 20);
     CHECK(t.shown == 1);
 
     /* a page of settings: the game's actor holds them, controls change them; an answer shown as they are */
@@ -192,50 +215,50 @@ int main(int argc, char **argv)
     dgx_ge_actor_t settings;
     dgx_ge_actor_start(&settings, dgx_ge_kind(&kinds, TEST_BLOB_SETTINGS), 0, 0, 0, 0);
     int image = -1;
-    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, 0, NULL, NULL);
     CHECK(t.state == DGX_GE_TALK_CHOOSING && t.role == DGX_GE_ROLE_GAME && t.shown == 4); /* Sound, Volume, Quiet, Back: not loud */
     CHECK(dgx_ge_talk_control(&t, 0, &image) && image == TEST_IMG_FOUR);                   /* sound on: ONE + 1 */
     CHECK(!dgx_ge_talk_control(&t, 3, &image));                                             /* Back: none */
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10); /* the switch: off, the choice stays */
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10, 10); /* the switch: off, the choice stays */
     CHECK(t.state == DGX_GE_TALK_CHOOSING && settings.params[TEST_SETTINGS_PARAM_SOUND] == 0 && t.changes == 1);
     CHECK(dgx_ge_talk_control(&t, 0, &image) && image == TEST_IMG_ONE);
-    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 20); /* the switch has no more: nothing, the choice stays where it is */
+    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 20, 20); /* the switch has no more: nothing, the choice stays where it is */
     CHECK(t.pick == 0 && t.changes == 1);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30);
-    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 40); /* the slider: 3, and loud is shown now, before it: the slider stays chosen */
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30, 30);
+    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 40, 40); /* the slider: 3, and loud is shown now, before it: the slider stays chosen */
     CHECK(settings.params[TEST_SETTINGS_PARAM_VOLUME] == 3 && t.shown == 5 && t.pick == 2 && t.changes == 2);
     CHECK(dgx_ge_talk_control(&t, 2, &image) && image == TEST_IMG_EIGHT); /* ONE + min(3, 2) */
-    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 50); /* no further */
+    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 50, 50); /* no further */
     CHECK(settings.params[TEST_SETTINGS_PARAM_VOLUME] == 3 && t.changes == 2);
-    dgx_ge_talk_event(&t, DGX_GE_UI_LESS, 60);
+    dgx_ge_talk_event(&t, DGX_GE_UI_LESS, 60, 60);
     CHECK(settings.params[TEST_SETTINGS_PARAM_VOLUME] == 2 && t.shown == 4 && t.pick == 1);
-    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 70);
-    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 80);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 90); /* loud: it leads on */
+    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 70, 70);
+    dgx_ge_talk_event(&t, DGX_GE_UI_PREV, 80, 80);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 90, 90); /* loud: it leads on */
     CHECK(t.state == DGX_GE_TALK_SAYING && !strcmp(dgx_ge_string(&strings, t.string), "Loud."));
     /* a control with a label: changed, then on */
-    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, 0, NULL, NULL);
     CHECK(t.shown == 5);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10);
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 20);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10, 10);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10, 10);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10, 10);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 20, 20);
     CHECK(settings.params[TEST_SETTINGS_PARAM_SOUND] == 1 && t.state == DGX_GE_TALK_OVER);
     /* more and less move the choice where there is no control */
-    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10); /* Loud */
-    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 20);
+    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, 0, NULL, NULL);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 10, 10); /* Loud */
+    dgx_ge_talk_event(&t, DGX_GE_UI_MORE, 20, 20);
     CHECK(t.pick == 2 && t.changes == 0);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30);
-    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30); /* Back */
-    dgx_ge_talk_event(&t, DGX_GE_UI_LESS, 40);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30, 30);
+    dgx_ge_talk_event(&t, DGX_GE_UI_NEXT, 30, 30); /* Back */
+    dgx_ge_talk_event(&t, DGX_GE_UI_LESS, 40, 40);
     CHECK(t.pick == 3);
     /* nobody plays the game: its conditions read 0, its controls change nothing; no kinds: no controls */
-    dgx_ge_talk_start(&t, &page, NULL, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &page, NULL, 0, 0, 0, NULL, NULL);
     CHECK(t.shown == 4 && !dgx_ge_talk_control(&t, 0, &image));
-    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10);
+    dgx_ge_talk_event(&t, DGX_GE_UI_ACTIVATE, 10, 10);
     CHECK(t.state == DGX_GE_TALK_CHOOSING && t.changes == 0);
-    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings}, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings}, 0, 0, 0, NULL, NULL);
     CHECK(!dgx_ge_talk_control(&t, 0, &image));
     /*
      * a condition that asks the game (no text makes one: the bytes of Loud's, volume > 2, made game.0 and abs six
@@ -255,10 +278,10 @@ int main(int argc, char **argv)
         dgx_ge_dialog_t asked;
         CHECK(dgx_ge_dialog_open(&asked, copy, n));
         dgx_ge_expr_ask = no_one, asks = 0;
-        dgx_ge_talk_start(&t, &asked, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
+        dgx_ge_talk_start(&t, &asked, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, 0, NULL, NULL);
         CHECK(t.shown == 4 && asks > 0);
         asks = 0;
-        dgx_ge_talk_start(&t, &asked, NULL, 0, 0, NULL, NULL);
+        dgx_ge_talk_start(&t, &asked, NULL, 0, 0, 0, NULL, NULL);
         CHECK(t.shown == 5 && asks > 0);
         dgx_ge_expr_ask = NULL;
         free(copy);
@@ -272,7 +295,7 @@ int main(int argc, char **argv)
     blob = dgx_ge_pack_blob(&pack, TEST_BLOB_CLOCK, &n);
     CHECK(blob && dgx_ge_dialog_open(&clock, blob, n));
     settings.params[TEST_SETTINGS_PARAM_VOLUME] = 22;
-    dgx_ge_talk_start(&t, &clock, &(dgx_ge_cast_t){.game = &settings}, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &clock, &(dgx_ge_cast_t){.game = &settings}, 0, 0, 0, NULL, NULL);
     settings.params[TEST_SETTINGS_PARAM_VOLUME] = 5; /* changed after it was said: the line keeps its number */
     char line[64];
     CHECK(t.state == DGX_GE_TALK_SAYING && t.forms == 3 && t.number == 22);
@@ -280,14 +303,14 @@ int main(int argc, char **argv)
     CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, 21, line, sizeof line), "Осталась 21 минута"));
     CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, -5, line, sizeof line), "Осталось -5 минут"));
     CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, 5, line, 10), "Оста")); /* cut to its room, 9 bytes: between letters (2 bytes each) */
-    dgx_ge_talk_play(&t, 0, true); /* seen whole: its second from now */
-    dgx_ge_talk_play(&t, 1000, true);
+    dgx_ge_talk_play(&t, 0, 0, true); /* seen whole: its second from now */
+    dgx_ge_talk_play(&t, 1000, 1000, true);
     CHECK(t.state == DGX_GE_TALK_SAYING && t.forms == 1 && t.number == 5);
     CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, t.number, line, sizeof line), "Volume 5."));
     /* a line of several numbers: each {name} as they were when it was said; translated in another order, each by its name */
     settings.params[TEST_SETTINGS_PARAM_SOUND] = 1;
-    dgx_ge_talk_play(&t, 1000, true);
-    dgx_ge_talk_play(&t, 2000, true);
+    dgx_ge_talk_play(&t, 1000, 1000, true);
+    dgx_ge_talk_play(&t, 2000, 2000, true);
     settings.params[TEST_SETTINGS_PARAM_SOUND] = 0;
     const int32_t said[] = {t.number, t.more[0]};
     CHECK(t.state == DGX_GE_TALK_SAYING && t.count == 2 && t.number == 1 && t.more[0] == 5);
@@ -295,7 +318,7 @@ int main(int argc, char **argv)
     CHECK(!strcmp(dgx_ge_string(&strings, t.string), "Громкость {1}, звук {0}.")); /* as the packer put it */
     /* numbers past 16 bits, as they were said, to the last of 32 */
     settings.params[TEST_SETTINGS_PARAM_VOLUME] = 40000;
-    dgx_ge_talk_start(&t, &clock, &(dgx_ge_cast_t){.game = &settings}, 0, 0, NULL, NULL);
+    dgx_ge_talk_start(&t, &clock, &(dgx_ge_cast_t){.game = &settings}, 0, 0, 0, NULL, NULL);
     CHECK(t.number == 40000 && !strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, t.number, line, sizeof line), "Осталось 40000 минут"));
     CHECK(!strcmp(dgx_ge_strings_number(&strings, t.string, t.forms, INT32_MIN, line, sizeof line), "Осталось -2147483648 минут"));
     settings.params[TEST_SETTINGS_PARAM_VOLUME] = 5;

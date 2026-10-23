@@ -26,9 +26,11 @@ extern "C" {
  * u16, actors u16, cues u16; pictures 10 bytes each: a picture of the pack
  * u16, x i16, y i16 (of its origin), layer u8, flags u8 (DGX_GE_BLIT_*), the
  * color of one of 1 bit u8 (a color of its set, 1..15: the frame's index of
- * it, as the maps given say; with no map of its set, the value itself), 0;
- * actors 10 bytes each: kind u16 (an animation of the pack), x i16, y i16,
- * script u8, layer u8, flip u8, color u8 (the same, for its pictures); cues 8
+ * it, as the maps given say; with no map of its set, the value itself),
+ * turn u8 (quarter turns clockwise after the mirror); actors 10 bytes each:
+ * kind u16 (an animation of the pack), x i16, y i16, script u8, layer u8,
+ * facing u8 (bit 0 left, bits 1-2 then turned by quarter turns clockwise),
+ * color u8 (the same, for its pictures); cues 8
  * bytes each, in the order of their times: at u32 (ms from the start), actor
  * u8 (0xFF: the end), event u8 (of the pack), 0, 0.
  *

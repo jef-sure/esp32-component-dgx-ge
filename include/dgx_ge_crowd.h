@@ -33,7 +33,8 @@ extern "C" {
  *           none), color u8 (of its pictures of 1 bit, as dgx_ge_show), order u8 (1: its key in the layer is its y, a
  *           world seen from above; 0: none)
  *   groups  16 bytes each: kind u8 (of the kinds above), script u8, count u16, a rectangle x, y i16, w, h u16 they
- *           are strewn in (by the dice of the seed: the same every time), flip u8 (0 right, 1 left, 2 either), 3 spare
+ *           are strewn in (by the dice of the seed: the same every time), flip u8 (0 right, 1 left, 2 either), turn u8
+ *           (then turned by so many quarter turns clockwise, 0..3; 4 any of them), 2 spare
  *
  * In a play (dgx_ge_crowd_play) every actor is moved on to now, the dice of
  * the game being the crowd's own. Its terrain: a sense of bodies is the

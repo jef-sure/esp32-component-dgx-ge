@@ -139,7 +139,7 @@ void dgx_ge_pocket_event(dgx_ge_kinds_t *kinds, dgx_ge_pocket_t *r, int event, u
 {
     dgx_ge_actor_t a;
     if (event < 0 || !dgx_ge_pocket_actor(kinds, r, 0, 0, now_ms, &a)) return;
-    dgx_ge_actor_advance(&a, now_ms, NULL, NULL);
+    dgx_ge_actor_rehearse(&a, now_ms); /* made again: where its script had come to */
     if (!dgx_ge_actor_event(&a, event, now_ms, NULL, NULL)) return;
     const uint8_t count = r->count;
     dgx_ge_pocket_of(r, &a);
@@ -195,7 +195,7 @@ bool dgx_ge_pockets_draw(dgx_ge_actor_t *holder, int point, int kind, uint32_t n
     if (place < 0 || hand < 0) return false;
     dgx_ge_actor_t *thing = &p->hands[hand];
     if (!dgx_ge_pocket_actor(p->kinds, &p->places[place], dgx_ge_actor_x(holder), dgx_ge_actor_y(holder), now_ms, thing)) return false;
-    dgx_ge_actor_advance(thing, now_ms, NULL, NULL); /* its first steps: what it is in a hand (its masks) */
+    dgx_ge_actor_rehearse(thing, now_ms); /* made again, its first steps: what it is in a hand (its masks) */
     if (!dgx_ge_actor_hold(holder, point, thing)) return false;
     dgx_ge_pockets_take(p, place, 1, NULL);
     return true;
@@ -212,19 +212,20 @@ bool dgx_ge_pockets_stow(dgx_ge_actor_t *holder, int point)
     return true;
 }
 
-int32_t dgx_ge_pockets_lay(dgx_ge_pockets_t *p, int place, int count, dgx_ge_world_t *world, int scene, int x, int y, bool flip, int event,
+int32_t dgx_ge_pockets_lay(dgx_ge_pockets_t *p, int place, int count, dgx_ge_world_t *world, int scene, int x, int y, unsigned orient, int event,
                            uint32_t now_ms, const dgx_ge_lay_t *how)
 {
     if (place < 0 || place >= p->capacity || !p->places[place].count || count < 1) return -1;
     if (count > p->places[place].count) count = p->places[place].count;
     int32_t handle;
     if (how) {
-        handle = dgx_ge_world_lay(world, p->kinds, &p->places[place], count, scene, x, y, flip, event, now_ms, how);
+        handle = dgx_ge_world_lay(world, p->kinds, &p->places[place], count, scene, x, y, orient, event, now_ms, how);
     } else {
         /* just there: a new object of so many */
         dgx_ge_actor_t a;
         if (!dgx_ge_pocket_actor(p->kinds, &p->places[place], x, y, now_ms, &a)) return -1;
-        a.flip = a.entered_flip = flip;
+        a.flip = a.entered_flip = orient & 1u;
+        a.turn = a.entered_turn = (uint8_t)(orient >> 1 & 3u);
         a.amount               = (uint8_t)count;
         if (event >= 0) dgx_ge_actor_event(&a, event, now_ms, NULL, NULL);
         dgx_ge_object_t o = {.scene = (uint16_t)scene};

@@ -9,7 +9,7 @@
 #   GAME_PACK_MAKE   := python3 tools/mygame_assets.py       # what makes the pack and its header (optional), run when
 #   GAME_PACK_INPUTS := tools/mygame_assets.py $(wildcard art/*.png anim/*.anim)  # one of these is newer than the header
 #   GAME_FONTS    := main/assets/mygame.fonts                # as dgx_ge_fonts (optional), with GAME_FONT_RULES
-#   GAME_DEFINES  := BOARD_SCALE=4                           # as target_compile_definitions
+#   GAME_DEFINES  := BOARD_SCALE=4 DGX_GE_ANIM_NOW_EVENTS=4  # as target_compile_definitions (and dgx_ge_now_events): all files
 #   HOST_DISPLAY  := 1280x800                                # the board shown: its display in pixels
 #   HOST_MM       := 217x136                                 #   and in millimetres (gestures, the pad's size)
 #   DGX           := managed_components/jef-sure__dgx         # DGX 0.8.0 or later (its host/dgx_host.mk)

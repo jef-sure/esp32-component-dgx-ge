@@ -52,13 +52,14 @@
 
 | Часть | Что это | Чем кладётся в пакет | Что видит код C |
 | --- | --- | --- | --- |
-| Картинки | PNG с палитрой, 1, 4 или 8 бит на точку, цвет 0 прозрачен; набор — картинки с общими цветами; базовая точка («где ноги»); маски столкновений; точки привязки («где рука»); вырезки | `add_set`, `add_png` (`add_image` для готовых значений), `add_mask`, `name_mask`, `add_meets`, `add_point`, `add_crop` | `<P>_SET_*`, `<P>_IMG_*`, `<P>_MASK_*`, `<P>_POINT_*` |
+| Картинки | PNG с палитрой, 1, 4 или 8 бит на точку, цвет 0 прозрачен; набор — картинки с общими цветами, своими или готовой палитры (`nes`, `gameboy`, `pico8`, палитра проекта); базовая точка («где ноги»); маски столкновений; точки привязки («где рука»); вырезки | `add_set` (`palette=` — готовая палитра), `add_png` (`add_image` для готовых значений), `add_mask`, `name_mask`, `add_meets`, `add_point`, `add_crop` | `<P>_SET_*`, `<P>_IMG_*`, `<P>_MASK_*`, `<P>_POINT_*` |
 | Анимации | скрипты `.anim` на языке движка: кадры на время, движение, события, параметры, правила переходов | `add_anim`, `add_anims` | `<P>_BLOB_<ВИД>`, `<P>_<ВИД>_SCRIPT_*`, `_EVENT_*`, `_PARAM_*`, `<P>_EVENT_*` |
 | Плитки и сцены | наборы плиток с правилами; сцены из слоёв, картинок, персонажей, зон, входов и сеток | `add_tileset`; сцены — из документа редактора (`add_sprites`) | `<P>_<НАБОР>_TILE_*`, `_SLOT_*`, `<P>_SCENE_<СЦЕНА>_*` |
 | Граф сцен | какие сцены есть, как из одной попасть в другую, правила карты, связи между клетками | `add_graph` (класс `Graph` из `tools/dgx_ge_graph.py`), `add_links` | `<P>_<ГРАФ>_EXIT_*`, `_ENTRY_*`, `_MAP_*` |
 | Диалоги | `.dlg` на языке `tools/dgx_ge_dialog.py`: кто что говорит, ответы, что от них меняется; переводы `.po`; поля ввода | `add_dialog`, `translate`, `add_field` | `<P>_BLOB_<ДИАЛОГ>`, `<P>_<ДИАЛОГ>_ROLE_*`, `<P>_FIELD_*` |
 | Стили и шрифты | как выглядит разговор; какие шрифты нужны, запросами к DGX | `add_style`, `add_font` | `<P>_STYLE_*`, `<P>_FONT_*`, `<P>_FONTS(X)` |
-| Числа игры | константы игры; имена чисел для скриптов; таймеры; звуки; заставки; погони; толпы | `add_game`, `add_constants`, `add_timer`, `add_sound`, `add_show`, `add_chase`, `add_crowd` | `<P>_GAME_*`, `<P>_<ИМЯ>` (имена чисел), `<P>_TIMER_*`, `<P>_SOUND_*`, `<P>_BLOB_*` |
+| Числа игры | константы игры; переменные игры; имена чисел для скриптов; таймеры; звуки; заставки; погони; толпы | `add_game`, `add_variable`, `add_constants`, `add_timer`, `add_sound`, `add_show`, `add_chase`, `add_crowd` | `<P>_GAME_*`, `<P>_GAME_VAR_*`, `<P>_<ИМЯ>` (имена чисел), `<P>_TIMER_*`, `<P>_SOUND_*`, `<P>_BLOB_*` |
+| Музыка | мелодии нотами, текстом на MML (overview-ru.md, 2.16); синтезатор проекта; наборы инструментов | `add_music` (`synth=` — синтезатор одной мелодии), `set_music_synth`, `add_music_set` | `<P>_MUSIC_*` |
 | Сырые байты | всё, что игра читает сама: уровень своего формата, таблица | `add_blob` | `<P>_BLOB_*` |
 
 Код игры на C — это то, что остаётся: правила, которых данные не выражают
@@ -203,13 +204,25 @@ style talk
 Картинки — обычные PNG с палитрой из любого редактора; цвет 0 палитры
 прозрачен.
 
+Набор может вместо своих цветов взять готовую палитру:
+`pack.add_set("SHIP", palette="nes")`. Имя — палитра проекта (`palettes`
+документа, они идут первыми) или палитра движка из `tools/palettes/`: `nes`,
+`gameboy`, `pico8`; можно дать и сами цвета списком. Тогда `add_png`
+приводит каждый цвет картинки к ближайшему цвету палитры (CIE76, расстояние в
+CIELAB), а в набор идут только взятые цвета палитры, в её порядке: набор
+перенумеровывает свои картинки, когда приходит новый цвет, и номера его
+цветов окончательны, когда все его картинки добавлены. Значения, данные как
+есть (`add_image`, `add_png` с `by_index=True`), в таком наборе — номера
+цветов палитры, 1 — первый. `write` один раз на набор говорит, сколько
+цветов картинок не из палитры, и самый далёкий из них.
+
 **Порядок вызовов важен.** Упаковщик проверяет ссылки сразу, поэтому то, на
 что ссылаются, добавляется раньше:
 
 | Вызов | Что должно быть добавлено до него |
 | --- | --- |
 | `add_png`, `add_image` | набор (`add_set`) |
-| `add_anim` | картинки, которые называют его кадры; точки (`add_point`); имена масок (`name_mask`); имена чисел (`add_constants`); виды, которые он называет (`appear`, `shoot`, `draw`, `sense`). Виды, которые знают друг друга (волк и овцы), добавляются вместе: `add_anims` |
+| `add_anim` | картинки, которые называют его кадры; точки (`add_point`); имена масок (`name_mask`); имена чисел (`add_constants`); переменные игры, которые он читает и меняет (`add_variable`); виды, которые он называет (`appear`, `shoot`, `draw`, `sense`). Виды, которые знают друг друга (волк и овцы), добавляются вместе: `add_anims` |
 | `add_tileset` с `life` | анимация жизни клетки |
 | `add_dialog` | анимации видов, которые играют роли; перевод (`translate`); поля (`add_field`); картинки портретов |
 | `add_show`, `add_crowd`, `add_chase` | анимации их видов |
@@ -253,14 +266,24 @@ pack.write("main/assets/mygame.pack", "main/assets/mygame_pack.h")
 | `masks` | `[{index, name}]`: какие маски есть | `name_mask`: `<P>_MASK_<NAME>` |
 | `meets` | текст: какие маски встречаются | `add_meets` |
 | `constants` | `{NAME: число}`: имена чисел для скриптов и условий диалогов | `add_constants`: в заголовке `<P>_<NAME>` с числом |
-| `sets` | наборы кадров: `{name, defaultMask, frames: [{image, width, height, origin: {x, y}, masks, points, packName}]}` | набор цветов из палитр его PNG; каждый кадр — картинка `<НАБОР>_<ФАЙЛ>` (или `packName`) с базовой точкой, масками (строки битов в шестнадцатеричных цифрах), точками; кадр без масок в наборе с `defaultMask` получает маску этого номера из своих непрозрачных точек |
-| `palettes` | наборы цветов без картинок | `add_set` |
+| `variables` | `[{name, value}]`: переменные игры, номера — по порядку | `add_variable` для каждой, до диалогов и скриптов документа: `game_var.<имя>` в них, `<P>_GAME_VAR_<ИМЯ>` в заголовке |
+| `sets` | наборы кадров: `{name, defaultMask, palette, frames: [{image, width, height, origin: {x, y}, masks, points, packName}]}` | набор цветов из палитр его PNG; с `palette` (`"nes"`, `"gameboy"`, `"pico8"` или имя одной из `palettes` документа) — набор готовой палитры: каждый цвет кадров приводится к ближайшему её цвету, значения кадров совпадать не обязаны, в наборе — взятые цвета палитры в её порядке; каждый кадр — картинка `<НАБОР>_<ФАЙЛ>` (или `packName`) с базовой точкой, масками (строки битов в шестнадцатеричных цифрах), точками; кадр без масок в наборе с `defaultMask` получает маску этого номера из своих непрозрачных точек |
+| `palettes` | наборы цветов без картинок | `add_set`; `palette` набора может назвать такую |
 | `tilesets` | `{name, cellWidth, cellHeight, tiles: [{name, kind, solid, pieces, ...}]}` | `add_tileset`; имена слоёв кусков становятся слотами |
 | `styles` | стили разговоров | `add_style` |
 | `screen` | `{width, height}`: экран игры | `<P>_SCREEN_WIDTH`, `_HEIGHT` |
-| `scenes` | сцены: слои с объектами `picture`, `actor`, `zone`, `entry`; сетки плиток; выходы; связи | блоб `SCENE_<ИМЯ>` (формат — в `include/dgx_ge_layout.h`) и имена его объектов в заголовке |
+| `scenes` | сцены: бумага (`background`, `"#rrggbb"`; без него бумаги у сцены нет), музыка (`music` — имя мелодии или `"stop"` — тишина; без него играющая продолжается; `musicFade` — мс затухания, без него 500), слои с объектами `picture`, `actor` (у каждого `flip` и `rotation`), `zone`, `entry`; сетки плиток; выходы; связи | блоб `SCENE_<ИМЯ>` (формат — в `include/dgx_ge_layout.h`) и имена его объектов в заголовке |
 | `graph`, `maps` | граф сцен и его карты | `Graph` и `add_graph`; связи карты — `add_links` |
-| `game`, `timers`, `sounds`, `crops`, `shows`, `chases` | игра целиком | `add_game`, `add_timer`, `add_sound` (только имена), `add_crop`, `add_show`, `add_chase` |
+| `game`, `timers`, `sounds`, `crops`, `shows`, `chases` | игра целиком | `add_game`, `add_timer`, `add_sound` (имя; отсчёты — из `sounds/<имя>.wav` рядом с документом, если такой файл есть), `add_crop`, `add_show`, `add_chase` |
+| `music` | имена мелодий | `add_music` с текстом из `music/<имя>.mml` рядом с документом; нет такого файла — только имя. `#set <имя>` мелодии берёт набор `music/sets/<имя>.mml` рядом с документом или набор движка |
+| `synth` | синтезатор музыки проекта: `"fm"` (без указания), `"chip"` или `"nes"` | `set_music_synth`; мелодия может назвать свой (`#synth`) |
+
+Как лежат картинки и актёры: у `picture` и `actor` сцены и у картинок и
+актёров представления (`shows`) `"flip": true` — отражение (актёр смотрит
+влево), `"rotation"` — затем поворот по часовой, 0, 90, 180 или 270 градусов
+(любое целое кратное 90, −90 — это 270; без него 0). Другой поворот
+упаковщик отвергает. Группа толпы (`add_crowd`) тоже берёт `"rotation"` или
+`"any"` — одно из четырёх по костям толпы.
 
 Рядом с документом упаковщик ищет файлы, которых в JSON нет:
 
@@ -269,8 +292,13 @@ pack.write("main/assets/mygame.pack", "main/assets/mygame_pack.h")
   собираются вместе, `add_anims`, и знают друг друга); набор, чьё имя карта
   называет своими правилами, — не вид, а правила графа;
 - диалоги — `dialogs/*.dlg`;
+- ноты мелодий, которые документ называет в `music`, — `music/<имя>.mml`,
+  а наборы инструментов, которые мелодии берут (`#set <имя>`), —
+  `music/sets/<имя>.mml`;
 - перевод — `po/<язык>.po`, если до вызова сказать язык:
-  `pack.language = "ru"`.
+  `pack.language = "ru"`;
+- отсчёты звуков — `sounds/<имя>.wav` для каждого звука, который документ
+  называет.
 
 Небольшой документ — один набор, плитки, одна сцена:
 
@@ -323,27 +351,35 @@ pack.write("main/assets/mygame.pack", "main/assets/mygame_pack.h")
 ### 2.3. Документ и скрипт вместе
 
 Третий вход — скрипт, который читает документ и добавляет то, чего в
-документе нет: отсчёты звуков, байты своего формата, цвета без картинок,
-второй язык. После `add_sprites` пакет — это тот же `Pack`, и можно
+документе нет: звуки, которых документ не называет или которым нужны свои
+параметры, байты своего формата, цвета без картинок, второй язык. После `add_sprites` пакет — это тот же `Pack`, и можно
 продолжать обычными вызовами:
 
 ```python
 pack = Pack("MYGAME")
 pack.add_sprites(os.path.join(ROOT, "game_data", "mygame.json"))
-# чего в документе нет: отсчёты звука, который он называет, цвет неба, свои байты
-pack.add_sound("step", wav=os.path.join(ROOT, "sounds", "step.wav"))
+# чего в документе нет: звук, который он не называет, цвет неба, свои байты
+pack.add_sound("wind", wav=os.path.join(ROOT, "sounds", "wind.wav"), loop=True)
 pack.add_set("SKY", [(150, 205, 250)])
 pack.add_blob("LEVELS", open(os.path.join(ROOT, "levels.bin"), "rb").read())
 pack.write(...)
 ```
 
 Со звуками так. Документ называет звуки только по именам
-(`"sounds": ["step"]`): такой звук получает номер по месту в списке, но
-пока ничего не играет. Скрипт даёт ему отсчёты тем же `add_sound` с тем же
-именем, и номер остаётся тем, что дал документ: скрипты анимации называют
-звук именно номером (`sound 0`). Звук, которого документ не называл,
-получает следующий номер. Отсчёты одному звуку даются один раз; второй раз —
-отказ, `sound STEP twice`.
+(`"sounds": ["step"]`), и номер звука — его место в списке. Отсчёты звук
+берёт из файла `sounds/<имя>.wav` рядом с документом, если такой файл есть:
+`add_sprites` читает его так же, как `add_sound(имя, wav=…)` без других
+параметров, — моно, IMA ADPCM, один раз, с громкостью записи. Звук без
+файла остаётся только именем и ничего не играет, пока скрипт не даст ему
+отсчёты тем же `add_sound` с тем же именем; номер при этом остаётся тем, что
+дал документ: скрипты анимации называют звук именно номером (`sound 0`).
+Звуку, чей файл уже взят из `sounds/`, скрипт отсчёты не даёт — это отказ
+(`sound STEP: its samples are taken from …/sounds/STEP.wav beside the document
+already`): у одного звука было бы два источника, и неясно, какой из них
+звучит. Звук, который должен идти по кругу или звучать тише, держит свой
+файл в другом месте, и скрипт даёт его с этими параметрами. Звук, которого
+документ не называл, получает следующий номер. Отсчёты одному звуку даются
+один раз; второй раз — отказ, `sound STEP twice`.
 
 ### 2.4. Почему не писать пакет самому
 
@@ -379,11 +415,19 @@ pack.write(...)
 | блоб с именем того, что упаковщик пишет сам | `ValueError: a blob named GAME: the packer's own blob GAME has that name (an animation, a dialog, a blob)` |
 | PNG не с палитрой | `ValueError: .../rgb.png: not a picture of a palette (RGB)` |
 | отсчёты одному звуку дважды | `ValueError: sound STEP twice` |
+| скрипт даёт отсчёты звуку, чей файл `add_sprites` уже взяла из `sounds/` | `ValueError: sound STEP: its samples are taken from …/sounds/STEP.wav beside the document already (add_sprites); …` |
 | имя числа выходит в заголовке именем другого | `ValueError: constant SET_COUNT: its name in the header, MYGAME_SET_COUNT, is another thing's: '#define MYGAME_SET_COUNT 3'; give the constant another name` |
+| переменная названа как константа | `ValueError: variable board_pad: BOARD_PAD is a constant (add_constants): give the variable another name` |
+| скрипт меняет переменную, которой пакет не объявил | `AnimError: .../HERO.anim: line 9: set game_var.lives: no such variable of the game (Pack.add_variable)` |
 
 Цвет картинки, которого нет в её наборе, — не ошибка, а предупреждение: он
 заменяется ближайшим, и упаковщик это говорит
 (`.../red.png: color 1 (255, 0, 0) is not in set A, taken as (250, 0, 0)`).
+Так же и набор готовой палитры: цвета его картинок не из палитры приводятся
+к ближайшим, а упаковщик один раз на набор говорит, сколько их и какой
+самый далёкий (`set SHIP: 3 colors of its pictures not in palette nes, each
+taken as the nearest; the farthest (200, 0, 0) of …/one.png as (163, 24, 0),
+distance 16.7 (CIE76)`).
 Два имени, которые в заголовке выходят одинаковыми (`stand-1` и `stand_1`),
 — тоже отказ: иначе один макрос назвал бы две вещи.
 
@@ -427,6 +471,7 @@ CRC-32 всего файла (`dgx_ge_pack_id`): сохранение помни
 #define MYGAME_SET_GROUND 1
 #define MYGAME_SET_UI 2
 #define MYGAME_SET_COUNT 3
+#define MYGAME_SET_COLOR_COUNT 7
 
 #define MYGAME_IMG_HERO_STAND 0
 #define MYGAME_IMG_HERO_STEP 1
@@ -462,11 +507,12 @@ CRC-32 всего файла (`dgx_ge_pack_id`): сохранение помни
 ```
 
 Имена получаются из имён данных: буквы и цифры остаются, всё прочее
-становится `_`, буквы — заглавными. Семьи имён:
+становится `_`, буквы — заглавными. Виды имён:
 
 | Имена | Что это |
 | --- | --- |
 | `<P>_SET_*`, `<P>_IMG_*`, `<P>_BLOB_*` и их `_COUNT` | наборы цветов, картинки, блобы (анимации, диалоги, сцены, плитки, графы, свои байты и то, что упаковщик пишет сам: `STRINGS`, `GAME`, `TIMERS`, `STYLES`, `CHASE`, `SOUNDS`) |
+| `<P>_SET_COLOR_COUNT` | сколько цветов во всех наборах вместе: столько байт занимают их таблицы (`dgx_ge_frame_pack_colors`) |
 | `<P>_<ВИД>_SCRIPT_*`, `_EVENT_*`, `_PARAM_*`, `_GAME_*` | скрипты, события, параметры вида и вопросы его скриптов к игре (`game.<имя>`) |
 | `<P>_EVENT_*` | события пакета: одно имя — один номер для всех видов |
 | `<P>_ANIM_PARAMS` | сколько параметров должен хранить каждый актёр (ниже) |
@@ -475,6 +521,7 @@ CRC-32 всего файла (`dgx_ge_pack_id`): сохранение помни
 | `<P>_ZONE_*`, `<P>_SCREEN_WIDTH`, `_HEIGHT` | слова видов зон; экран игры из документа |
 | `<P>_<ГРАФ>_EXIT_*`, `_ENTRY_*`, `_MAP_*` | выходы, входы и карты графа |
 | `<P>_GAME_*` | места констант игры в блобе `GAME` |
+| `<P>_GAME_VAR_*`, `<P>_GAME_VAR_COUNT` | номера переменных игры в её хранилище (`dgx_ge_vars_t`), сколько их |
 | `<P>_<ИМЯ>` | имена чисел, которые пишут скрипты (`add_constants`, `constants` документа), с самим числом |
 | `<P>_MASK_*`, `<P>_POINT_*` | маски и точки привязки |
 | `<P>_SOUND_*`, `<P>_TIMER_*` | звуки и таймеры по номерам |
@@ -493,10 +540,11 @@ CRC-32 всего файла (`dgx_ge_pack_id`): сохранение помни
 компиляцию останавливает `#error` из самого заголовка. Анимация, которой
 нужно больше параметров, чем хранит сборка, на плате просто не откроется.
 
-**Шрифты, буквы, шаблон перевода.** Игра не носит с собой готовых шрифтов:
-она говорит, какой шрифт нужен (`add_font("text", points=10)` — «10 точек
-кадра»), а DGX делает его при сборке, для дисплея и масштаба платы, только
-с теми буквами, которые пакет может напечатать
+**Шрифты, буквы, шаблон перевода.** Шрифты игра носит в прошивке, но не
+готовит их сама и не хранит в исходниках: она говорит, какой шрифт нужен
+(`add_font("text", points=10)` — «10 точек кадра»), а DGX делает его при
+сборке, для дисплея и масштаба платы, только с теми буквами, которые пакет
+может напечатать
 ([2.12](overview-ru.md#212-текст-надписи-диалоги-шрифты)). Для `mygame`:
 
 ```
@@ -577,6 +625,8 @@ idf_component_register(
 	EMBED_FILES "assets/mygame.pack"
 )
 dgx_ge_params_of_pack(assets/mygame_pack.h)
+dgx_ge_now_events(4)
+dgx_ge_synths(fm)
 dgx_ge_fonts(assets/mygame.fonts)
 dgx_fonts_board(PIXELS ${BOARD_PIXELS} MM ${BOARD_MM})
 dgx_fonts_scale(2)
@@ -602,6 +652,16 @@ dgx_fonts_rules(../fonts.rules)
 - `EMBED_FILES` следит за самим пакетом: изменился — встраивается заново.
 - `dgx_ge_params_of_pack` читает уже свежий заголовок, раз пакет собран до
   него.
+- `dgx_ge_now_events(4)` задаёт всей сборке `DGX_GE_ANIM_NOW_EVENTS`:
+  сколько событий `now` игра может послать актёру из его же шага, чтобы
+  они взялись по очереди ([animation-ru.md](animation-ru.md), раздел 4);
+  каждое место — 2 байта в каждом актёре. Годится от 1 до 255, без вызова
+  будет 4. Число записано явно, чтобы было видно, где оно задаётся.
+- `dgx_ge_synths(fm)` задаёт всей сборке `DGX_GE_SYNTH_<ИМЯ>=1`: какие
+  синтезаторы музыки есть в прошивке (`chip`, `nes`, `fm` — те, на которых
+  играют мелодии игры; overview-ru.md, 2.16). Остальных во флеше нет, а
+  мелодия такого синтезатора не звучит. Без вызова — только FM; он
+  записан явно по той же причине.
 
 Так это выглядит, когда в `anim/hero.anim` добавлены два параметра (их
 стало три) и запущена `idf.py build`:
@@ -622,10 +682,14 @@ ESP-IDF, игра) получают `DGX_GE_ANIM_PARAMS=3`.
 ```make
 # пакет заново, когда данные или скрипт новее заголовка: host.mk делает его, пока его читают
 GAME_PACK_MAKE   := python3 tools/make_pack.py $(ENGINE)
-GAME_PACK_INPUTS := tools/make_pack.py $(wildcard art/*.png anim/*.anim dialogs/*.dlg po/*.po)
+GAME_PACK_INPUTS := tools/make_pack.py $(wildcard art/*.png anim/*.anim dialogs/*.dlg po/*.po $(ENGINE)/tools/dgx_ge_*.py)
 
 include $(ENGINE)/boards/host/host.mk
 ```
+
+Упаковщик движка (`$(ENGINE)/tools/dgx_ge_*.py`) — тоже вход: новый движок,
+который пишет блоб в новой версии, пересоберёт пакет, а движок читает
+только свою версию.
 
 Если заголовка `GAME_PACK_H` нет или хоть один файл из `GAME_PACK_INPUTS`
 новее его, `host.mk` запускает команду сразу, пока make его читает, и
@@ -660,6 +724,7 @@ mygame.pack: 1180 bytes
 #include "dgx_ge_dialog.h"
 #include "dgx_ge_frame.h"
 #include "dgx_ge_game.h"
+#include "dgx_ge_glue.h"
 #include "dgx_ge_input.h"
 #include "dgx_ge_mixer.h"
 #include "dgx_ge_pack.h"
@@ -668,8 +733,6 @@ mygame.pack: 1180 bytes
 #include "dgx_ge_talk_view.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 /* пакет, встроенный сборкой: имена символов — от имени файла */
 extern const uint8_t mygame_pack_start[] asm("_binary_mygame_pack_start");
@@ -679,7 +742,8 @@ enum { FRAME_W = 160, FRAME_H = 100, GROUND_Y = FRAME_H - 4 };
 enum { LAYER_BACK, LAYER_ACTORS, LAYER_TALK, LAYERS };
 
 static dgx_ge_pack_t pack;
-static uint8_t       maps[MYGAME_SET_COUNT][16];   /* цвета каждого набора: номера в кадре */
+static uint8_t       maps[MYGAME_SET_COLOR_COUNT];   /* цвета всех наборов: номера в кадре, по байту на цвет */
+static const uint8_t *map_of[MYGAME_SET_COUNT];      /* где в maps начинается таблица каждого набора */
 static dgx_ge_kinds_t kinds;
 static dgx_ge_actor_t hero;
 ...
@@ -698,25 +762,16 @@ void app_main(void)
     if (!board_display_init(&board)) return;                               /* дисплей платы */
     if (!dgx_ge_pack_open(&pack, mygame_pack_start, mygame_pack_end - mygame_pack_start)) return;
 
-    /* кадр игры так крупно, как позволяет дисплей: x2 на CYD */
-    dgx_screen_t *lcd = board.lcd;
-    int scale = lcd->width / FRAME_W < lcd->height / FRAME_H ? lcd->width / FRAME_W : lcd->height / FRAME_H;
-    scale = scale < 1 ? 1 : scale;
-    dgx_ge_frame_t *frame = dgx_ge_frame_create(lcd, (lcd->width - FRAME_W * scale) / 2,
-                                                (lcd->height - FRAME_H * scale) / 2, FRAME_W, FRAME_H);
-    if (frame && scale > 1 && !dgx_ge_frame_scale(frame, scale)) frame = NULL;
-    if (frame && board_band) dgx_ge_frame_band(frame, board_band);
+    /* кадр игры так крупно, как позволяет дисплей, посередине: x2 на CYD */
+    dgx_ge_frame_t *frame = dgx_ge_frame_fit(board.lcd, FRAME_W, FRAME_H, 0, board_band);
     dgx_ge_scene_t *scene = frame ? dgx_ge_scene_create(frame, LAYERS, 4, 4) : NULL;
     if (!scene) return;
     dgx_ge_scene_layer_pixels(scene, LAYER_TALK, true);                     /* разговор — в пикселях дисплея */
 
-    /* цвета всех наборов кадру; бумага (номер 0) — небо */
-    for (int set = 0; set < MYGAME_SET_COUNT; ++set) {
-        const uint8_t (*rgb)[3];
-        const int n = dgx_ge_pack_set_colors(&pack, set, &rgb);
-        dgx_ge_frame_add_colors(frame, rgb, n, maps[set]);
-        if (set == MYGAME_SET_UI) dgx_ge_frame_set_color(frame, 0, rgb[0][0], rgb[0][1], rgb[0][2]);
-    }
+    /* цвета всех наборов кадру; бумага (номер 0) — небо, первый цвет набора UI */
+    dgx_ge_frame_pack_colors(frame, &pack, maps, sizeof maps, map_of);
+    const uint8_t (*sky)[3];
+    if (dgx_ge_pack_set_colors(&pack, MYGAME_SET_UI, &sky)) dgx_ge_frame_set_color(frame, 0, sky[0][0], sky[0][1], sky[0][2]);
     dgx_ge_scene_reset(scene, 0);
     /* декорации: земля, один раз */
     ...
@@ -730,7 +785,8 @@ void app_main(void)
     dgx_ge_kinds_init(&kinds, &pack, 4);
     uint32_t now = esp_timer_get_time() / 1000;
     dgx_ge_actor_start(&hero, dgx_ge_kind(&kinds, MYGAME_BLOB_HERO), MYGAME_HERO_SCRIPT_STAND, 20, GROUND_Y - 1, now);
-    /* звук — как в hello: dgx_ge_sounds_open на блобе SOUNDS, dgx_ge_mixer_init, board_sound_start */
+    blob  = dgx_ge_pack_blob(&pack, MYGAME_BLOB_SOUNDS, &size);
+    sound = board_sound_open(&mixer, &sounds, blob, size, 2);                /* звук, где он у платы есть */
     ...
 
     /* диалог: строки, стили, шрифты игры по именам заголовка */
@@ -747,7 +803,8 @@ void app_main(void)
     dgx_ge_talk_view_init(&view, blob, blob ? size : 0, frame, fonts, MYGAME_FONT_COUNT);
     dgx_ge_talk_view_pixels(&view, true, made);
     dgx_ge_actor_t *const cast[1] = {&hero};
-    dgx_ge_talk_start(&talk, &hello, &(dgx_ge_cast_t){.roles = cast}, MYGAME_STYLE_TALK, now, say, NULL);
+    /* время разговора и время мира здесь одно: мир ничто не останавливает */
+    dgx_ge_talk_start(&talk, &hello, &(dgx_ge_cast_t){.roles = cast}, MYGAME_STYLE_TALK, now, now, say, NULL);
 
     dgx_ge_input_t input = {0};
     uint32_t walk_to = 0;
@@ -758,8 +815,8 @@ void app_main(void)
 
         dgx_ge_actor_advance(&hero, now, say, NULL);                        /* шаги, чьё время пришло */
         if (talk.state != DGX_GE_TALK_OVER) {                               /* события: кнопки — разговору */
-            if (input.pressed & (DGX_GE_KEY_A | DGX_GE_KEY_B)) dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_ACTIVATE, now);
-            dgx_ge_talk_view_play(&view, &talk, &strings, now);
+            if (input.pressed & (DGX_GE_KEY_A | DGX_GE_KEY_B)) dgx_ge_talk_view_event(&view, &talk, DGX_GE_UI_ACTIVATE, now, now);
+            dgx_ge_talk_view_play(&view, &talk, &strings, now, now);
             if (talk.state == DGX_GE_TALK_OVER) walk_to = now + walk_ms;
         } else if (walk_to) {                                               /* или герою */
             dgx_ge_actor_event(&hero, (int32_t)(now - walk_to) < 0 ? MYGAME_HERO_EVENT_WALK : MYGAME_HERO_EVENT_STOP, now, say, NULL);
@@ -767,18 +824,11 @@ void app_main(void)
 
         dgx_ge_scene_actors_begin(scene);                                   /* что видно в этом кадре */
         static dgx_image_t picture;                                         /* герой: его картинка сейчас */
-        dgx_ge_item_t it = {.x = dgx_ge_actor_x(&hero) + hero.image_dx, .y = dgx_ge_actor_y(&hero) + hero.image_dy,
-                            .layer = LAYER_ACTORS};
-        if (hero.image >= 0 && dgx_ge_pack_image(&pack, hero.image, &picture)) {
-            it.image = &picture;
-            it.map   = maps[dgx_ge_pack_image_set(&pack, hero.image)];
-            dgx_ge_scene_actor(scene, &it);
-        }
+        dgx_ge_scene_show_actor(scene, &hero, LAYER_ACTORS, &pack, map_of, &picture);
         dgx_ge_talk_view_show(&view, &talk, scene, LAYER_TALK);
         dgx_ge_scene_render(scene);                                         /* нарисовать изменённое и отправить */
 
-        const int64_t spent = esp_timer_get_time() - t0;                    /* шаг цикла не чаще 20 мс */
-        vTaskDelay(spent < 20000 ? pdMS_TO_TICKS((20000 - spent) / 1000) + 1 : 1);
+        board_pace(t0, 20000);                                              /* шаг цикла не чаще 20 мс, и хотя бы тик другим задачам */
     }
 }
 ```
@@ -788,13 +838,14 @@ void app_main(void)
 | Шаг | Что делает | Где подробнее |
 | --- | --- | --- |
 | пакет | `dgx_ge_pack_open` по символам, которые дала сборка; ничего не копирует | обзор, [2.2](overview-ru.md#22-пакет-ресурсов) |
-| плата | `board_display_init` из `boards/dgx_ge_board.h`: дисплей; там же касание (`board_pointer_*`), кнопки (`board_buttons`), геймпад и клавиатура на дисплее, звук (`board_sound_start`) | [2.17](overview-ru.md#217-плата), [host-ru.md](host-ru.md#1-как-это-устроено) |
-| кадр | `dgx_ge_frame_create`, `dgx_ge_frame_scale`; цвета наборов — `dgx_ge_frame_add_colors` | [2.3](overview-ru.md#23-картинки-и-цвета), [2.4](overview-ru.md#24-кадр) |
+| плата | `board_display_init` из `boards/dgx_ge_board.h`: дисплей; там же касание (`board_pointer_*`), кнопки (`board_buttons`), геймпад и клавиатура на дисплее, звук (`board_sound_open`) | [2.17](overview-ru.md#217-плата), [host-ru.md](host-ru.md#1-как-это-устроено) |
+| кадр | `dgx_ge_frame_fit` (или `dgx_ge_frame_create` и `dgx_ge_frame_scale`); цвета наборов — `dgx_ge_frame_pack_colors` | [2.3](overview-ru.md#23-картинки-и-цвета), [2.4](overview-ru.md#24-кадр) |
 | сцена | `dgx_ge_scene_create` (слои, декорации, актёры), декорации между `dgx_ge_scene_set_begin` и `_end` | [2.5](overview-ru.md#25-сцена) |
 | виды и актёры | `dgx_ge_kinds_init` и `dgx_ge_kind(&kinds, <P>_BLOB_<ВИД>)` — анимация вида; `dgx_ge_actor_start` со скриптом из заголовка | [2.7](overview-ru.md#27-актёры-и-скрипты) |
-| цикл | ввод (`dgx_ge_input_update`), `dgx_ge_actor_advance`, решения и события (`dgx_ge_actor_event`), что видно (`dgx_ge_scene_actors_begin`, `dgx_ge_scene_actor`), `dgx_ge_scene_render`, `vTaskDelay` | [2.18](overview-ru.md#218-цикл-игры-целиком) |
+| цикл | ввод (`dgx_ge_input_update`), `dgx_ge_actor_advance`, решения и события (`dgx_ge_actor_event`), что видно (`dgx_ge_scene_actors_begin`, `dgx_ge_scene_show_actor`), `dgx_ge_scene_render`, `board_pace` | [2.18](overview-ru.md#218-цикл-игры-целиком) |
 | `say` | что скрипт говорит игре: `signal`, `sound`, таймеры, клетки, появление | [animation-ru.md](animation-ru.md#5-что-скрипт-сообщает-игре) |
 | числа игры | `dgx_ge_game_open` на блобе `GAME`, `dgx_ge_game_value(&game, <P>_GAME_<ИМЯ>, иначе)` | `include/dgx_ge_game.h` |
+| переменные игры | `dgx_ge_vars_open` на блобе `VARIABLES`, `dgx_ge_game_vars = &vars`; `vars.values[<P>_GAME_VAR_<ИМЯ>]` | `include/dgx_ge_game.h` |
 | диалоги | `dgx_ge_strings_open`, `dgx_ge_dialog_open`, `dgx_ge_talk_start`; показ — `dgx_ge_talk_view_*` | [2.12](overview-ru.md#212-текст-надписи-диалоги-шрифты) |
 
 Остальное подключается так же — блоб из пакета по имени заголовка и
@@ -846,7 +897,7 @@ void app_main(void)
 | --- | --- |
 | что делает персонаж, сколько длится каждый кадр, куда он движется, какие звуки и сигналы — скрипт `.anim` | какие кнопки становятся какими событиями |
 | что из чего следует (матрица переходов `on ...`) | решения, которым нужно знание всей игры: куда целиться, за кем гнаться, что считать собранным рядом; ответы на вопросы скриптов (`game.<имя>`, `dgx_ge_expr_ask`) |
-| числа игры: скорости, жизни, размеры — `add_game`; имена чисел для скриптов — `add_constants` | настройка платы и кадра, масштаб |
+| числа игры: скорости, жизни, размеры — `add_game`; имена чисел для скриптов — `add_constants`; счёт, настройки, состояние правил — переменные игры (`add_variable`), их меняют скрипты и диалоги | настройка платы и кадра, масштаб |
 | уровень: сцена, сетка, плитки с правилами | где хранить сохранение |
 | таймеры, заставки, погони, толпы, диалоги, стили | главный цикл |
 
@@ -879,12 +930,12 @@ mygame/
 
 Шаги:
 
-1. **Движок в зависимости.** `idf.py add-dependency "jef-sure/dgx-ge^0.3.0"`
+1. **Движок в зависимости.** `idf.py add-dependency "jef-sure/dgx-ge"`
    добавляет его в `main/idf_component.yml`, DGX приходит с ним сам. DGX-DI
    (указатель, геймпад, клавиатура на дисплее) нужен платам с тачем и
-   сборке для компьютера: `idf.py add-dependency "jef-sure/dgx-di^0.1.2"`.
-   Плата компьютера и часть того, о чём здесь речь, появились в движке
-   в версии 0.2.0. Чтобы взять движок из клона репозитория, в
+   сборке для компьютера: `idf.py add-dependency "jef-sure/dgx-di"`. Без
+   версии берётся новейшая, а `dependencies.lock` держит взятые версии до
+   `idf.py update-dependencies`. Чтобы взять движок из клона репозитория, в
    `main/idf_component.yml` ему дают `override_path`:
 
    ```yaml
@@ -892,7 +943,7 @@ mygame/
      jef-sure/dgx-ge:
        version: "*"
        override_path: "../../esp32-component-dgx-ge"   # путь от main/ к клону
-     jef-sure/dgx-di: "^0.1.2"
+     jef-sure/dgx-di: "*"
    ```
 
    Тогда движок лежит не в `managed_components/`, и обеим сборкам говорят,
@@ -962,7 +1013,9 @@ mygame/
    `BOARD_MM`. Заголовок плат `dgx_ge_board.h` приходит с самим движком, и
    `BOARD_INCLUDE_DIRS` теперь пуст: он оставлен, чтобы игры, которые его
    называют, собирались как прежде; пакет встраивается `EMBED_FILES`;
-   `dgx_ge_params_of_pack` передаёт число параметров всей сборке;
+   `dgx_ge_params_of_pack` передаёт число параметров всей сборке,
+   `dgx_ge_now_events` — сколько событий `now` из шага актёра ждут в очереди;
+   `dgx_ge_synths` — какие синтезаторы музыки есть в прошивке;
    `dgx_ge_fonts` отдаёт запросы шрифтов DGX, а `dgx_fonts_board`,
    `dgx_fonts_scale` и `dgx_fonts_rules` говорят ему, для какого дисплея,
    масштаба и по каким правилам их делать. Масштаб шрифтов должен совпадать
@@ -1004,6 +1057,7 @@ GAME_SRCS       := main/main.c
 GAME_INCLUDES   := main
 GAME_EMBED      := main/assets/mygame.pack          # как EMBED_FILES
 GAME_PACK_H     := main/assets/mygame_pack.h        # как dgx_ge_params_of_pack
+GAME_DEFINES    := DGX_GE_ANIM_NOW_EVENTS=4 DGX_GE_SYNTH_FM=1  # как dgx_ge_now_events, dgx_ge_synths
 GAME_FONTS      := main/assets/mygame.fonts         # как dgx_ge_fonts
 GAME_FONT_RULES := fonts.rules                      # как dgx_fonts_rules
 GAME_FONT_SCALE := 2                                # как dgx_fonts_scale
@@ -1011,7 +1065,7 @@ HOST_DISPLAY    := 320x240                          # дисплей изобр�
 HOST_MM         := 58x43
 
 GAME_PACK_MAKE   := python3 tools/make_pack.py $(ENGINE)   # пакет заново (раздел 4)
-GAME_PACK_INPUTS := tools/make_pack.py $(wildcard art/*.png anim/*.anim dialogs/*.dlg po/*.po)
+GAME_PACK_INPUTS := tools/make_pack.py $(wildcard art/*.png anim/*.anim dialogs/*.dlg po/*.po $(ENGINE)/tools/dgx_ge_*.py)
 
 include $(ENGINE)/boards/host/host.mk
 ```
@@ -1145,6 +1199,8 @@ allow "DejaVu Sans" 8..
 | `the pack was not made: <команда> failed (it says why above)` | так `host.mk` передаёт отказ упаковщика (`GAME_PACK_MAKE`) | читать сообщение выше |
 | `the pack could not be made (... tools/make_pack.py: see above)` | так `main/CMakeLists.txt` из раздела 4 передаёт отказ упаковщика | читать сообщение выше |
 | `warning: ... is not in set ..., taken as ...` | цвет картинки не из её набора | поправить палитру картинки или набор |
+| `warning: set SHIP: 3 colors of its pictures not in palette nes, each taken as the nearest; the farthest ...` | набор готовой палитры, а картинки нарисованы не только её цветами | расстояние меньше 5 глазу почти не видно, 20 и больше — уже другой цвет: его стоит перерисовать цветом палитры |
+| `ValueError: set SHIP: no palette 'c64'; there are gameboy, nes, pico8` | палитры с таким именем нет ни в проекте, ни в движке | взять одну из названных или добавить её в `palettes` документа |
 
 **Настройка и компиляция**
 

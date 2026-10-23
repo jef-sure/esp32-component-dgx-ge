@@ -10,7 +10,8 @@ Russian and in English.
 
 A kind: its params, its states (the scripts: what is active, what is done,
 how long, what follows; repeats told once), its transitions (on an event,
-from where, to where, when; and the events it does not answer). A pack: the
+from where, to where, when; and the events it does not answer), and the
+scripts where an answer of the game would be lost (lost_answers). A pack: the
 events between kinds, who sends them (hit, recoil, tell holder, contact on)
 and who answers them; an event answered and sent by no kind is sent by the
 game.
@@ -35,12 +36,24 @@ T = {
     "states": {"ru": "Состояния", "en": "States"},
     "transitions": {"ru": "Переходы", "en": "Transitions"},
     "deaf": {"ru": "Не отвечает на", "en": "Does not answer"},
+    "lost": {"ru": "Ответ игры пропадёт", "en": "The game's answer would be lost"},
+    "lost_one": {"ru": "Состояние {s} подаёт {sig} и переходит в {to}, но само не отвечает ни на одно событие: событие, которым игра сразу "
+                       "ответит на сигнал, застанет актёра ещё в {s} и пропадёт. Если игра так отвечает, назовите {s} в правилах этого "
+                       "события (само состояние или группу, где оно есть)",
+                 "en": "The state {s} gives {sig} and goes on to {to}, but answers no event itself: an event the game answers the signal "
+                       "with at once finds the actor still in {s} and is lost. If the game answers so, name {s} in the rules of that "
+                       "event (the state itself or a group it is in)"},
+    "lost_sig": {"ru": "сигнал {n}", "en": "signal {n}"},
+    "lost_sigs": {"ru": "сигналы {n}", "en": "signals {n}"},
+    "lost_or": {"ru": " или ", "en": " or "},
     "between": {"ru": "События между видами", "en": "Events between kinds"},
     "starts": {"ru": "в начале {v}", "en": "starts at {v}"},
     "masks": {"ru": "активны: {m}", "en": "active: {m}"},
     "no_masks": {"ru": "масок нет", "en": "no masks"},
     "set": {"ru": "{p} = {v}", "en": "{p} = {v}"},
     "add": {"ru": "{p} += {v}", "en": "{p} += {v}"},
+    "set_var": {"ru": "переменная игры {p} = {v}", "en": "the game's variable {p} = {v}"},
+    "add_var": {"ru": "переменная игры {p} += {v}", "en": "the game's variable {p} += {v}"},
     "velocity": {"ru": "скорость: вперёд {x}, вниз {y} точек/с", "en": "velocity: forward {x}, down {y} points/s"},
     "accel": {"ru": "ускорение: вперёд {x}, вниз {y} точек/с²", "en": "acceleration: forward {x}, down {y} points/s²"},
     "path": {"ru": "по формуле: {f}", "en": "by a formula: {f}"},
@@ -94,7 +107,12 @@ T = {
     "count_some": {"ru": "в карманах есть {k}", "en": "there is {k} in the pockets"},
     "pockets": {"ru": "Карманы: {n}", "en": "Pockets: {n} places"},
     "stack": {"ru": "В одно место кармана — до {n}", "en": "Up to {n} in one place of a pocket"},
-    "frame_x": {"ru": "кадр по выражению {e}, {ms} мс", "en": "a frame by the expression {e}, {ms} ms"},
+    "frame_x": {"ru": "кадр по выражению {e}, {ms}", "en": "a frame by the expression {e}, {ms}"},
+    "frame_one": {"ru": "кадр {pic}, {ms}", "en": "frame {pic}, {ms}"},
+    "frame_none": {"ru": "ничего не показывает {ms}", "en": "shows nothing for {ms}"},
+    "frame_at": {"ru": " (картинка сдвинута: {at})", "en": " (the picture moved by {at})"},
+    "ms": {"ru": "{ms} мс", "en": "{ms} ms"},
+    "worked_ms": {"ru": "{e} мс (длительность вычисляется в начале кадра)", "en": "{e} ms (the time worked out as the frame begins)"},
     "amount": {"ru": "(сколько их лежит)", "en": "(how many lie)"},
     "keep": {"ru": "мир хранит, новым не уступает", "en": "the world keeps it: newer things do not take its place"},
     "hit": {"ru": "{m}, встретив {on}: {what}", "en": "{m} meeting {on}: {what}"},
@@ -104,11 +122,21 @@ T = {
     "nothing": {"ru": "ничего", "en": "nothing"},
     "signal": {"ru": "сигнал игре {n}", "en": "a signal to the game {n}"},
     "sound": {"ru": "звук {n}", "en": "sound {n}"},
+    "music": {"ru": "играет музыку {m}", "en": "plays the music {m}"},
+    "music_stop": {"ru": "музыка смолкает", "en": "the music stops"},
+    "fading": {"ru": " (смена затуханием за {t})", "en": " (fading over {t})"},
+    "music_level": {"ru": "громкость музыки — {p} от настройки{ms}", "en": "the music at {p} of its volume{ms}"},
+    "over": {"ru": " за {t}", "en": " over {t}"},
+    "music_plays": {"ru": "музыка ещё играет", "en": "a music still plays"},
+    "music_over": {"ru": "музыка не играет", "en": "no music plays"},
     "dx": {"ru": "шаг {n} вперёд", "en": "{n} forward"},
     "dx_back": {"ru": "шаг {n} назад", "en": "{n} back"},
     "dy": {"ru": "{n} вниз", "en": "{n} down"},
     "dy_up": {"ru": "{n} вверх", "en": "{n} up"},
     "flip": {"ru": "разворот", "en": "turns round"},
+    "rotate": {"ru": "поворот на {d}° по часовой", "en": "turns {d}° clockwise"},
+    "rotate_back": {"ru": "поворот на {d}° против часовой", "en": "turns {d}° anticlockwise"},
+    "rotate_to": {"ru": "поворот в положение {d}°", "en": "turns to {d}°"},
     "branch": {"ru": "здесь можно прервать", "en": "may be broken off here"},
     "cycle": {"ru": "{p} по кругу {a}…{b}, кадр {ms} мс", "en": "{p} goes round {a}…{b}, a frame of {ms} ms"},
     "loop": {"ru": "по кругу", "en": "round and round"},
@@ -197,8 +225,9 @@ class Kind:
 
 
 class Teller:
-    def __init__(self, lang, words=None, masks=None, defines=None):
+    def __init__(self, lang, words=None, masks=None, defines=None, params=None):
         self.lang, self.words, self.masks, self.defines = lang, words or {}, masks or {}, defines or {}
+        self.params = set(params or ())  # of the kind: a time that reads one is worked out as the frame begins
         self.labels = set()  # of the script being told: a goto to one of them names a place in it
 
     def label(self, name):
@@ -241,27 +270,83 @@ def _pictures(pics, lang):
     return ", ".join(shown)
 
 
+def _without_ms(text):
+    """The time of a frame without its unit, as the assembler reads it: 83ms, (speed)ms, TICK ms; fall_ms is a name."""
+    text = text.strip()
+    m = re.search(r"([A-Za-z0-9_]*)ms$", text)
+    return text[:-2].rstrip() if m and (not m.group(1) or m.group(1)[0].isdigit()) else text
+
+
+def _frame(rest):
+    """A frame as written: its picture (an expression in parentheses with them), its time without ms, where it is moved (None)."""
+    if rest.startswith("("):
+        depth, k = 0, len(rest) - 1
+        for k, c in enumerate(rest):
+            depth += (c == "(") - (c == ")")
+            if depth == 0:
+                break
+        pic, tail = rest[:k + 1], rest[k + 1:]
+    else:
+        pic, _, tail = rest.partition(" ")
+    tail, _, at = f" {tail} ".partition(" at ")
+    return pic, _without_ms(tail), at.strip() or None
+
+
+# what an expression reads of the actor and the game as the step is made, beside its params
+WORKED = ("now", "x", "y", "vx", "vy", "amount", "count", "timer", "game", "game_var", "axis", "rnd", "its", "rotation")
+
+
+def _worked(text, t):
+    """Is a frame's time worked out as the frame begins (it reads the actor's params or what it is then)?"""
+    return bool(set(re.findall(r"[A-Za-z_]\w*", text)) & (t.params | set(WORKED)))
+
+
+def _time(text, t):
+    """A frame's time in words, and its ms: None when it is worked out as the frame begins (or not known here)."""
+    if text.isdigit():
+        return _t("ms", t.lang, ms=text), int(text)
+    if set(re.findall(r"[A-Za-z_]\w*", text)) & (t.params | set(WORKED)):
+        inner = text[1:-1] if text.startswith("(") and _frame(text)[0] == text else text  # (speed): speed
+        return _t("worked_ms", t.lang, e=inner.strip()), None
+    try:
+        ms = int(eval(t.defines[text], {}, {})) if text in t.defines else None
+    except Exception:
+        ms = None
+    return _t("ms", t.lang, ms=t.value(text)), ms
+
+
 def _steps(stmts, t):
-    """The statements of a script as told items, repeats told once: (text, ms)."""
+    """The statements of a script as told items, repeats told once: (text, ms; None when not known)."""
     items, i = [], 0
     while i < len(stmts):
         word, rest = stmts[i]
         # a frame worked out by an expression: told as it is written, amount in words
         if word == "frame" and rest.startswith("("):
-            expr, _, ms = rest[1:].rpartition(")")
-            ms = re.sub(r"\s*ms$", "", ms.strip())
-            expr = re.sub(r"\bamount\b", _t("amount", t.lang), expr)
-            items.append((_t("frame_x", t.lang, e=expr.strip(), ms=ms), int(ms) if ms.isdigit() else 0))
+            pic, ms, _ = _frame(rest)
+            expr = re.sub(r"\bamount\b", _t("amount", t.lang), pic[1:-1])
+            told, ms = _time(ms, t)
+            items.append((_t("frame_x", t.lang, e=expr.strip(), ms=told), ms))
             i += 1
             continue
+        # a frame of its own: moved, or of a time worked out as it begins
+        if word == "frame":
+            pic, ms, at = _frame(rest)
+            worked = _worked(ms, t)
+            told, ms = _time(ms, t)
+            if at or worked:
+                moved = _t("frame_at", t.lang, at=at) if at else ""
+                what = _t("frame_none", t.lang, ms=told) + moved if pic == "none" else _t("frame_one", t.lang, pic=pic + moved, ms=told)
+                items.append((what, ms))
+                i += 1
+                continue
         # a param set to n, n+1, ... a frame each: one round
         if word == "set" and i + 1 < len(stmts) and stmts[i + 1][0] == "frame":
             p, _, v = rest.partition(" ")
             run, j, ms = [], i, None
             while j + 1 < len(stmts) and stmts[j][0] == "set" and stmts[j][1].split()[0] == p and stmts[j + 1][0] == "frame":
                 vv = stmts[j][1].split(None, 1)[1].strip()
-                fms = re.sub(r"ms$", "", stmts[j + 1][1].split()[1])
-                if not vv.isdigit() or (run and int(vv) != run[-1] + 1) or (ms and fms != ms):
+                _, fms, at = _frame(stmts[j + 1][1])
+                if not vv.isdigit() or _worked(fms, t) or at or (run and int(vv) != run[-1] + 1) or (ms and fms != ms):
                     break
                 run.append(int(vv))
                 ms = fms
@@ -269,7 +354,8 @@ def _steps(stmts, t):
                 if j < len(stmts) and stmts[j][0] == "label":
                     break  # a label begins another round: what goes round is told from it
             if len(run) >= 3:
-                items.append((_t("cycle", t.lang, p=t.plain(p), a=run[0], b=run[-1], ms=ms), int(ms) * len(run)))
+                each = _time(ms, t)[1]
+                items.append((_t("cycle", t.lang, p=t.plain(p), a=run[0], b=run[-1], ms=t.value(ms)), None if each is None else each * len(run)))
                 i = j
                 continue
         # frames of one time, one after another, with steps and sounds between them: told together
@@ -278,11 +364,10 @@ def _steps(stmts, t):
             while j < len(stmts):
                 w, r = stmts[j]
                 if w == "frame":
-                    parts = r.split()
-                    fms = re.sub(r"ms$", "", parts[1])
-                    if (ms and fms != ms) or " at " in f" {r} ":
+                    pic, fms, at = _frame(r)
+                    if (ms and fms != ms) or at or pic.startswith("(") or _worked(fms, t):
                         break
-                    pics.append(parts[0])
+                    pics.append(pic)
                     ms = fms
                 elif w in ("dx", "dy") and re.fullmatch(r"-?\d+", r) and j + 1 < len(stmts) and stmts[j + 1][0] in ("frame", "dx", "dy", "sound"):
                     if w == "dx":
@@ -295,13 +380,13 @@ def _steps(stmts, t):
                     break
                 j += 1
             n = len(pics)
-            unit = "мс" if t.lang == "ru" else "ms"
-            what = _frames(n, t.lang) + " " + _pictures(pics, t.lang) + (f", {ms} {unit}" if n == 1 else f" {'по' if t.lang == 'ru' else 'of'} {ms} {unit}")
+            told, each = _time(ms, t)
+            what = _frames(n, t.lang) + " " + _pictures(pics, t.lang) + (f", {told}" if n == 1 else f" {'по' if t.lang == 'ru' else 'of'} {told}")
             if dx:
                 what += ", " + (_t("dx_back", t.lang, n=-dx) if dx < 0 else _t("dx", t.lang, n=dx))
             if dy:
                 what += ", " + (_t("dy_up", t.lang, n=-dy) if dy < 0 else _t("dy", t.lang, n=dy))
-            items.append(("; ".join([what] + said), int(ms) * n))
+            items.append(("; ".join([what] + said), None if each is None else each * n))
             i = j
             continue
         items.append((_statement(word, rest, t), 0))
@@ -317,6 +402,8 @@ def _statement(word, rest, t):
         return _t("masks", lang, m=", ".join(t.mask(a) for a in on)) if on else _t("no_masks", lang)
     if word in ("set", "add"):
         p, _, v = rest.partition(" ")
+        if p.startswith("game_var."):
+            return _t(word + "_var", lang, p=t.plain(p[9:]), v=t.value(v))
         return _t(word, lang, p=t.plain(p), v=t.value(v))
     if word in ("velocity", "accel"):
         xy = [x.strip() for x in (rest.split(",") if "," in rest else rest.split())]
@@ -392,6 +479,8 @@ def _statement(word, rest, t):
         cond = re.sub(r"count\((\w+)\)\s*==\s*0\b", lambda m: _t("count_none", lang, k=t.word(m.group(1))), cond.strip())
         cond = re.sub(r"count\((\w+)\)\s*(>\s*0|>=\s*1)\b", lambda m: _t("count_some", lang, k=t.word(m.group(1))), cond)
         cond = re.sub(r"count\((\w+)\)", lambda m: _t("count", lang, k=t.word(m.group(1))), cond)
+        cond = re.sub(r"\bmusic\s*(>=\s*0|!=\s*-1|>\s*-1)", lambda m: _t("music_plays", lang), cond)
+        cond = re.sub(r"\bmusic\s*(<\s*0|==\s*-1|<=\s*-1)", lambda m: _t("music_over", lang), cond)
         target = target.strip()
         return _t("goto_if", lang, c=cond, s=t.label(target) if target in t.labels else t.word(target))
     if word == "hit":
@@ -408,6 +497,12 @@ def _statement(word, rest, t):
         return _t("hit", lang, m=t.mask(words[0]), on=", ".join(on), what="; ".join(what) or _t("nothing", lang))
     if word in ("signal", "sound"):
         return _t(word, lang, n=rest)
+    if word == "music":
+        args = rest.split()
+        if args[:1] == ["volume"]:
+            return _t("music_level", lang, p=args[1] if len(args) > 1 else "?", ms=_t("over", lang, t=args[2]) if len(args) > 2 else "")
+        fade = _t("fading", lang, t=args[1]) if len(args) > 1 else ""
+        return (_t("music_stop", lang) if args[:1] == ["stop"] else _t("music", lang, m=t.word(args[0]) if args else "?")) + fade
     if word == "dx":
         n = int(rest) if re.fullmatch(r"-?\d+", rest) else rest
         return _t("dx_back", lang, n=-n) if isinstance(n, int) and n < 0 else _t("dx", lang, n=n)
@@ -416,6 +511,14 @@ def _statement(word, rest, t):
         return _t("dy_up", lang, n=-n) if isinstance(n, int) and n < 0 else _t("dy", lang, n=n)
     if word == "flip":
         return _t("flip", lang)
+    if word == "rotate":
+        to, _, degrees = rest.partition(" ") if rest.startswith("to ") else ("", "", rest)
+        degrees = degrees.strip()
+        if to:
+            return _t("rotate_to", lang, d=t.value(degrees))
+        if re.fullmatch(r"-\d+", degrees):
+            return _t("rotate_back", lang, d=degrees[1:])
+        return _t("rotate", lang, d=t.value(degrees))
     if word == "branch":
         return _t("branch", lang)
     return ""
@@ -462,18 +565,79 @@ def _ending(name, segs, k, t, script_names):
 
 
 def _told(segs, k, t, mark=False):
-    """A part in words: its items, the mark of its label before the first when asked; and how long its frames take."""
+    """
+    A part in words: its items, the mark of its label before the first when asked; and how long its frames take (None:
+    a time of them is a name, the length is not told).
+    """
     items = _steps(_reach(segs[k][1])[0], t)
     texts = [text for text, _ in items]
     if mark and segs[k][0]:
         texts = [_t("mark", t.lang, l=segs[k][0]) + " " + texts[0]] + texts[1:] if texts else [_t("mark", t.lang, l=segs[k][0])]
-    return texts, sum(ms for _, ms in items)
+    return texts, None if any(ms is None for _, ms in items) else sum(ms for _, ms in items)
+
+
+def lost_answers(text):
+    """
+    The answers of the game a kind would lose: [(script, its signals, the scripts it goes on to)], in the order of
+    the scripts. The game answers a signal from its say, at once (dgx_ge_actor_event), and the actor is then still in
+    the script whose step signalled: one that answers no event (no rule of on names it, by itself or in a group)
+    drops the answer (the event returns false). Such a script is told when, after a signal, it goes on into another
+    script (goto, goto if): the kind answers there, so its writer may count on it here (a step that tells the game and
+    passes on). A script that stays in itself (hold, a goto of its own labels or of itself) answers nothing all its
+    life, as written, and is not told; nor is a kind that answers no event at all. The script followed is the one
+    the actor is in: its goto to a label (of any script) and its running on past its end into the next script keep it
+    there; what follows vanish is not followed. Only signal: the other steps the game hears mean what the engine says.
+    """
+    kind = Kind(text)
+    if not kind.rules:
+        return []
+    flat = []  # the statements of all the scripts in order, each script begun by ("script", name)
+    for name, stmts in kind.scripts:
+        flat.append(("script", name))
+        flat += stmts
+    starts = {r: i for i, (w, r) in enumerate(flat) if w == "script"}
+    labels = {r: i for i, (w, r) in enumerate(flat) if w == "label"}
+    answering = {m for _, src, _, _ in kind.rules for m in kind.groups.get(src, [src])}
+    out = []
+    for name, start in starts.items():
+        if name in answering:
+            continue
+        signals, onto, seen, todo = [], [], set(), [(start + 1, ())]
+        while todo:
+            i, said = todo.pop()
+            while i < len(flat) and (i, said) not in seen:
+                seen.add((i, said))
+                word, rest = flat[i]
+                if word == "signal" and rest not in said:
+                    said += (rest,)
+                if word in ("hold", "vanish"):
+                    break
+                if word == "goto":
+                    m = re.fullmatch(r"(\w+)\s+if\s+.+", rest)
+                    to = m.group(1) if m else rest
+                    if to in labels or to == name:
+                        at = labels[to] if to in labels else start
+                        if m:
+                            todo.append((at + 1, said))
+                        else:
+                            i = at + 1
+                            continue
+                    elif to in starts:
+                        if said:
+                            signals += [s for s in said if s not in signals]
+                            onto += [to] if to not in onto else []
+                        if not m:
+                            break
+                i += 1
+        if signals:
+            out.append((name, signals, onto))
+    return out
 
 
 def explain(text, lang="ru", words=None, masks=None, title=None):
     """One kind in words: markdown."""
     kind = Kind(text)
-    t = Teller(lang, words, masks, kind.defines)
+    t = Teller(lang, words, masks, kind.defines, kind.params)
     names = [n for n, _ in kind.scripts]
     out = [f"## {title}"] if title else []
     places = kind.pockets and (_places(int(kind.pockets), lang) if kind.pockets.isdigit() else kind.pockets)
@@ -499,7 +663,7 @@ def explain(text, lang="ru", words=None, masks=None, title=None):
         for k in range(len(segs)):
             part, part_ms = _told(segs, k, t, mark=True)
             texts += part
-            ms += part_ms
+            ms = None if ms is None or part_ms is None else ms + part_ms  # a time worked out as a frame begins: no length known
         ending = _ending(name, segs, len(segs) - 1, t, names)
         # what goes round has no end: its round is told (from the label on), not a length
         loops = ending in (_t("loop", lang),) or ending.startswith(_t("from_label", lang, l="").split("«")[0].split("“")[0])
@@ -522,6 +686,13 @@ def explain(text, lang="ru", words=None, masks=None, title=None):
     deaf = [e for e in kind.events if not any(r[0] == e for r in kind.rules)]
     if deaf:
         out.append(f"\n**{T['deaf'][lang]}:** " + ", ".join(t.word(e) for e in deaf) + ".")
+    lost = lost_answers(text)
+    if lost:
+        out.append(f"\n**{T['lost'][lang]}:**\n")
+        for name, signals, onto in lost:
+            sig = _t("lost_sig" if len(signals) == 1 else "lost_sigs", lang, n=", ".join(t.value(v) for v in signals))
+            to = _t("lost_or", lang).join(t.label(t.plain(o)) for o in onto)
+            out.append("- " + _t("lost_one", lang, s=t.label(t.plain(name)), sig=sig, to=to) + ".")
     return "\n".join(out) + "\n"
 
 
@@ -580,6 +751,7 @@ DIALOG_T = {
     "silence": {"ru": " (молчание {t} → {label})", "en": " (silence {t} → {label})"},
     "answer": {"ru": "«{text}» → {label}", "en": "“{text}” → {label}"},
     "control": {"ru": "«{text}» — {kind}: {param}", "en": "“{text}” — {kind}: {param}"},
+    "variable": {"ru": "переменная игры {n}", "en": "the game's variable {n}"},
     "stays": {"ru": ", выбор остаётся", "en": ", the choice stays"},
     "then": {"ru": ", потом → {label}", "en": ", then → {label}"},
     "game_kind": {"ru": "**Настройки игры:** {kind}.", "en": "**The game's settings:** {kind}."},
@@ -653,11 +825,13 @@ def explain_dialog(text, lang="ru", words=None, strings=None):
                 txt += DIALOG_T["silence"][lang].format(t=ms(m.group(2)), label=t.plain(m.group(3)))
             out.append("- " + txt + ":")
         elif s.startswith('"'):
-            m = _re.match(r'"((?:[^"\\]|\\.)*)"\s*(?:if\s+(.+?))?\s*(?:control\s+(\w+)\s+(\w+))?\s*(?:->\s*(\w+))?\s*$', s)
+            m = _re.match(r'"((?:[^"\\]|\\.)*)"\s*(?:if\s+(.+?))?\s*(?:control\s+(\w+)\s+((?:game_var\.)?\w+))?\s*(?:->\s*(\w+))?\s*$', s)
             if m:
                 if m.group(3):
-                    # a control: what it changes; with a label, on after it, else the choice stays
-                    txt = DIALOG_T["control"][lang].format(text=line(m.group(1)), kind=t.word(m.group(3)), param=t.plain(m.group(4)))
+                    # a control: what it changes (a variable of the game, or a param of the one choosing); with a label, on after it, else the choice stays
+                    edited = m.group(4)
+                    edited = DIALOG_T["variable"][lang].format(n=t.plain(edited[9:])) if edited.startswith("game_var.") else t.plain(edited)
+                    txt = DIALOG_T["control"][lang].format(text=line(m.group(1)), kind=t.word(m.group(3)), param=edited)
                     txt += DIALOG_T["then"][lang].format(label=t.plain(m.group(5))) if m.group(5) else DIALOG_T["stays"][lang]
                 else:
                     txt = DIALOG_T["answer"][lang].format(text=line(m.group(1)), label=t.plain(m.group(5) or ""))

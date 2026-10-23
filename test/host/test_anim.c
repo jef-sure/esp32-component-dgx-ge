@@ -155,6 +155,17 @@ static void clock_say(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, 
     if (what == DGX_GE_ANIM_PARAM) ++clock_frames;
 }
 
+/* The steps of stepper: their moments; at the third the game makes it faster, 60 ms a step (as a game's apple would) */
+static uint32_t stepped[32];
+static int      steps_made;
+
+static void stepper_say(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, uint32_t at_ms, void *ctx)
+{
+    if (what != DGX_GE_ANIM_SIGNAL || value != 2) return;
+    if (steps_made < 32) stepped[steps_made] = at_ms;
+    if (++steps_made == 3) a->params[TEST_TIMING_PARAM_SPEED] = 60;
+}
+
 /* The time of the scripts: motion that adds up however the calls come, events from its own say and from its past, a long absence lived through. */
 static void clock_tests(const dgx_ge_pack_t *pack)
 {
@@ -199,6 +210,37 @@ static void clock_tests(const dgx_ge_pack_t *pack)
     clock_frames = 0;
     dgx_ge_actor_advance(&c, 30 * 60 * 1000, clock_say, NULL);
     CHECK(clock_frames == 10843 && c.params[TEST_TIMING_PARAM_N] == 10844 && c.due_ms == 10844u * 166);
+
+    /* a frame's time from a param, worked out as the frame begins: 100 ms, then 60 from the step at 200, however the calls come */
+    const uint32_t rates[] = {1, 7, 16, 33, 59, 100, 250, 1000};
+    for (int k = 0; k < 8; ++k) {
+        steps_made = 0;
+        dgx_ge_actor_start(&c, &anim, TEST_TIMING_SCRIPT_STEPPER, 0, 0, 0);
+        for (uint32_t t = 0;; t = t + rates[k] < 1000 ? t + rates[k] : 1000) {
+            dgx_ge_actor_advance(&c, t, stepper_say, NULL);
+            if (t == 1000) break;
+        }
+        bool right = steps_made == 16 && c.image == -1;
+        for (int i = 0; i < steps_made && i < 32; ++i) right = right && stepped[i] == (i < 3 ? 100u * i : 200u + 60u * (i - 2));
+        CHECK(right);
+    }
+    /* the game changes the param between calls, in a frame: that frame keeps its time, the next ones take the new one */
+    steps_made = 3; /* its say makes it no faster */
+    dgx_ge_actor_start(&c, &anim, TEST_TIMING_SCRIPT_STEPPER, 0, 0, 0);
+    dgx_ge_actor_advance(&c, 250, stepper_say, NULL);
+    c.params[TEST_TIMING_PARAM_SPEED] = 30;
+    dgx_ge_actor_advance(&c, 299, stepper_say, NULL);
+    CHECK(c.due_ms == 300);
+    dgx_ge_actor_advance(&c, 300, stepper_say, NULL);
+    CHECK(c.due_ms == 330 && steps_made == 7);
+
+    /* the time below 1: 1 ms; above 65535: 65535; the picture worked out (ONE + n), the other one moved */
+    dgx_ge_actor_start(&c, &anim, TEST_TIMING_SCRIPT_BOUNDS, 0, 0, 0);
+    c.params[TEST_TIMING_PARAM_N] = TEST_IMG_EIGHT - TEST_IMG_ONE;
+    dgx_ge_actor_advance(&c, 0, NULL, NULL);
+    CHECK(c.due_ms == 1 && c.image == TEST_IMG_EIGHT && c.image_dx == 0);
+    dgx_ge_actor_advance(&c, 1, NULL, NULL);
+    CHECK(c.due_ms == 1 + 65535u && c.image == TEST_IMG_ONE && c.image_dx == 2 && c.image_dy == -1);
 }
 
 /* The questions of the test's game: far (0) is 21, near (1) what ctx says. */

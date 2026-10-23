@@ -69,6 +69,10 @@ cases = {
     "frame expression not closed": BASE + "script c\n    frame (1 + amount 10ms\n    hold\n",
     "amount in a path": BASE + "script c\n    path x: amount * t, y: 0\n    hold\n",
     "frame expression of no picture": BASE + "script c\n    frame (NOPE + amount) 10ms\n    hold\n",
+    "frame time of constants 0": BASE + "script c\n    frame 1 (5 - 5)ms\n    hold\n",
+    "frame time of constants too long": BASE + "script c\n    frame (1 + amount) 70000ms\n    hold\n",
+    "frame time of t": BASE + "script c\n    frame 1 (t * 10)ms\n    hold\n",
+    "frame time of no name": BASE + "script c\n    frame 1 (speed)ms\n    hold\n",
     "table of a param": "param p 1\ntable tab 1 p\n" + BASE,
     "table twice": "table tab 1\ntable tab 2\n" + BASE,
     "table value too big": "table tab 40000\n" + BASE,
@@ -283,7 +287,7 @@ except AnimError:
 done = assemble("pockets 6\nstack 10\nscript a\n    keep\nlabel top\n    goto top if count(SWORD) == 0\n    goto b if 1 < 2\n"
                 "    draw hand SWORD\n    stow hand\n    hold\nscript b\n    hold\n", {}, {"hand": 4}, kinds={"SWORD": 9})
 header = struct.unpack_from("<IHHHHIBBBB", done.blob, 0)
-if header[1] != 10 or header[6:10] != (6, 10, 0, 0):
+if header[1] != 11 or header[6:10] != (6, 10, 0, 0):
     print(f"test_anim_rules.py: header {header}")
     failed += 1
 code = done.blob[20 + 2 * 2:]
@@ -364,6 +368,23 @@ for what, call in (("no end", lambda p: p.add_show("S", actors=[{"name": "a", "k
 done = assemble("script a\n    frame none 10ms\n    hold\n")
 if struct.pack("<HH", 0xFFFF, 10) not in done.blob:
     print("test_anim_rules.py: frame none is not 0xFFFF")
+    failed += 1
+# a frame's time an expression, worked out as the frame begins: FRAME_MS dx, dy, the picture an expression (a constant one a number, none
+# -1), then the time; of constants the steps they always were (FRAME, FRAME_AT, FRAME_X), the bytes as before; fall_ms a name, not fall_ ms
+num = lambda v: bytes([5]) + struct.pack("<Bf", EXPR["num"], v)
+done = assemble("define TICK 40\nparam speed 100\nparam fall_ms 800\nscript a\n    frame none (speed)ms\n    frame P speed * 2 at 2, -1\n"
+                "    frame (P + amount) (speed)ms\n    frame (P + 2) fall_ms\n    frame P (TICK * 2)ms\n    frame P TICK ms at 1, 1\n"
+                "    frame (P + amount) (1000 / 12)ms\n    hold\n", {"P": 10})
+speed, fall = Expr("speed", {}, {"speed": (0, 100)}, False, "t").code(), Expr("f", {}, {"f": (1, 800)}, False, "t").code()
+want = (bytes([OP["FRAME_MS"], 0, 0]) + num(-1) + speed
+        + bytes([OP["FRAME_MS"], 2, 0xFF]) + num(10) + Expr("speed * 2", {}, {"speed": (0, 100)}, False, "t").code()
+        + bytes([OP["FRAME_MS"], 0, 0]) + Expr("10 + amount", {}, {}, False, "t").code() + speed
+        + bytes([OP["FRAME_MS"], 0, 0]) + num(12) + fall
+        + struct.pack("<BHH", OP["FRAME"], 10, 80) + struct.pack("<BHHbb", OP["FRAME_AT"], 10, 40, 1, 1)
+        + bytes([OP["FRAME_X"], 83, 0]) + Expr("10 + amount", {}, {}, False, "t").code() + bytes([OP["HOLD"]]))
+code = done.blob[20 + 2 + 4:]
+if OP["FRAME_MS"] != 44 or code != want or done.blob[4] != 11:
+    print(f"test_anim_rules.py: a frame's time by an expression {code.hex()} not {want.hex()}")
     failed += 1
 # a radius of a sense worked out at the step (flag 4, its expression after where); a number as before (no flag, no expression)
 d1 = assemble("param p 0\n" + BASE + "script c\n    sense any within 30 - p / 4 into p\n    hold\n")

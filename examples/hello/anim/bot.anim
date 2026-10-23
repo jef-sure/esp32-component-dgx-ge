@@ -47,8 +47,50 @@ script hop
     dy 6
     goto stand
 
-group ground: stand, walk
+# a hop on the way: the same arc, and forward a point a picture (about as fast as it walks), so a hop
+# taken while walking goes on in the walk's direction; it walks on after it if the arrow is still held
+script leap
+    sound 0
+    signal 1
+    frame BOT_HOP 35ms
+    dx 1
+    dy -6
+    frame BOT_HOP 35ms
+    dx 1
+    dy -5
+    frame BOT_HOP 35ms
+    dx 1
+    dy -4
+    frame BOT_HOP 35ms
+    dx 1
+    dy -3
+    frame BOT_HOP 35ms
+    dx 1
+    dy -2
+    frame BOT_HOP 35ms
+    dx 1
+    dy -1
+    frame BOT_HOP 35ms
+    dx 1
+    dy 1
+    frame BOT_HOP 35ms
+    dx 1
+    dy 2
+    frame BOT_HOP 35ms
+    dx 1
+    dy 3
+    frame BOT_HOP 35ms
+    dx 1
+    dy 4
+    frame BOT_HOP 35ms
+    dx 1
+    dy 5
+    frame BOT_HOP 35ms
+    dx 1
+    dy 6
+    goto stand
 
 on walk: stand -> walk now
 on stop: walk -> stand branch
-on hop: ground -> hop now
+on hop: stand -> hop now
+on hop: walk -> leap now

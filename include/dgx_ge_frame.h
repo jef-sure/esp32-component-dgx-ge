@@ -141,6 +141,15 @@ bool dgx_ge_frame_scale(dgx_ge_frame_t *frame, int scale);
  */
 bool dgx_ge_frame_band(dgx_ge_frame_t *frame, uint32_t bytes);
 
+/*
+ * A frame of width x height points made for the display, as a game makes one: scale times larger (dgx_ge_frame_scale),
+ * 0 the largest whole scale at which all of it is seen (1 when even that is too large, 8 at most), in the middle of the
+ * display; then sent in bands of band bytes (dgx_ge_frame_band, the board's board_band; 0 a strip). The scale it took
+ * is frame->scale; a band there was no room for leaves a strip, frame->band 0. NULL when there is no memory for the
+ * frame or for its strip (nothing is kept), or a scale above 8.
+ */
+dgx_ge_frame_t *dgx_ge_frame_fit(dgx_screen_t *display, int width, int height, int scale, uint32_t band);
+
 static inline int dgx_ge_frame_width(const dgx_ge_frame_t *f)
 {
     return f->buffer->width;

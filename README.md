@@ -44,7 +44,11 @@ Its interfaces will still change.
   engine's input.
 - **A sound mixer** of 8-bit and IMA ADPCM samples, mono or stereo; the
   platform sends what it mixes, from a task of its own if it likes, with
-  its lock given to the mixer, so the game never takes one.
+  its lock given to the mixer, so the game never takes one. Beside the
+  samples, music by notes (MML) on the synthesizer the game chooses: a
+  chip's square, triangle and noise, the NES's, or FM after the OPL2, with
+  sets of instruments as data; the same C builds as WebAssembly for the
+  editor, sample for sample.
 - **Python tools** (`tools/`) that turn pictures, scripts, dialogs and
   sounds into one pack and a C header for it, also straight from a file of
   my sprite editor ([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor)): its sets, animations, tiles,
@@ -69,16 +73,53 @@ in for a board and what it cannot show (speed, memory), is in
 [docs/host-en.md](docs/host-en.md) ([по-русски](docs/host-ru.md)). The engine itself is
 plain C and is tested on a host too.
 
+## On a board
+
+A frame here is not tied to a rate. Actors live by the game's clock, and the
+loop draws as soon as the frame before is out, sending only what changed;
+a game says how often it steps (Prince of Persia steps 12 times a second, as
+the original did). So what I give is what a frame costs: the time of one
+frame that sent anything, and how many pixels of the display it sent.
+Measured on 2026-10-23, from the engine of this version, ESP-IDF 6.0.1.
+Prince of Persia runs its demo, three rooms in 40 seconds; each of its
+numbers is of the log line the firmware writes once a second (the frames
+that second sent: their time on average, the slowest, their pixels).
+
+| | CYD (ESP32, 240 MHz; 320×240 over SPI) | Guition JC8012P4A1C (ESP32-P4, 400 MHz; 1280×800 over MIPI-DSI) |
+| --- | --- | --- |
+| A frame of 320×200 | at 1:1 | at ×4 |
+| Prince of Persia in a room: a frame, on average | 5.9–13.0 ms; half of the seconds under 7.4 | 3.0–9.0 ms; half of the seconds under 4.7 |
+| …the slowest frame of a second | 21 ms | 16 ms |
+| …its pixels | 580–2 800 | 14 000–57 000 |
+| …the room drawn anew, entering it | 39–44 ms | 37–41 ms |
+| `examples/hello`, the whole frame | 29.3 ms, 64 000 pixels | 21.3 ms, 1 024 000 pixels |
+| RAM free once the game runs (PoP / hello) | 190 012 / 226 488 bytes | 29.7 / 27.6 MB, most of it PSRAM |
+| RAM the firmware's data take (`.data` + `.bss`; PoP / hello) | 24 844 / 14 396 bytes | 31 244 / 20 796 bytes |
+| code kept in internal RAM (PoP / hello) | 52 515 / 52 135 bytes (IRAM, apart from the data's) | 68 392 / 68 392 bytes (DIRAM, shared with the data) |
+| flash, code and constants (PoP / hello) | 1.34 MB (the pack 0.97 MB) / 0.24 MB | 1.74 / 0.49 MB |
+
+A game where little moves at once has a lot of room: a frame of a room in
+play takes 3 to 13 ms of the 83 ms a step of the game has. A frame where
+everything changes costs about 40 ms on both boards. The free RAM is
+what the game finds once it runs, after everything static and the frame;
+the RAM of the data and the code in internal RAM are what the firmware
+takes before it starts, the first of them the part a game's own globals
+grow. Both firmwares log their numbers once a second (`room …: N pictures
+a second, … us each on average, … at worst, … pixels each`; hello's the
+same), so a game of yours can be measured the same way.
+
 ## Getting started
 
 You need ESP-IDF 5.3 or newer; I build the engine, the boards and the game
 it was checked on with 6.0. The engine is in the ESP Component Registry;
-add it to the project's `main`, and DGX 0.8 comes along by
-itself:
+add it to the project's `main`, and DGX comes along by itself:
 
 ```sh
-idf.py add-dependency "jef-sure/dgx-ge^0.3.0"
+idf.py add-dependency "jef-sure/dgx-ge"
 ```
+
+With no version it takes the newest, and `dependencies.lock` beside the
+project keeps the versions taken until `idf.py update-dependencies`.
 
 DGX builds only what the project's `sdkconfig` turns on: the engine's
 frame needs its virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`), and the
@@ -90,12 +131,17 @@ The component manager puts it into `managed_components/jef-sure__dgx-ge`
 and makes `main` require it, so `main/CMakeLists.txt` needs no `REQUIRES`
 for it (if it names it, the name is `jef-sure__dgx-ge`). There, after
 `idf_component_register`, the build is told how many params an actor
-keeps, as many as the game's pack needs:
+keeps, as many as the game's pack needs, how many `now` events an
+actor's own step may send, waiting in turn (the engine's default, 4,
+written out), and which synthesizers of music the firmware carries (the
+engine's default, FM, written out; `chip`, `nes`, `fm`):
 
 ```cmake
 idf_component_register(SRCS "main.c" INCLUDE_DIRS "."
                        EMBED_FILES "assets/game.pack")
 dgx_ge_params_of_pack(assets/game_pack.h)
+dgx_ge_now_events(4)
+dgx_ge_synths(fm)
 ```
 
 A Python script of the game builds its pack with `tools/dgx_ge_pack.py`

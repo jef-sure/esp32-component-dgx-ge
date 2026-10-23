@@ -70,7 +70,9 @@ its loop, and the board finds its moment inside it. Every firmware loop
 has to call `vTaskDelay`, or the task watchdog fires. On the computer,
 `vTaskDelay` is where the board shows the display in the window, reads the
 mouse and the keyboard, plays the scripted input, and decides whether it's
-time to quit. Then it sleeps for as long as the game asked.
+time to quit. Then it sleeps for as long as the game asked. A game that ends
+each pass of its loop with the boards' `board_pace(t0, period_us)` is right
+as it is: that ends in `vTaskDelay` too, at least a tick each pass.
 
 The board shows a *display*; the computer's screen doesn't become one. The
 window is the display of a particular board, in pixels and in millimetres,
@@ -303,7 +305,7 @@ GAME_PACK_MAKE   := python3 tools/mygame_assets.py
 GAME_PACK_INPUTS := tools/mygame_assets.py $(wildcard art/*.png anim/*.anim)
 GAME_FONTS      := main/assets/mygame.fonts
 GAME_FONT_RULES := fonts.rules
-GAME_DEFINES    := BOARD_SCALE=4
+GAME_DEFINES    := BOARD_SCALE=4 DGX_GE_ANIM_NOW_EVENTS=4 DGX_GE_SYNTH_FM=1
 HOST_DISPLAY    := 1280x800
 HOST_MM         := 217x136
 include managed_components/jef-sure__dgx-ge/boards/host/host.mk
@@ -322,11 +324,11 @@ normally means the project's root.
 | `GAME_EMBED` | files embedded in the program whole, with the same symbols as on a board: `mygame.pack` gives `_binary_mygame_pack_start` and `_end` | `EMBED_FILES` |
 | `GAME_PACK_H` | the pack's header. Its `<PREFIX>_ANIM_PARAMS` says how many params an actor keeps, and the whole build gets `DGX_GE_ANIM_PARAMS` from it | `dgx_ge_params_of_pack` |
 | `GAME_PACK_MAKE` | the command that makes the pack and its header (optional). `make` runs it before anything else when the header is missing or older than one of `GAME_PACK_INPUTS` | — |
-| `GAME_PACK_INPUTS` | what the pack is made from: its script, the art, the scripts of animation, any document it reads | — |
+| `GAME_PACK_INPUTS` | what the pack is made from: its script, the art, the scripts of animation, any document it reads; and the engine's packer, `tools/dgx_ge_*.py`, so that a new version of a blob makes the pack again (the engine reads only its own version) | — |
 | `GAME_FONTS` | the game's font requests, the file the pack script writes with `Pack.write_fonts` (optional) | `dgx_ge_fonts` |
 | `GAME_FONT_RULES` | the rules of which installed faces may be taken (optional) | `dgx_fonts_rules` |
 | `GAME_FONT_SCALE` | the scale the fonts are made for, in pixels of the display per point of the frame. If not set, `BOARD_SCALE` from `GAME_DEFINES`, else 1 | `dgx_fonts_scale` |
-| `GAME_DEFINES` | the game's preprocessor definitions, without `-D` | `target_compile_definitions` |
+| `GAME_DEFINES` | the game's preprocessor definitions, without `-D`. They go to every file compiled, the engine's too, so this is also where a setting of the whole build goes: `DGX_GE_ANIM_NOW_EVENTS=4`, how many `now` events an actor's own step may send, waiting in turn, and `DGX_GE_SYNTH_FM=1`, the synthesizers of music the build carries (`_CHIP`, `_NES` the others; the engine's defaults, written out) | `target_compile_definitions`; for `DGX_GE_ANIM_NOW_EVENTS`, `dgx_ge_now_events`; for `DGX_GE_SYNTH_*`, `dgx_ge_synths` |
 | `HOST_DISPLAY` | the display shown, in pixels; `1280x800` if not set | the board's display |
 | `HOST_MM` | the same display in millimetres, for gestures and the pad's size; `217x136` if not set | the board's `board_mm_w`, `board_mm_h` |
 | `DGX`, `DGX_DI` | where DGX and DGX-DI are (section 3) | the component manager |
@@ -388,6 +390,17 @@ agree on the size of an actor. CMake's `dgx_ge_params_of_pack` does the
 same for a board. The header also guards against a mismatch: if the build
 keeps fewer params than the pack needs, it stops with `#error` naming
 `dgx_ge_params_of_pack`.
+
+**`GAME_DEFINES` go to every file, the engine's too.** That is what a
+setting of the whole build needs: `DGX_GE_ANIM_NOW_EVENTS`, the depth of an
+actor's queue of `now` events sent from its own step, changes the size of
+an actor, so the game and the engine must be compiled with the same value.
+On a board `dgx_ge_now_events(<n>)` in `main/CMakeLists.txt` sets it for
+the whole build; on the computer the same number goes into `GAME_DEFINES`
+(`DGX_GE_ANIM_NOW_EVENTS=4`). Left out on both, it is the engine's 4.
+The synthesizers of music are the same kind of setting (a channel's state is
+as large as the largest of them needs): `dgx_ge_synths(chip fm)` on a board,
+`DGX_GE_SYNTH_CHIP=1 DGX_GE_SYNTH_FM=1` here; left out, FM alone.
 
 **It makes the fonts, if the game asked for any.** The rule runs DGX's
 `font2c/dgx_fonts.py build` on `GAME_FONTS` and writes into

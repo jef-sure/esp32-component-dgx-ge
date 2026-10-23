@@ -8,6 +8,8 @@ extern "C" {
 #include <stdint.h>
 
 #include "dgx_ge_input.h"
+#include "dgx_ge_sound.h"
+#include "dgx_ge_types.h"
 
 /*
  * Animation: scripts and the rules of passing from one to another.
@@ -15,7 +17,8 @@ extern "C" {
  * A script is a little program of frames, written as text and put into the
  * pack by tools/dgx_ge_anim.py (see there for the language). A frame is a
  * picture shown for a time; between frames the script moves its actor, turns
- * it round, sets its speed, tells the game something. Time is real time: an
+ * it round (flip) or by quarter turns (rotate), sets its speed, tells the game
+ * something. Time is real time: an
  * actor is moved on to a moment, and every step whose time has come is made,
  * so a slow frame rate shows fewer pictures but the same way travelled.
  *
@@ -45,7 +48,7 @@ extern "C" {
  *   code     the steps, see dgx_ge_anim.c
  */
 #define DGX_GE_ANIM_MAGIC   0x4E414744u /* "DGAN" */
-#define DGX_GE_ANIM_VERSION 10u
+#define DGX_GE_ANIM_VERSION 11u
 
 /* How many points an actor holds things at (carry): a sword and a shield. */
 #ifndef DGX_GE_ANIM_CARRIED
@@ -55,6 +58,18 @@ extern "C" {
 /* How many masks an actor may watch for touching at once (contact <mask> <side> ...), 6 bytes each. */
 #ifndef DGX_GE_ANIM_CONTACTS
 #define DGX_GE_ANIM_CONTACTS 2
+#endif
+
+/*
+ * Events at once an actor's own say may give in one step, taken in turn (dgx_ge_actor_event), 2 bytes each; one more
+ * is refused. One value for the whole build, the engine's and the game's: the actor's size depends on it (a game
+ * says it by dgx_ge_now_events of project_include.cmake, on the computer in its GAME_DEFINES).
+ */
+#ifndef DGX_GE_ANIM_NOW_EVENTS
+#define DGX_GE_ANIM_NOW_EVENTS 4
+#endif
+#if DGX_GE_ANIM_NOW_EVENTS < 1 || DGX_GE_ANIM_NOW_EVENTS > 255
+#error "DGX_GE_ANIM_NOW_EVENTS: 1 to 255"
 #endif
 
 /* Params an actor has room for, 8 bytes each (what it is, what it entered its script with); a blob that declares more does not open. */
@@ -112,10 +127,12 @@ typedef struct dgx_ge_actor {
     /* set by the script */
     int16_t              image;    /* of the pack, -1 none yet */
     int8_t               image_dx; /* where the picture stands from the actor, forward */
-    int8_t               image_dy;
+    int8_t               image_dy; /* down, of its axes */
     bool                 flip;   /* facing the other way than its pictures */
+    uint8_t              turn;   /* turned clockwise by so many quarter turns (0..3), after the mirror: dgx_ge_actor_rotation */
     uint16_t             masks;  /* the masks of collisions that are active */
     uint16_t             hits;   /* where what they do when they meet is in the code + 1 (hit), 0 nothing */
+    uint16_t             now[DGX_GE_ANIM_NOW_EVENTS]; /* events at once its own say gave in this step, in turn: event + 1, 0 none */
     /*
      * What is held, by points: the frame to show it by (carry: the hand as it
      * holds it now; -1: the thing's own), and the thing itself when it is an
@@ -139,7 +156,7 @@ typedef struct dgx_ge_actor {
     signed int           rest_y : 21, rest_vy : 11;
     /* a path: the place a formula of the time gives, from where and when it began */
     uint16_t             path;   /* where its step is in the code + 1, 0 none */
-    int8_t               path_sign; /* forward when it began: 1 or -1 */
+    uint8_t              path_orient; /* the way it faced when it began (dgx_ge_orient): its formula is of those axes */
     uint32_t             path_ms;
     int32_t              path_x, path_y;
     int32_t              params[DGX_GE_ANIM_PARAMS]; /* by the numbers the pack gives */
@@ -151,6 +168,7 @@ typedef struct dgx_ge_actor {
     uint32_t             entered_ms;
     int32_t              entered_x, entered_y;
     bool                 entered_flip;
+    uint8_t              entered_turn;
     int32_t              entered_params[DGX_GE_ANIM_PARAMS];
     /* what was let go last (release): the picture, -1 none, and its velocity, points a second (x as the scene goes) */
     struct {
@@ -381,13 +399,28 @@ typedef enum {
      */
     DGX_GE_ANIM_APPEAR = 13,
     DGX_GE_ANIM_VANISH = 14, /* the actor is gone from the game (vanish): the game takes it away */
+    /*
+     * a music of the pack (the value: its number, <PREFIX>_MUSIC_<name>; 255: stop) for the game's output
+     * (dgx_ge_sound_music), dgx_ge_anim_said(0) the ms of its fade (0: at once); the music's level by design (the
+     * value: percent), dgx_ge_anim_said(0) the ms to reach it (dgx_ge_sound_music_level)
+     */
+    DGX_GE_ANIM_MUSIC       = 15,
+    DGX_GE_ANIM_MUSIC_LEVEL = 16,
+    DGX_GE_ANIM_VAR         = 17, /* a variable of the game (the value: its number) has changed by the script (set, add game_var.<name>) */
 } dgx_ge_anim_say_t;
 
 /*
  * The numbers of the step being said (tell cell: 0 the cell, 1 the value; press, clear: 0 the cell; appear: x, y,
- * kind, left), worked out as it is made; good only in the say of it.
+ * kind, left; music, its level: 0 the ms), worked out as it is made; good only in the say of it.
  */
 int32_t dgx_ge_anim_said(int i);
+
+/*
+ * What a script says of sound handed on to the game's output, in its say: a sound played (DGX_GE_ANIM_SOUND), a
+ * music played or stopped with its fade (DGX_GE_ANIM_MUSIC), the music's level (DGX_GE_ANIM_MUSIC_LEVEL); false for
+ * anything else, which is the game's. A game that leaves out stale sounds plays them itself before it.
+ */
+bool dgx_ge_anim_said_sound(const dgx_ge_sound_t *out, dgx_ge_anim_say_t what, uint8_t value);
 
 /*
  * appear ... with <param> = <expression>, ...: in the say of that appear
@@ -425,7 +458,8 @@ extern uint32_t *dgx_ge_dice;
  * (a cell's life, a thing lying or in a pocket, a control of a dialog) asks as
  * itself too: its params and kind are there, the pointer is good only while it
  * asks. NULL: no actor asks (an expression of no actor: none the assembler
- * makes asks the game).
+ * makes asks the game). The game's variables (game_var.<name>, dgx_ge_game.h) are no questions: the engine reads
+ * them itself.
  */
 typedef float (*dgx_ge_ask_fn)(int what, const dgx_ge_actor_t *who, void *ctx);
 extern dgx_ge_ask_fn dgx_ge_expr_ask;
@@ -437,6 +471,12 @@ extern void         *dgx_ge_expr_ask_ctx;
  */
 extern const dgx_ge_input_t *dgx_ge_expr_input;
 
+/*
+ * music of an expression: the music the game's output of sounds plays now (dgx_ge_sound_music_now: its number, -1
+ * none), so a script waits for one to end (goto waiting if music >= 0); the game gives its output once (NULL: -1).
+ */
+extern const dgx_ge_sound_t *dgx_ge_expr_sound;
+
 /* Put an actor at x, y (pixels) into a script, from now on, its params as they start. */
 void dgx_ge_actor_start(dgx_ge_actor_t *actor, const dgx_ge_anim_t *anim, int script, int x, int y, uint32_t now_ms);
 
@@ -446,8 +486,17 @@ void dgx_ge_actor_start(dgx_ge_actor_t *actor, const dgx_ge_anim_t *anim, int sc
  * the end waits for it, and a later event takes the place of one waiting.
  * One at once sent from the actor's own say (the game answering what its
  * step tells) is taken at that step's moment, right after the say: the rest
- * of the step is not made. One from before the moment the actor has been
- * moved to takes its motion back to it (the steps made since stay made).
+ * of the step is not made. More sent so in one step wait in a queue, in the
+ * order sent, and are taken one by one, each in the script the one before led
+ * to, where that script would end the step (its frame, its hold), at the same
+ * moment: as if the game sent them one by one after the step. One sent while
+ * others wait is queued whatever it means where the actor is now (true); what
+ * it means is found when its turn comes, in the script the actor is in then
+ * (nothing: it is passed by; at a branch point or at the end: it waits as
+ * such). The queue holds DGX_GE_ANIM_NOW_EVENTS; one more is refused (false),
+ * the log says so once, those queued are still taken. One from before the
+ * moment the actor has been moved to takes its motion back to it (the steps
+ * made since stay made).
  */
 bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx);
 
@@ -459,6 +508,17 @@ bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_g
  * is paused.
  */
 void dgx_ge_actor_advance(dgx_ge_actor_t *actor, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx);
+
+/*
+ * A rehearsal: the actor moved on to now, or sent the event, as by dgx_ge_actor_advance and dgx_ge_actor_event, to learn
+ * the state its script comes to, not as a step of the game: it says nothing and writes no variable of the game
+ * (game_var.<name>). For an actor made again from its record (dgx_ge_object_actor, dgx_ge_pocket_actor) caught up to
+ * now, whose script from where it entered it was played once already, and for a model that is no thing of the game. The
+ * engine rehearses so itself where a thing of a pocket is made again (taken into a hand, caught up before its event) and
+ * for a control of a dialog and the model of a shot. Without a say an actor's steps are still the game's: they write.
+ */
+void dgx_ge_actor_rehearse(dgx_ge_actor_t *actor, uint32_t now_ms);
+bool dgx_ge_actor_rehearse_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms);
 
 /* What the game says of a hit about to be sent: send it, pass it by, or send none more in this look. */
 typedef enum {
@@ -501,6 +561,37 @@ static inline int dgx_ge_actor_x(const dgx_ge_actor_t *actor)
 static inline int dgx_ge_actor_y(const dgx_ge_actor_t *actor)
 {
     return actor->y >> 8;
+}
+
+/*
+ * The way an actor faces (dgx_ge_orient): mirrored by flip, turned by turn. Whatever is said in its axes (x forward,
+ * y down of its pictures: a velocity, a path, the picture's offset, a point, a mask, front and back, a sense) is so
+ * in the scene; the scene itself (the terrain, tiles, where things are) is not turned.
+ */
+static inline unsigned dgx_ge_actor_orient(const dgx_ge_actor_t *actor)
+{
+    return dgx_ge_orient(actor->flip, actor->turn);
+}
+
+/* Its turn in degrees clockwise: 0, 90, 180 or 270 (rotation in a script). */
+static inline int dgx_ge_actor_rotation(const dgx_ge_actor_t *actor)
+{
+    return (actor->turn & 3) * 90;
+}
+
+/*
+ * Turned so, as a script's rotate to: degrees clockwise to the nearest multiple of 90 (a half away from zero: 45 is
+ * 90, -45 is 270), any whole number (-90 is 270, 450 is 90). As flip, the actor's own: one begun so (as the game sets
+ * entered_flip) sets entered_turn = turn too.
+ */
+void dgx_ge_actor_set_rotation(dgx_ge_actor_t *actor, int degrees);
+
+/* Where its picture's origin stands, in pixels: its place and the picture's offset (image_dx, image_dy), turned as it faces. */
+static inline void dgx_ge_actor_picture_at(const dgx_ge_actor_t *actor, int *x, int *y)
+{
+    int32_t dx = actor->image_dx, dy = actor->image_dy;
+    dgx_ge_orient_apply(dgx_ge_actor_orient(actor), &dx, &dy);
+    *x = dgx_ge_actor_x(actor) + dx, *y = dgx_ge_actor_y(actor) + dy;
 }
 
 #ifdef __cplusplus

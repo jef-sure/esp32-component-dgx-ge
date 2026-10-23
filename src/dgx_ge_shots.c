@@ -40,7 +40,7 @@ bool dgx_ge_shots_kind(dgx_ge_shots_t *s, uint16_t id, const dgx_ge_anim_t *anim
     /* what its first script says: an actor of it, its first steps made */
     dgx_ge_actor_t a;
     dgx_ge_actor_start(&a, anim, 0, 0, 0, 0);
-    dgx_ge_actor_advance(&a, 0, NULL, NULL);
+    dgx_ge_actor_rehearse(&a, 0);
     s->kinds[k] = (dgx_ge_shot_kind_t){.id = id, .anim = anim, .image = a.image, .ay = (int16_t)(a.ay / 256), .masks = a.masks, .hits = a.hits};
     return true;
 }

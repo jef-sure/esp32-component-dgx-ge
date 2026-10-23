@@ -1,0 +1,19 @@
+; MSX-MUSIC: fifteen instruments in the spirit of the built-in ones of the YM2413 (FM-PAC, MSX2+), their names and
+; numbers as the chip has them; the settings are this set's own, made for the engine's FM, not the chip's. A song
+; takes them by #set msx-music, by number or name (@3, @piano).
+#synth fm
+@1 violin = fm mod(mult 1 level 22 attack 60 decay 600 sustain 13 release 120 feedback 5 vibrato) car(mult 1 level 0 attack 70 decay 2000 sustain 14 release 150 vibrato)
+@2 guitar = fm mod(mult 3 level 26 attack 0 decay 900 sustain 4 release 200 feedback 3 percussive) car(mult 1 level 0 attack 0 decay 2500 sustain 6 release 250 percussive)
+@3 piano = fm mod(mult 1 level 24 ksl 1.5 attack 0 decay 1200 sustain 5 release 300 feedback 2 percussive) car(mult 1 level 0 attack 0 decay 3500 sustain 9 release 400 percussive ksr)
+@4 flute = fm mod(mult 1 level 40 attack 80 decay 400 sustain 12 release 80 feedback 6 tremolo) car(mult 1 level 0 attack 60 decay 2000 sustain 15 release 100 vibrato)
+@5 clarinet = fm mod(mult 2 level 20 attack 20 decay 400 sustain 12 release 80) car(mult 1 level 0 attack 25 decay 1000 sustain 15 release 100)
+@6 oboe = fm mod(mult 3 level 24 attack 15 decay 300 sustain 12 release 80 feedback 4) car(mult 1 level 0 attack 20 decay 1000 sustain 15 release 90)
+@7 trumpet = fm mod(mult 1 level 18 attack 40 decay 300 sustain 11 release 80 feedback 4) car(mult 1 level 0 attack 20 decay 1500 sustain 14 release 100 vibrato)
+@8 organ = fm mod(mult 2 level 6 attack 0 decay 0 sustain 15 release 30 wave abs-sine) car(mult 1 level 0 attack 0 decay 0 sustain 15 release 40) connect add
+@9 horn = fm mod(mult 1 level 30 attack 60 decay 500 sustain 12 release 120 feedback 2) car(mult 1 level 0 attack 50 decay 1500 sustain 14 release 140)
+@10 synth = fm mod(mult 1 level 14 attack 0 decay 800 sustain 10 release 100 feedback 7) car(mult 1 level 0 attack 0 decay 1500 sustain 14 release 120 wave half-sine)
+@11 harpsichord = fm mod(mult 5 level 20 attack 0 decay 400 sustain 3 release 150 feedback 4 percussive) car(mult 1 level 0 attack 0 decay 1800 sustain 5 release 200 percussive ksr)
+@12 vibraphone = fm mod(mult 4 level 30 attack 0 decay 600 sustain 0 release 100 percussive) car(mult 1 level 0 attack 0 decay 4000 sustain 8 release 600 percussive tremolo)
+@13 synth-bass = fm mod(mult 1 level 12 attack 0 decay 200 sustain 6 release 60 feedback 5 percussive) car(mult 1 level 0 attack 0 decay 1200 sustain 10 release 80)
+@14 acoustic-bass = fm mod(mult 1 level 28 attack 0 decay 300 sustain 4 release 80 percussive) car(mult 1 level 0 attack 0 decay 2500 sustain 8 release 120 percussive)
+@15 electric-guitar = fm mod(mult 1 level 16 attack 0 decay 1500 sustain 8 release 150 feedback 6) car(mult 1 level 0 attack 0 decay 3000 sustain 10 release 200 wave half-sine percussive)

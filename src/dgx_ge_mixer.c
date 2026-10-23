@@ -2,14 +2,16 @@
 #include <string.h>
 
 #include "dgx_ge_mixer.h"
+#include "dgx_ge_music.h"
 
 /*
  * SOUNDS: 'DGSN', version, count; 12 bytes a sound: offset, samples, rate, codec (bit 5 middle and side, bit 6
  * stereo, bit 7 round), the side's shift; the data: a stream a channel one after the other (ADPCM: the states of the
- * streams first, each stream's nibbles from a byte of its own)
+ * streams first, each stream's nibbles from a byte of its own). Version 2: the count of musics (u16, then 0) after the
+ * count of sounds; after the sounds' entries 8 bytes a music: the offset of its song (DGMU, dgx_ge_music.c) and its
+ * size (0: a name only).
  */
 #define SOUNDS_MAGIC 0x4E534744u
-#define HEAD         8
 #define ENTRY        12
 enum { CODEC_PCM8 = 1, CODEC_ADPCM = 2 };
 
@@ -52,15 +54,22 @@ static size_t data_size(uint8_t codec, uint8_t channels, bool mid_side, uint8_t 
     return n;
 }
 
+/* The bytes before the sounds' entries: version 1 has no musics. */
+static size_t head_of(const uint8_t *b)
+{
+    return u16_at(b + 4) == 2 ? 12 : 8;
+}
+
 bool dgx_ge_sounds_open(dgx_ge_sounds_t *sounds, const void *blob, size_t size)
 {
     const uint8_t *b = blob;
     memset(sounds, 0, sizeof(*sounds));
-    if (!b || size < HEAD || u32_at(b) != SOUNDS_MAGIC || u16_at(b + 4) != 1) return false;
-    const uint16_t count = u16_at(b + 6);
-    if (size < HEAD + (size_t)ENTRY * count) return false;
+    if (!b || size < 8 || u32_at(b) != SOUNDS_MAGIC || (u16_at(b + 4) != 1 && u16_at(b + 4) != 2) || size < head_of(b)) return false;
+    const uint16_t count = u16_at(b + 6), musics = head_of(b) == 12 ? u16_at(b + 8) : 0;
+    if (size < head_of(b) + (size_t)ENTRY * count) return false;
+    if (!dgx_ge_music_check(b, size, head_of(b) + (size_t)ENTRY * count, musics)) return false;
     for (int i = 0; i < count; ++i) {
-        const uint8_t *e      = b + HEAD + ENTRY * i;
+        const uint8_t *e      = b + head_of(b) + ENTRY * i;
         const uint32_t frames = u32_at(e + 4);
         const uint8_t  codec = e[10] & 0x0F, channels = e[10] & 0x40 ? 2 : 1, shift = e[11];
         const bool     mid_side = channels == 2 && (e[10] & 0x20);
@@ -68,14 +77,14 @@ bool dgx_ge_sounds_open(dgx_ge_sounds_t *sounds, const void *blob, size_t size)
         if ((codec != CODEC_PCM8 && codec != CODEC_ADPCM) || !u16_at(e + 8) || shift > 3) return false;
         if (u32_at(e) > size || data_size(codec, channels, mid_side, shift, frames) > size - u32_at(e)) return false;
     }
-    sounds->blob = b, sounds->size = size, sounds->count = count;
+    sounds->blob = b, sounds->size = size, sounds->count = count, sounds->musics = musics;
     return true;
 }
 
 static const uint8_t *entry(const dgx_ge_sounds_t *sounds, int sound)
 {
     if (!sounds || !sounds->blob || sound < 0 || sound >= sounds->count) return NULL;
-    const uint8_t *e = sounds->blob + HEAD + ENTRY * sound;
+    const uint8_t *e = sounds->blob + head_of(sounds->blob) + ENTRY * sound;
     return u32_at(e + 4) ? e : NULL;
 }
 
@@ -93,7 +102,13 @@ bool dgx_ge_mixer_init(dgx_ge_mixer_t *mixer, const dgx_ge_sounds_t *sounds, int
     mixer->voices = calloc((size_t)voices, sizeof(dgx_ge_voice_t));
     if (!mixer->voices) return false;
     mixer->sounds = sounds, mixer->voice_count = (uint8_t)voices, mixer->rate = rate, mixer->channels = (uint8_t)channels;
-    mixer->volume = 255;
+    mixer->volume = mixer->effects = 255;
+    /* the music's state, when the sounds have music */
+    if (!dgx_ge_music_new(sounds, rate, &mixer->music)) {
+        free(mixer->voices);
+        memset(mixer, 0, sizeof(*mixer));
+        return false;
+    }
     return true;
 }
 
@@ -115,6 +130,7 @@ void dgx_ge_mixer_free(dgx_ge_mixer_t *mixer)
     void (*lock)(bool)     = mixer->lock;
     const uint8_t channels = mixer->channels;
     free(mixer->voices);
+    free(mixer->music);
     memset(mixer, 0, sizeof(*mixer));
     mixer->lock = lock, mixer->channels = channels;
     give(mixer);
@@ -209,6 +225,13 @@ void dgx_ge_mixer_volume(dgx_ge_mixer_t *mixer, uint8_t volume)
     give(mixer);
 }
 
+void dgx_ge_mixer_effects_volume(dgx_ge_mixer_t *mixer, uint8_t volume)
+{
+    take(mixer);
+    mixer->effects = volume;
+    give(mixer);
+}
+
 bool dgx_ge_mixer_busy(const dgx_ge_mixer_t *mixer)
 {
     bool busy = false;
@@ -264,8 +287,10 @@ void dgx_ge_mixer_fill(dgx_ge_mixer_t *mixer, int16_t *out, int frames)
                 take_frame(v);
             }
         }
+        /* the bus of the effects; the music's, mono: the middle of a stereo output */
+        const int32_t music = mixer->music ? dgx_ge_music_next(mixer->music) : 0;
         for (int c = 0; c < ch; ++c) {
-            const int32_t s = scaled(sum[c], mixer->volume);
+            const int32_t s = scaled(scaled(sum[c], mixer->effects) + music, mixer->volume);
             out[f * ch + c] = (int16_t)(s < -32768 ? -32768 : s > 32767 ? 32767 : s);
         }
     }
@@ -282,7 +307,22 @@ static void output_stop(void *ctx, int sound)
     dgx_ge_mixer_stop(ctx, sound);
 }
 
+static void output_music(void *ctx, int music, uint32_t fade_ms)
+{
+    dgx_ge_mixer_music(ctx, music, fade_ms);
+}
+
+static void output_music_level(void *ctx, int percent, uint32_t ms)
+{
+    dgx_ge_mixer_music_level(ctx, percent, ms);
+}
+
+static int output_music_now(void *ctx)
+{
+    return dgx_ge_mixer_music_now(ctx);
+}
+
 dgx_ge_sound_t dgx_ge_mixer_output(dgx_ge_mixer_t *mixer)
 {
-    return (dgx_ge_sound_t){output_play, output_stop, mixer};
+    return (dgx_ge_sound_t){output_play, output_stop, mixer, output_music, output_music_now, output_music_level};
 }

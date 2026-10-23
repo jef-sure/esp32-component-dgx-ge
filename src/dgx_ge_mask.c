@@ -5,16 +5,16 @@
 
 #define GRID 16 /* tiles across and down the overlap at most */
 
-/* The rectangle a mask takes in the scene, by the origin of its picture, mirrored or not. */
-dgx_ge_rect_t dgx_ge_mask_place(const dgx_ge_mask_t *m, int x, int y, bool flip)
+/* The rectangle a mask takes in the scene, by the origin of its picture, in its orientation (mirrored, turned). */
+dgx_ge_rect_t dgx_ge_mask_place(const dgx_ge_mask_t *m, int x, int y, unsigned orient)
 {
-    const int left = flip ? x - (m->x + m->width - 1) : x + m->x;
-    return dgx_ge_rect(left, y + m->y, m->width, m->height);
+    return dgx_ge_orient_rect(orient, x, y, m->x, m->y, m->width, m->height);
 }
 
-bool dgx_ge_mask_has(const dgx_ge_mask_t *m, dgx_ge_rect_t r, bool flip, int sx, int sy)
+bool dgx_ge_mask_has(const dgx_ge_mask_t *m, dgx_ge_rect_t r, unsigned orient, int sx, int sy)
 {
-    const int c = flip ? r.x + r.w - 1 - sx : sx - r.x, row = sy - r.y;
+    int c, row;
+    dgx_ge_orient_back(orient, m->width, m->height, sx - r.x, sy - r.y, &c, &row);
     return m->bits[row * ((m->width + 7) / 8) + c / 8] >> (7 - c % 8) & 1;
 }
 
@@ -26,10 +26,10 @@ static int floor_div(int a, int b)
     return a >= 0 ? a / b : -((-a + b - 1) / b);
 }
 
-int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, const dgx_ge_mask_t *b, int bx, int by, bool b_flip, int tile,
+int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, unsigned a_orient, const dgx_ge_mask_t *b, int bx, int by, unsigned b_orient, int tile,
                          dgx_ge_area_t *areas)
 {
-    const dgx_ge_rect_t ra = place_of(a, ax, ay, a_flip), rb = place_of(b, bx, by, b_flip), both = dgx_ge_rect_intersect(ra, rb);
+    const dgx_ge_rect_t ra = place_of(a, ax, ay, a_orient), rb = place_of(b, bx, by, b_orient), both = dgx_ge_rect_intersect(ra, rb);
     if (dgx_ge_rect_empty(both)) return 0;
     if (tile < 1) tile = 1;
     /* a grid of tiles of the scene over the overlap, coarser if it would be too wide */
@@ -42,7 +42,7 @@ int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, co
     bool any = false;
     for (int sy = both.y; sy < both.y + both.h; ++sy)
         for (int sx = both.x; sx < both.x + both.w; ++sx)
-            if (has(a, ra, a_flip, sx, sy) && has(b, rb, b_flip, sx, sy)) {
+            if (has(a, ra, a_orient, sx, sy) && has(b, rb, b_orient, sx, sy)) {
                 uint16_t *in = &count[(floor_div(sy, tile) - ty0) * GRID + floor_div(sx, tile) - tx0];
                 if (*in < 0xFFFF) ++*in; /* a tile of more points than that counts as full */
                 any = true;
@@ -166,7 +166,7 @@ static bool within_any(const dgx_ge_rect_t *solids, int count, int x, int y)
 }
 
 /* The touch of a solid among others: given as rectangles (solids, count), or told by a function (inside, ctx). */
-static inline unsigned touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
+static inline unsigned touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
                                   int count, dgx_ge_solid_fn inside, void *ctx, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
 {
     gather_t g[DGX_GE_TOUCH_SIDES] = {{0}};
@@ -175,7 +175,7 @@ static inline unsigned touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, b
     const dgx_ge_rect_t both = dgx_ge_rect_intersect(place, near);
     for (int y = both.y; y < both.y + both.h; ++y)
         for (int x = both.x; x < both.x + both.w; ++x) {
-            if (!has(m, place, flip, x, y)) continue;
+            if (!has(m, place, orient, x, y)) continue;
             const bool in_x = x >= solid.x && x < solid.x + solid.w, in_y = y >= solid.y && y < solid.y + solid.h;
             if (in_x && in_y) gather(&g[0], x, y);
             else if (!in_x && !in_y) continue;
@@ -186,24 +186,24 @@ static inline unsigned touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, b
     return gathered(g, areas);
 }
 
-unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
+unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach, const dgx_ge_rect_t *solids,
                                       int count, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
 {
-    return touch_rect(m, place, flip, solid, reach, solids, count, NULL, NULL, areas);
+    return touch_rect(m, place, orient, solid, reach, solids, count, NULL, NULL, areas);
 }
 
-unsigned dgx_ge_mask_touch_rect_where(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, dgx_ge_solid_fn inside,
+unsigned dgx_ge_mask_touch_rect_where(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach, dgx_ge_solid_fn inside,
                                       void *ctx, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
 {
-    return touch_rect(m, place, flip, solid, reach, NULL, 0, inside, ctx, areas);
+    return touch_rect(m, place, orient, solid, reach, NULL, 0, inside, ctx, areas);
 }
 
-unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
+unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
 {
-    return dgx_ge_mask_touch_rect_among(m, place, flip, solid, reach, NULL, 0, areas);
+    return dgx_ge_mask_touch_rect_among(m, place, orient, solid, reach, NULL, 0, areas);
 }
 
-unsigned dgx_ge_mask_touch_mask(const dgx_ge_mask_t *a, dgx_ge_rect_t pa, bool fa, const dgx_ge_mask_t *b, dgx_ge_rect_t pb, bool fb, int reach,
+unsigned dgx_ge_mask_touch_mask(const dgx_ge_mask_t *a, dgx_ge_rect_t pa, unsigned fa, const dgx_ge_mask_t *b, dgx_ge_rect_t pb, unsigned fb, int reach,
                                 dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES])
 {
     gather_t g[DGX_GE_TOUCH_SIDES] = {{0}};

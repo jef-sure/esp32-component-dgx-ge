@@ -1,5 +1,167 @@
 # Changes
 
+## 0.4.0 - 2026-10-23
+
+Music by notes on synthesizers of a game's choice (a chip, the NES, FM),
+the game's variables instead of an actor of settings, an actor turned by
+quarters beside its mirror, ready palettes of a set, events at once in a
+queue, faster touches among many tiles, and what three games of the
+editor wrote alike, now the engine's. Repack: DGAN, DGSC, DGSH, DGCR,
+DGDL, SOUNDS and DGMU have new versions.
+
+- **An actor turned by quarters beside its mirror:** `rotate <degrees>`,
+  `rotate to <degrees>`, an expression worked out at the step (a number, a
+  param, `game_var.<name>`), the nearest multiple of 90, round the circle.
+  `rotation` reads it, `its.rotation` of the one sensed, a dialog's
+  condition too; in C `dgx_ge_actor_rotation`, `dgx_ge_actor_set_rotation`,
+  `dgx_ge_actor_orient`, `dgx_ge_actor_picture_at`. The picture is drawn
+  in that one of DGX's eight (`dgx_ge_orient_output`; items have `turn`,
+  boxes swap width and height), and whatever is said in the actor's axes
+  turns with it: dx, dy, velocity, acceleration, a path, the picture's
+  offset, points and what is held, masks, front and back of contacts,
+  `release`, `shoot`, `steer`, `sense`. The scene does not turn; with no
+  turn everything is as before. 0 bytes of RAM. A body's `flip` holds the
+  whole orientation (`dgx_ge_orient(flip, quarters)`; `true` is the mirror
+  as before); the mask functions, `dgx_ge_image_box[_scaled]`,
+  `dgx_ge_world_lay` and `dgx_ge_pockets_lay` take an orientation where they
+  took a flip, a flip given meaning the mirror. A document's pictures and
+  actors of a scene and a show take `"rotation": 0|90|180|270`, a crowd's
+  group a rotation or `"any"`.
+- **Changed (format):** DGAN 11 (steps `ROTATE` 49, `ROTATE_X` 50), DGSC 5,
+  DGSH 2, DGCR 2: repack. Saves are version 4 (a world record's turn);
+  saves of 2 and 3 are read, unturned.
+
+- **The README gives what a frame costs on the boards** (the CYD and the
+  Guition 10"): a frame's time and pixels in play and drawn anew, RAM free,
+  static RAM and flash. `examples/hello` logs its free RAM and the cost of
+  its frames once a second, as a game can. The docs name no version to add
+  (`idf.py add-dependency "jef-sure/dgx-ge"`: the newest, kept by
+  `dependencies.lock`).
+
+- **A frame's time by an expression:** `frame P (speed)ms`, `frame none
+  (…)ms`, `frame (<picture expr>) (…)ms`, worked out as the frame begins
+  (below 1: 1 ms, above 65535: 65535); a time of constants gives the same
+  bytes as before. New step `FRAME_MS` (44); DGAN stays 10. A frame's `ms`
+  is read off only as a unit (`fall_ms` is a name).
+- **Changed (breaking): a talk has two clocks.** `dgx_ge_talk_start`,
+  `_event`, `_play`, `_field_done`, `dgx_ge_talk_view_play`, `_event`,
+  `_pointer` and `_type` take the talk's own moment and the world's; timed
+  lines, choices, letters and controls go by the first, `tell`, `give` and
+  conditions land at the second. `dgx_ge_talk_t.ahead_ms` and the view's
+  `now_ms` are gone. Fixed: what a dialog does before its first line now
+  lands at the world's moment.
+- **Tile cycles laid again in one call:** `dgx_ge_grid_play(grid, scene,
+  now)`, marking only what changed; false when the game must lay the set
+  anew.
+- **Changed (format): a scene's paper in the scene.** DGSC version 3, a head
+  of 32 bytes with the paper r, g, b and a flag; the packer takes it from a
+  document scene's `background`; `dgx_ge_layout_scene` makes it colour 0 of
+  the frame. Blobs of version 2 are refused: repack.
+- **Changed (breaking for pack scripts that read `sounds/` themselves):** a
+  sound a document names takes its samples from `sounds/<name>.wav` beside
+  it; giving that sound samples again is refused.
+- **`dgx_ge_explain.py` shows where an answer of the game would be lost**
+  (a state that signals and goes on into another script, answering no event
+  itself), and no longer fails on a frame whose time is a name.
+- **The common glue of a game:** `dgx_ge_frame_fit()` (the frame for the
+  display, the largest whole scale, centred), `dgx_ge_frame_pack_colors()`
+  (every set's colours at once; the header gives `<P>_SET_COLOR_COUNT`),
+  `dgx_ge_item_picture()`, `dgx_ge_item_actor()`,
+  `dgx_ge_scene_show_actor()`; in `dgx_ge_board.h` `board_sound_open()` (the
+  game's sound in one call) and `board_pace(t0, period_us)` (the rest of the
+  period waited, at least a tick given up, on every board and on the
+  computer). The engine's component requires `esp_timer`.
+- **Music by notes, as the sound chips':** `Pack.add_music(name, mml)`
+  (`<P>_MUSIC_<NAME>`; MML: channels A–H, instruments `@n = square 25% |
+  triangle | noise` with attack/decay/sustain/release/volume, notes, lengths
+  and dots, ties, `[ ]n` repeats, `$` loop point; errors by line and
+  column; a document's `music` with `music/<name>.mml`). The mixer
+  synthesizes it in whole numbers at its rate, in a place of its own: no
+  effect takes it, `dgx_ge_mixer_stop(-1)` leaves it.
+  `dgx_ge_mixer_music(m, n, fade_ms)`, `_music_now`, `_music_level`; two
+  buses, `dgx_ge_mixer_effects_volume` and `_music_volume`, under the
+  overall volume.
+- **Scripts:** `music <name> [<time>]`, `music stop [<time>]`, `music volume
+  <n>% [<time>]` (steps 45, 46; `DGX_GE_ANIM_MUSIC`, `_MUSIC_LEVEL`); the
+  expression `music` (the one playing, −1 none; `dgx_ge_expr_sound`), so a
+  script waits for its end with no C; `dgx_ge_anim_said_sound` hands what a
+  script says of sound to the output.
+- **Changed (format): SOUNDS version 2 with music** (version 1, the same
+  bytes, without).
+- **Changed (breaking for hand-written outputs): `dgx_ge_sound_t`** gets
+  `music`, `music_now`, `music_level` after `ctx`.
+- **Faster touches among many tiles:** more than 32 solids about a body
+  (a game looking far for walls) were looked up point by point, tens of
+  times slower; now they go into a buffer of the heap taken once at need,
+  kept, grown by 16 (the stack of a game's task does not grow). A frame of
+  Prince of Persia's demo that cost 90 ms on the CYD costs 21 (34 → 16 on
+  the P4); the touches are the same.
+- **A set of a ready palette:** `Pack.add_set(name, palette="nes" |
+  "gameboy" | "pico8" | <a project's palette> | [colors])`, a document
+  set's `"palette"`. Every color of its pictures is brought to the
+  palette's nearest by CIE76 (the distance in CIELAB); only the colors
+  taken go into the set, in the palette's order; `write` warns once a set
+  how many colors were not the palette's and the farthest (picture, color,
+  distance). Palettes as data in `tools/palettes/` (`nes`: the 2C02G of
+  the NESdev wiki, 54 colors; `gameboy`: the DMG's four greens; `pico8`:
+  its 16); a name of no palette is refused with those there are. No C, no
+  RAM, the pack format the same.
+- **The game's variables instead of an actor of settings:** declared in
+  the pack (`Pack.add_variable(name, value)`, a document's `variables`;
+  the header gives `<P>_GAME_VAR_<NAME>`), held once in the game's store
+  (`dgx_ge_vars_t`, `dgx_ge_vars_open`, `dgx_ge_game_vars`; 4 bytes a
+  variable). Scripts read `game_var.<name>` and write it by `set` and
+  `add game_var.<name>` (steps 47, 48), the game told by `DGX_GE_ANIM_VAR`
+  (17); a dialog's condition reads one, its control edits one (`control
+  SLIDER game_var.volume`), a line shows them (`{game_var.<name>}`); saved
+  as a chunk `VARS` (`dgx_ge_vars_save`, `_load`). A game's settings no
+  longer take params of every actor (a game whose settings were an actor's
+  8 params and whose people need 6: 16 bytes an actor less).
+- **Rehearsals:** `dgx_ge_actor_rehearse(actor, now)` and
+  `dgx_ge_actor_rehearse_event(actor, event, now)` move an actor on to
+  learn where its script comes to (made again from its record, a model):
+  they say nothing and write no variable. A step of the game writes one
+  whether a `say` is given or not.
+- **Changed (format): DGDL version 7** (an answer's and a line's flags:
+  a control of a variable, a line of variables); repack.
+- **Synthesizers of music to choose:** `chip` (the square, triangle and
+  noise, sample for sample as before), `nes` (after the 2A03: pulses of
+  12.5/25/50/75% at its timer's periods, the staircase triangle, noise long
+  and short, 16 levels) and `fm` (after the OPL2: two operators, four
+  waves, multipliers, levels, envelopes, feedback, the connection). A song
+  says `#synth`, or takes the project's (`Pack.set_music_synth`,
+  `add_music(synth=)`, a document's `synth`); neither said, **FM**.
+  Instruments by name (`@2 bass = …`, `@bass`), `#tail <ms>`, sets of
+  instruments as data (`#set <name>`: the project's by
+  `Pack.add_music_set` or `music/sets/<name>.mml` beside a document, then
+  the engine's `chip` and `msx-music`). `dgx_ge_synths(chip nes fm)` says
+  which the firmware carries (FM alone unless said); a song of one left out
+  plays nothing, logged once. RAM: music 60 → 68 bytes, a channel 36; with
+  FM in the build 84 and 64.
+- **Changed (format): DGMU version 2** for a song of the NES or FM, or with
+  a tail (the synth and the tail after the tempo); the chip's without a tail
+  stays version 1, the same bytes.
+- **A song alone, as the mixer plays it:** `dgx_ge_synth.h`
+  (`dgx_ge_song_check`, `dgx_ge_song_player_new`, `_render`, `_free`,
+  `dgx_ge_music_render`); `tools/synth` builds it as a WAV writer (`make`)
+  and in WebAssembly for an editor (`make wasm`); `tools/dgx_ge_music.py
+  song.mml song.dgmu [--synth] [--sets]`.
+- **Events at once from an actor's own step in a queue:** a second `now`
+  event the game sends from the same step no longer replaces the first; they
+  are taken in the order sent, each in the script the one before led to (at
+  that script's next frame or `hold`, at the same moment). Depth
+  `DGX_GE_ANIM_NOW_EVENTS` (4 by default; 2 bytes a place in the actor, 224
+  → 232 bytes with 8 params on a 32-bit chip); one more is refused (false,
+  logged once). Events at a branch point or the end are as before.
+  `dgx_ge_now_events(n)` in `project_include.cmake` sets the depth for the
+  whole build (1..255, said once); on the computer `DGX_GE_ANIM_NOW_EVENTS=n`
+  in `GAME_DEFINES`.
+- **Changed (format): a scene's music in the scene.** DGSC version 4, a head
+  of 36 bytes; the packer takes the document scene's `music` (a name or
+  `stop`) and `musicFade` (500 ms by default); `dgx_ge_layout_music` asks it
+  of the output as the game enters the scene. Blobs of version 3 are
+  refused: repack.
+
 ## 0.3.0 - 2026-10-23
 
 Four pieces of glue a maze game had to write in C, now the engine's. A minor version: the game's answer to `game.<name>` takes one more parameter.

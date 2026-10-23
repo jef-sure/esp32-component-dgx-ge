@@ -11,6 +11,9 @@ enum { OP_SAY = 1, OP_CHOOSE, OP_TELL, OP_GIVE, OP_GOTO, OP_END, OP_STYLE, OP_SA
 #define HEADER_BYTES 16u
 #define STAYS        0xFFFFu /* an answer that leads nowhere */
 #define NO_KIND      0xFFFFu
+#define SAY_IMPORTANT 1u /* the flags of a line: shown whole */
+#define SAY_VARS      2u /* its numbers are variables of the game, not params of the one saying it */
+#define ANSWER_VAR    1u /* the flags of an answer: its control edits a variable of the game, not a param of the one choosing */
 /* steps made without a line or a choice before a dialog is taken for one that goes round for ever */
 #define MAX_STEPS 1024
 
@@ -123,10 +126,10 @@ const char *dgx_ge_strings_numbers(const dgx_ge_strings_t *s, int first, int for
     return out;
 }
 
-/* The bytes of an answer of a choose at p: string u16, label u16, control u16, param u8, its expression (length first). */
+/* The bytes of an answer of a choose at p: string u16, label u16, control u16, param u8, flags u8, its expression (length first). */
 static unsigned answer_bytes(const uint8_t *p)
 {
-    return 7 + 1 + p[7];
+    return 8 + 1 + p[8];
 }
 
 /* The one choosing: the actor of the role, or the game's. */
@@ -141,7 +144,7 @@ static bool holds(const dgx_ge_talk_t *t, const uint8_t *expr)
     if (!expr[0]) return true;
     const dgx_ge_actor_t *a = chooser(t);
     if (a) return dgx_ge_actor_eval(a, expr) != 0;
-    const dgx_ge_expr_ctx_t c = {.now_ms = t->now_ms - t->ahead_ms}; /* the world's moment */
+    const dgx_ge_expr_ctx_t c = {.now_ms = t->world_ms}; /* the world's moment */
     return dgx_ge_expr_eval(expr, &c) != 0;
 }
 
@@ -151,7 +154,7 @@ static const uint8_t *answer_at(const dgx_ge_talk_t *t, int n)
     const uint8_t *p = t->dialog->code + t->at;
     const uint8_t *a = p + 7;
     for (unsigned i = 0; i < p[2]; ++i, a += answer_bytes(a))
-        if (holds(t, a + 7) && n-- == 0) return a;
+        if (holds(t, a + 8) && n-- == 0) return a;
     return NULL;
 }
 
@@ -175,7 +178,7 @@ static void run(dgx_ge_talk_t *t)
             const unsigned size = p[0] == OP_SAY_N ? 9 : p[0] == OP_SAY_NS ? (left >= 9 ? 9u + p[8] : 9u) : 7;
             if (left < size || (p[0] == OP_SAY_NS && (p[8] < 1 || p[8] > DGX_GE_TALK_NUMBERS))) goto over;
             t->at = t->pc, t->pc += (uint16_t)size;
-            t->state = DGX_GE_TALK_SAYING, t->role = p[1], t->important = p[2] != 0, t->string = u16_at(p + 3);
+            t->state = DGX_GE_TALK_SAYING, t->role = p[1], t->important = (p[2] & SAY_IMPORTANT) != 0, t->string = u16_at(p + 3);
             t->wait_ms = u16_at(p + 5), t->seen = false, t->since_ms = t->now_ms;
             t->forms = 0, t->number = 0, t->count = 0;
             if (p[0] != OP_SAY) {
@@ -185,7 +188,7 @@ static void run(dgx_ge_talk_t *t)
                 t->forms                    = p[7] ? p[7] : 1;
                 t->count                    = p[0] == OP_SAY_N ? 1 : p[8];
                 for (int i = 0; i < t->count; ++i) {
-                    const int32_t v = a && a->anim && param[i] < a->anim->params ? a->params[param[i]] : 0;
+                    const int32_t v = p[2] & SAY_VARS ? dgx_ge_var(dgx_ge_game_vars, param[i]) : a && a->anim && param[i] < a->anim->params ? a->params[param[i]] : 0;
                     if (i) t->more[i - 1] = v;
                     else t->number = v;
                 }
@@ -196,7 +199,7 @@ static void run(dgx_ge_talk_t *t)
             if (left < 7) goto over;
             unsigned size = 7;
             for (unsigned i = 0; i < p[2]; ++i) {
-                if (size + 8 > left || size + answer_bytes(p + size) > left) goto over;
+                if (size + 9 > left || size + answer_bytes(p + size) > left) goto over;
                 size += answer_bytes(p + size);
             }
             t->at = t->pc, t->pc += (uint16_t)size, t->role = p[1];
@@ -211,7 +214,7 @@ static void run(dgx_ge_talk_t *t)
             if (left < 3) goto over;
             dgx_ge_actor_t *a = actor_of(t, p[1]);
             t->pc += 3;
-            if (a) dgx_ge_actor_event(a, p[2], t->now_ms - t->ahead_ms, t->say, t->ctx); /* at the world's moment */
+            if (a) dgx_ge_actor_event(a, p[2], t->world_ms, t->say, t->ctx); /* at the world's moment */
             break;
         }
         case OP_GIVE: {
@@ -223,7 +226,7 @@ static void run(dgx_ge_talk_t *t)
             /* as many as there are and go in, place after place */
             while (count > 0 && from && to && from->pockets && to->pockets) {
                 const int place = dgx_ge_pockets_find(from->pockets, kind);
-                const int moved = place >= 0 ? dgx_ge_pockets_move(from->pockets, place, count, to->pockets, -1, t->now_ms - t->ahead_ms) : 0;
+                const int moved = place >= 0 ? dgx_ge_pockets_move(from->pockets, place, count, to->pockets, -1, t->world_ms) : 0;
                 if (moved <= 0) break;
                 count -= moved;
             }
@@ -246,30 +249,45 @@ over:
 }
 
 void dgx_ge_talk_start(dgx_ge_talk_t *t, const dgx_ge_dialog_t *dialog, const dgx_ge_cast_t *cast, uint16_t style, uint32_t now_ms,
-                       dgx_ge_anim_say_fn say, void *ctx)
+                       uint32_t world_ms, dgx_ge_anim_say_fn say, void *ctx)
 {
     memset(t, 0, sizeof(*t));
     t->dialog = dialog;
     for (int i = 0; i < dialog->roles && i < DGX_GE_DIALOG_ROLES; ++i) t->actors[i] = cast && cast->roles ? cast->roles[i] : NULL;
     if (cast) t->game = cast->game, t->kinds = cast->kinds, t->fields = cast->fields, t->field_count = cast->fields ? cast->field_count : 0;
-    t->pc     = dialog->start;
-    t->style  = style;
-    t->now_ms = now_ms;
-    t->say    = say;
-    t->ctx    = ctx;
+    t->pc       = dialog->start;
+    t->style    = style;
+    t->now_ms   = now_ms;
+    t->world_ms = world_ms; /* before the first steps: a tell before the first line lands in the world too */
+    t->say      = say;
+    t->ctx      = ctx;
     run(t);
 }
 
-/* The actor of a control for the moment: script 0, the value of the param it shows, now; false when it has none. */
+/* Where the value a control of an answer edits lives: a variable of the game, or a param of the one choosing; NULL none. */
+static int32_t *control_value(const dgx_ge_talk_t *t, const uint8_t *a)
+{
+    if (a[7] & ANSWER_VAR) return dgx_ge_game_vars && a[6] < dgx_ge_game_vars->count ? &dgx_ge_game_vars->values[a[6]] : NULL;
+    dgx_ge_actor_t *owner = chooser(t);
+    return owner && a[6] < DGX_GE_ANIM_PARAMS ? &owner->params[a[6]] : NULL;
+}
+
+/* The kind of the control of an answer; NULL none (or a field). */
+static const dgx_ge_anim_t *control_kind(const dgx_ge_talk_t *t, const uint8_t *a)
+{
+    const uint16_t kind = u16_at(a + 4);
+    return kind != NO_KIND && kind != DGX_GE_DIALOG_FIELD && t->kinds ? dgx_ge_kind(t->kinds, kind) : NULL;
+}
+
+/* The actor of a control for the moment: script 0, the value it shows, now; false when it has none. */
 static bool control_actor(const dgx_ge_talk_t *t, const uint8_t *a, dgx_ge_actor_t *c)
 {
-    const dgx_ge_actor_t *owner = chooser(t);
-    const uint16_t        kind  = u16_at(a + 4);
-    const dgx_ge_anim_t  *anim  = kind != NO_KIND && kind != DGX_GE_DIALOG_FIELD && t->kinds ? dgx_ge_kind(t->kinds, kind) : NULL;
-    if (!anim || !owner || a[6] >= DGX_GE_ANIM_PARAMS) return false;
+    const dgx_ge_anim_t *anim  = control_kind(t, a);
+    const int32_t       *value = control_value(t, a);
+    if (!anim || !value) return false;
     dgx_ge_actor_start(c, anim, 0, 0, 0, t->now_ms);
-    c->params[0] = owner->params[a[6]];
-    dgx_ge_actor_advance(c, t->now_ms, NULL, NULL);
+    c->params[0] = *value;
+    dgx_ge_actor_rehearse(c, t->now_ms);
     return true;
 }
 
@@ -279,11 +297,11 @@ static void tell_control(dgx_ge_talk_t *t, const uint8_t *a, int which)
     dgx_ge_actor_t c;
     const uint8_t  event = t->dialog->ui[which];
     if (event == 0xFF || !control_actor(t, a, &c)) return;
-    dgx_ge_actor_event(&c, event, t->now_ms, NULL, NULL);
-    dgx_ge_actor_advance(&c, t->now_ms, NULL, NULL);
-    dgx_ge_actor_t *owner = chooser(t);
-    if (owner->params[a[6]] == c.params[0]) return;
-    owner->params[a[6]] = c.params[0], ++t->changes;
+    dgx_ge_actor_rehearse_event(&c, event, t->now_ms);
+    dgx_ge_actor_rehearse(&c, t->now_ms);
+    int32_t *value = control_value(t, a);
+    if (*value == c.params[0]) return;
+    *value = c.params[0], ++t->changes;
     /* the answers shown as the conditions say now; the one chosen stays chosen while it is shown */
     t->shown = 0;
     for (const uint8_t *b; (b = answer_at(t, t->shown)); ++t->shown)
@@ -302,9 +320,9 @@ static void take(dgx_ge_talk_t *t, const uint8_t *a)
     run(t);
 }
 
-void dgx_ge_talk_event(dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms)
+void dgx_ge_talk_event(dgx_ge_talk_t *t, dgx_ge_ui_t event, uint32_t now_ms, uint32_t world_ms)
 {
-    t->now_ms = now_ms;
+    t->now_ms = now_ms, t->world_ms = world_ms;
     if (t->editing) return; /* a field edited: the one showing it says when it is done */
     if (t->state == DGX_GE_TALK_SAYING) {
         if (event == DGX_GE_UI_ACTIVATE || event == DGX_GE_UI_NEXT) run(t);
@@ -343,9 +361,10 @@ const dgx_ge_field_t *dgx_ge_talk_field(const dgx_ge_talk_t *t, int shown)
     return f->text && f->size ? f : NULL;
 }
 
-void dgx_ge_talk_field_done(dgx_ge_talk_t *t, bool changed)
+void dgx_ge_talk_field_done(dgx_ge_talk_t *t, bool changed, uint32_t now_ms, uint32_t world_ms)
 {
     if (!t->editing) return;
+    t->now_ms = now_ms, t->world_ms = world_ms;
     t->editing = false, t->since_ms = t->now_ms; /* a choice with a time: its time from now, not from before the editing */
     if (changed) ++t->changes;
     const uint8_t *a = answer_at(t, t->pick);
@@ -357,9 +376,9 @@ bool dgx_ge_talk_pauses(const dgx_ge_talk_t *t)
     return t->state != DGX_GE_TALK_OVER && t->dialog && (t->dialog->flags & DGX_GE_DIALOG_PAUSE);
 }
 
-void dgx_ge_talk_play(dgx_ge_talk_t *t, uint32_t now_ms, bool seen)
+void dgx_ge_talk_play(dgx_ge_talk_t *t, uint32_t now_ms, uint32_t world_ms, bool seen)
 {
-    t->now_ms = now_ms;
+    t->now_ms = now_ms, t->world_ms = world_ms;
     if (!t->wait_ms || t->editing) return; /* a field edited: a choice with a time waits for it */
     if (t->state == DGX_GE_TALK_SAYING) {
         if (seen && !t->seen) t->seen = true, t->seen_ms = now_ms;
@@ -396,11 +415,11 @@ bool dgx_ge_talk_control(const dgx_ge_talk_t *t, int shown, int *image)
 
 bool dgx_ge_talk_control_range(const dgx_ge_talk_t *t, int shown, int *value, int *least, int *most, int *step)
 {
-    const uint8_t *a = t->state == DGX_GE_TALK_CHOOSING ? answer_at(t, shown) : NULL;
-    const dgx_ge_actor_t *owner = chooser(t);
-    const dgx_ge_anim_t  *anim  = a && u16_at(a + 4) != NO_KIND && u16_at(a + 4) != DGX_GE_DIALOG_FIELD && t->kinds ? dgx_ge_kind(t->kinds, u16_at(a + 4)) : NULL;
-    if (!anim || !owner || a[6] >= DGX_GE_ANIM_PARAMS || anim->params < 4) return false;
-    *value = owner->params[a[6]];
+    const uint8_t       *a    = t->state == DGX_GE_TALK_CHOOSING ? answer_at(t, shown) : NULL;
+    const dgx_ge_anim_t *anim = a ? control_kind(t, a) : NULL;
+    const int32_t       *now  = anim ? control_value(t, a) : NULL;
+    if (!now || anim->params < 4) return false;
+    *value = *now;
     *least = (int16_t)u16_at(anim->initial + 2), *most = (int16_t)u16_at(anim->initial + 4), *step = (int16_t)u16_at(anim->initial + 6);
     return *most > *least && *step > 0;
 }

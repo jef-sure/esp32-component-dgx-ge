@@ -11,6 +11,8 @@ const dgx_ge_its_t *dgx_ge_expr_its;
 dgx_ge_ask_fn       dgx_ge_expr_ask;
 void               *dgx_ge_expr_ask_ctx;
 const dgx_ge_input_t *dgx_ge_expr_input;
+const dgx_ge_sound_t *dgx_ge_expr_sound;
+dgx_ge_vars_t        *dgx_ge_game_vars; /* dgx_ge_game.h: here, where expressions read it, so that scripts need no more */
 
 /* Of the one found: a param, or what else ITS names; 0 when none. */
 static float its_value(unsigned k)
@@ -27,12 +29,13 @@ static float its_value(unsigned k)
     case ITS_TILE: return (float)w->tile;
     case ITS_MOD: return (float)w->mod;
     case ITS_CELL: return (float)w->cell;
+    case ITS_ROTATION: return (float)w->rotation;
     default: return 0;
     }
 }
 
 /*
- * One switch on the code of a step: the codes are dense (1..51), so it is a table of jumps, not a chain of comparisons.
+ * One switch on the code of a step: the codes are dense (1..55), so it is a table of jumps, not a chain of comparisons.
  * Each step checks what it needs (the bytes after it, the stack) itself; broken, the value is 0.
  */
 float dgx_ge_expr_eval(const uint8_t *p, const dgx_ge_expr_ctx_t *c)
@@ -106,6 +109,12 @@ float dgx_ge_expr_eval(const uint8_t *p, const dgx_ge_expr_ctx_t *c)
             PUSHES(1);
             stack[depth++] = dgx_ge_expr_input && p[i] < DGX_GE_AXES ? dgx_ge_expr_input->axes[p[i]] * (1.0f / DGX_GE_AXIS_MAX) : 0;
             ++i;
+            break;
+        case E_MUSIC: PUSHES(0); stack[depth++] = (float)dgx_ge_sound_music_now(dgx_ge_expr_sound); break;
+        case E_ROTATION: PUSHES(0); stack[depth++] = c->who ? (float)dgx_ge_actor_rotation(c->who) : 0; break;
+        case E_VAR:
+            PUSHES(1);
+            stack[depth++] = (float)dgx_ge_var(dgx_ge_game_vars, p[i++]);
             break;
         case E_ABS:
         case E_SIN:

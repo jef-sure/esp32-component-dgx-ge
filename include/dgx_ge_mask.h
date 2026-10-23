@@ -11,7 +11,7 @@ extern "C" {
 
 /*
  * Collisions by masks. A picture has masks of zones by index (body, blade,
- * shield), 1 bit a point, from its origin, mirrored with it (see
+ * shield), 1 bit a point, from its origin, mirrored and turned with it (see
  * dgx_ge_pack.h). Two bodies collide where an active mask of one meets an
  * active mask of the other. What an index means is the game's.
  *
@@ -32,25 +32,26 @@ typedef struct {
 
 /*
  * Where two masks meet, each by the origin of its picture at x, y of the
- * scene, mirrored or not: the areas, in tiles of tile x tile points (larger
+ * scene, in its orientation (dgx_ge_orient: mirrored, turned; a bool flip as
+ * before): the areas, in tiles of tile x tile points (larger
  * when the overlap is too wide for 16 x 16 tiles). Returns how many areas,
  * 0 when they do not meet.
  */
-int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, bool a_flip, const dgx_ge_mask_t *b, int bx, int by, bool b_flip, int tile,
+int dgx_ge_masks_overlap(const dgx_ge_mask_t *a, int ax, int ay, unsigned a_orient, const dgx_ge_mask_t *b, int bx, int by, unsigned b_orient, int tile,
                          dgx_ge_area_t *areas);
 
-/* Where a mask lies in the scene, its picture's origin at x, y, mirrored or not. */
-dgx_ge_rect_t dgx_ge_mask_place(const dgx_ge_mask_t *m, int x, int y, bool flip);
+/* Where a mask lies in the scene, its picture's origin at x, y, in an orientation (mirrored, turned: a quarter turn swaps its width and height). */
+dgx_ge_rect_t dgx_ge_mask_place(const dgx_ge_mask_t *m, int x, int y, unsigned orient);
 
 /* Is a point of the scene in a mask placed at r (dgx_ge_mask_place)? It lies in r. */
-bool dgx_ge_mask_has(const dgx_ge_mask_t *m, dgx_ge_rect_t r, bool flip, int sx, int sy);
+bool dgx_ge_mask_has(const dgx_ge_mask_t *m, dgx_ge_rect_t r, unsigned orient, int sx, int sy);
 
 /* A picture of the pack standing in the scene with its masks: which are active is the script's (dgx_ge_actor_t.masks). */
 typedef struct {
     const dgx_ge_pack_t *pack;
     int                  image;
-    int                  x, y; /* the origin, points of the scene */
-    bool                 flip;
+    int                  x, y;   /* the origin, points of the scene */
+    uint8_t              flip;   /* its orientation, mirrored and turned (dgx_ge_orient): true, as before, the mirror */
     uint16_t             active; /* a bit an index */
 } dgx_ge_body_t;
 
@@ -85,7 +86,7 @@ typedef struct {
 typedef void (*dgx_ge_touch_fn)(const dgx_ge_touch_t *touch, void *ctx);
 
 /* The sides (bits) a mask, placed (dgx_ge_mask_place), touches a rectangle of solid on, within reach points; the areas by side. */
-unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach,
+unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach,
                                 dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES]);
 
 /*
@@ -94,21 +95,21 @@ unsigned dgx_ge_mask_touch_rect(const dgx_ge_mask_t *m, dgx_ge_rect_t place, boo
  * beside this one. The seam of two slabs side by side is no edge: feet on
  * it touch the floor below, and nothing on the left or the right.
  */
-unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach,
+unsigned dgx_ge_mask_touch_rect_among(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach,
                                       const dgx_ge_rect_t *solids, int count, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES]);
 
 /* The same, the other solids told by a function: is a point inside one of them (the bodies of a grid, however many)? */
 typedef bool (*dgx_ge_solid_fn)(int x, int y, void *ctx);
-unsigned dgx_ge_mask_touch_rect_where(const dgx_ge_mask_t *m, dgx_ge_rect_t place, bool flip, dgx_ge_rect_t solid, int reach,
+unsigned dgx_ge_mask_touch_rect_where(const dgx_ge_mask_t *m, dgx_ge_rect_t place, unsigned orient, dgx_ge_rect_t solid, int reach,
                                       dgx_ge_solid_fn inside, void *ctx, dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES]);
 
 /* The same against another mask placed: a point of a touches b where b has the point, or one up to reach points away on that side. */
-unsigned dgx_ge_mask_touch_mask(const dgx_ge_mask_t *a, dgx_ge_rect_t pa, bool fa, const dgx_ge_mask_t *b, dgx_ge_rect_t pb, bool fb, int reach,
+unsigned dgx_ge_mask_touch_mask(const dgx_ge_mask_t *a, dgx_ge_rect_t pa, unsigned fa, const dgx_ge_mask_t *b, dgx_ge_rect_t pb, unsigned fb, int reach,
                                 dgx_ge_area_t areas[DGX_GE_TOUCH_SIDES]);
 
 /*
  * Bodies of a scene, looked at by what has changed. The game gives a body
- * again whenever it may have changed (its place, picture, turn, active
+ * again whenever it may have changed (its place, picture, orientation, active
  * masks); one that has not is not looked at. A look takes every body changed
  * since the last look against the bodies whose masks it may reach: pairs are
  * found by sweeping the boxes of their active masks along x, so many bodies
@@ -191,8 +192,8 @@ struct dgx_ge_actor *dgx_ge_collisions_actor_of(const dgx_ge_collisions_t *c, in
 
 /*
  * The body of an actor, as it is drawn: its picture of pack, where it stands
- * (its place and the picture's offset, mirrored with it), its turn, its
- * active masks; of an owner and a side (dgx_ge_collisions_set). One that
+ * (its place and the picture's offset, mirrored and turned with it), its
+ * orientation, its active masks; of an owner and a side (dgx_ge_collisions_set). One that
  * shows no picture is removed. The registry keeps the actor. Given again
  * every frame, it is looked at only when something of it has changed.
  */

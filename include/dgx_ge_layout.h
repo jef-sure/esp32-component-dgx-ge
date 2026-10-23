@@ -28,19 +28,29 @@ extern "C" {
  * or entered (dgx_ge_layout_links_of) and fires them (dgx_ge_links_fire). The cells of the map that change are the
  * game's to keep, a scene not shown included: their lives go on.
  *
+ * The paper: the color under everything of the scene, its background in the editor; laid with the scene, it is the
+ * color 0 of the frame (the paper of dgx_ge_frame.h) and the paper of the scene. A scene of no background has none:
+ * the game's paper stays.
+ *
+ * The music: a scene may name the music that plays in it (a music of the pack, <PREFIX>_MUSIC_<NAME>) and the time
+ * of the fade it comes in by, or silence; the game, entering it, asks it of its output (dgx_ge_layout_music). The
+ * music already playing goes on; a scene that names none leaves what plays.
+ *
  * The blob, little-endian: "DGSC", version u16, layers u8, grids u8, width, height i16, pictures, actors, zones,
- * entries, sources u16, 0 u16, where the grids begin u32; the layers (factor i16, order u8, flags u8); the pictures
- * (picture u16, x, y, key i16, layer u8, flags u8 — bit 0 mirrored, clip x, y, w, h i16 — w 0: none); the zones
+ * entries, sources u16, 0 u16, where the grids begin u32, the paper r, g, b u8, flags u8 (bit 0: it has a paper), the
+ * music u8, flags u8 (bit 0: it names a music, bit 1: silence), the fade u16 ms; the layers (factor i16, order u8, flags u8); the pictures
+ * (picture u16, x, y, key i16, layer u8, flags u8 — bit 0 mirrored, bits 1-2 then turned by quarter turns clockwise, clip
+ * x, y, w, h i16 — w 0: none); the zones
  * (kind u16, x, y, w, h i16); the entries (x, y i16, flags u8 — bit 0 facing left, 0); the sources of links (kind u8
  * — DGX_GE_LAYOUT_CELL, _ACTOR, _ZONE, 0, which u16 — a cell's number in the map, an actor's or a zone's in the scene,
  * its first link u16); the actors by offsets u16 (kind — the blob of its animation u16, script u8, layer u8, x, y i16,
- * flags u8, params u8, each param: number u8, 0, value i16); the grids, each from a multiple of 4 (tiles — the blob of
+ * flags u8 — bit 0 facing left, bits 1-2 then turned as a picture, params u8, each param: number u8, 0, value i16); the grids, each from a multiple of 4 (tiles — the blob of
  * its set u16, x, y i16, cols, rows u16, first — the number of its first cell in the map u16, flags u8 — bit 0
  * modifiers, bit 1 variants, slots u8, the layer of the scene of each slot u8 — 0xFF none, the cells u16 from an even
  * place, the modifiers u8, the variants u32 from a multiple of 4).
  */
 #define DGX_GE_LAYOUT_MAGIC   0x43534744u /* "DGSC" */
-#define DGX_GE_LAYOUT_VERSION 2u
+#define DGX_GE_LAYOUT_VERSION 5u
 
 /* What fires links in a scene: a cell (a plate trodden on), an actor (a lever pulled), a zone (one come into). */
 enum { DGX_GE_LAYOUT_CELL, DGX_GE_LAYOUT_ACTOR, DGX_GE_LAYOUT_ZONE };
@@ -58,13 +68,27 @@ typedef struct {
 bool dgx_ge_layout_open(dgx_ge_layout_t *layout, const void *data, size_t size);
 
 /*
- * The scene's layers (their factor and order) and its pictures, into a scene of the game, between its
- * dgx_ge_scene_set_begin and _end: each picture a piece of its set, its dgx_image_t kept in images (layout->pictures
+ * The scene's paper, layers (their factor and order) and pictures, into a scene of the game, between its
+ * dgx_ge_scene_set_begin and _end: the paper, if it has one, the color 0 of the frame and the scene's (scene->paper
+ * 0), given only when it is another (a color given makes all of the frame drawn anew); each picture a piece of its set, its dgx_image_t kept in images (layout->pictures
  * of them, the game's: the scene points at them), maps: by set of the pack the indices of the frame for its colors
  * (NULL: as they are). false: the scene has fewer layers, a picture is not in the pack, its set is full.
  */
 bool dgx_ge_layout_scene(const dgx_ge_layout_t *layout, dgx_ge_scene_t *scene, const dgx_ge_pack_t *pack, const uint8_t *const *maps,
                          dgx_image_t *images);
+
+/*
+ * The music the scene names: its number (<PREFIX>_MUSIC_<NAME>), 255 silence, -1 none (what plays goes on); fade_ms
+ * (NULL: not wanted) the time of the change.
+ */
+int dgx_ge_layout_music_of(const dgx_ge_layout_t *layout, uint32_t *fade_ms);
+
+/*
+ * Entering the scene: the music it names asked of the game's output, by its fade (dgx_ge_sound_music: the same one
+ * playing goes on), silence if it says so; one that names none leaves what plays. Called as the game enters the scene,
+ * not as it lays it again (a music that has ended would start again).
+ */
+void dgx_ge_layout_music(const dgx_ge_layout_t *layout, const dgx_ge_sound_t *out);
 
 /* Zone n: its place in the scene and its kind (a word of the game: <PREFIX>_ZONE_<WORD>); false: no such zone. */
 bool dgx_ge_layout_zone(const dgx_ge_layout_t *layout, int n, dgx_ge_rect_t *place, int *kind);
@@ -72,11 +96,12 @@ bool dgx_ge_layout_zone(const dgx_ge_layout_t *layout, int n, dgx_ge_rect_t *pla
 /* Entry n: where one who comes stands, and whether facing left; false: no such entry. */
 bool dgx_ge_layout_entry(const dgx_ge_layout_t *layout, int n, int *x, int *y, bool *left);
 
-/* An actor as laid: its kind (the blob of its animation), the script it begins with, its layer, place, facing; the params given. */
+/* An actor as laid: its kind (the blob of its animation), the script it begins with, its layer, place, facing (mirrored, turned); the params given. */
 typedef struct {
     int            kind, script, layer;
     int16_t        x, y;
     bool           flip;
+    uint8_t        turn; /* quarter turns clockwise after the mirror (dgx_ge_actor_t.turn) */
     int            params;
     const uint8_t *given; /* params of them: number u8, 0, value i16 */
 } dgx_ge_layout_actor_t;
@@ -84,7 +109,7 @@ typedef struct {
 /* Actor n as laid; false: no such actor. */
 bool dgx_ge_layout_actor(const dgx_ge_layout_t *layout, int n, dgx_ge_layout_actor_t *actor);
 
-/* Actor n started as laid: its kind's animation (of kinds), its script, place and facing, the params given over its own. false: none, or no such kind. */
+/* Actor n started as laid: its kind's animation (of kinds), its script, place and facing (flip and turn), the params given over its own. false: none, or no such kind. */
 bool dgx_ge_layout_actor_start(const dgx_ge_layout_t *layout, int n, dgx_ge_actor_t *actor, dgx_ge_kinds_t *kinds, uint32_t now_ms);
 
 /* A grid as laid: its set of tiles (a blob), place, size, the layer of each slot of the set, its cells, modifiers and variants in the blob. */
