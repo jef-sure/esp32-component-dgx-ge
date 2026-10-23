@@ -75,7 +75,7 @@ add it to the project's `main`, and DGX 0.8 comes along by
 itself:
 
 ```sh
-idf.py add-dependency "jef-sure/dgx-ge^0.2.0"
+idf.py add-dependency "jef-sure/dgx-ge^0.3.0"
 ```
 
 DGX builds only what the project's `sdkconfig` turns on: the engine's

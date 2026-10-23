@@ -29,6 +29,16 @@ static void said(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, uint3
     ++said_events;
 }
 
+/* The game's answer to a question: 1 when no actor asks, 0 when one does; the asks counted. */
+static int asks;
+
+static float no_one(int what, const dgx_ge_actor_t *who, void *ctx)
+{
+    (void)what, (void)ctx;
+    ++asks;
+    return who ? 0.0f : 1.0f;
+}
+
 /* The answers shown, their strings joined by '|'. */
 static const char *answers(const dgx_ge_talk_t *t, const dgx_ge_strings_t *s)
 {
@@ -227,6 +237,32 @@ int main(int argc, char **argv)
     CHECK(t.state == DGX_GE_TALK_CHOOSING && t.changes == 0);
     dgx_ge_talk_start(&t, &page, &(dgx_ge_cast_t){.game = &settings}, 0, 0, NULL, NULL);
     CHECK(!dgx_ge_talk_control(&t, 0, &image));
+    /*
+     * a condition that asks the game (no text makes one: the bytes of Loud's, volume > 2, made game.0 and abs six
+     * times): the game's actor choosing, it asks, the game answers 0: Loud is not shown; then nobody choosing: no
+     * actor asks (none kept from before), 1: shown
+     */
+    {
+        static const uint8_t was[] = {8, 2, 1, 1, 0, 0, 0, 0x40, 21}, asking[] = {8, 46, 0, 11, 11, 11, 11, 11, 11};
+        blob          = dgx_ge_pack_blob(&pack, TEST_BLOB_PAGE, &n);
+        uint8_t *copy = malloc(n), *at = NULL;
+        int      found = 0;
+        memcpy(copy, blob, n);
+        for (size_t i = 0; i + sizeof was <= n; ++i)
+            if (!memcmp(copy + i, was, sizeof was)) at = copy + i, ++found;
+        CHECK(found == 1);
+        memcpy(at, asking, sizeof asking);
+        dgx_ge_dialog_t asked;
+        CHECK(dgx_ge_dialog_open(&asked, copy, n));
+        dgx_ge_expr_ask = no_one, asks = 0;
+        dgx_ge_talk_start(&t, &asked, &(dgx_ge_cast_t){.game = &settings, .kinds = &kinds}, 0, 0, NULL, NULL);
+        CHECK(t.shown == 4 && asks > 0);
+        asks = 0;
+        dgx_ge_talk_start(&t, &asked, NULL, 0, 0, NULL, NULL);
+        CHECK(t.shown == 5 && asks > 0);
+        dgx_ge_expr_ask = NULL;
+        free(copy);
+    }
 
     /* lines of a number: the form the language gives it (three in Russian), the number as it was when said */
     const int forms[][2] = {{1, 0}, {2, 1}, {4, 1}, {5, 2}, {11, 2}, {12, 2}, {14, 2}, {21, 0}, {22, 1}, {25, 2}, {101, 0}, {111, 2}, {0, 2}};

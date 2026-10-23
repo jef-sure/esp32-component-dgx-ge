@@ -99,7 +99,7 @@ float dgx_ge_expr_eval(const uint8_t *p, const dgx_ge_expr_ctx_t *c)
             break;
         case E_GAME:
             PUSHES(1);
-            stack[depth++] = dgx_ge_expr_ask ? dgx_ge_expr_ask(p[i], dgx_ge_expr_ask_ctx) : 0;
+            stack[depth++] = dgx_ge_expr_ask ? dgx_ge_expr_ask(p[i], c->who, dgx_ge_expr_ask_ctx) : 0;
             ++i;
             break;
         case E_AXIS:

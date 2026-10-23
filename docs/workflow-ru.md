@@ -57,7 +57,7 @@
 | Граф сцен | какие сцены есть, как из одной попасть в другую, правила карты, связи между клетками | `add_graph` (класс `Graph` из `tools/dgx_ge_graph.py`), `add_links` | `<P>_<ГРАФ>_EXIT_*`, `_ENTRY_*`, `_MAP_*` |
 | Диалоги | `.dlg` на языке `tools/dgx_ge_dialog.py`: кто что говорит, ответы, что от них меняется; переводы `.po`; поля ввода | `add_dialog`, `translate`, `add_field` | `<P>_BLOB_<ДИАЛОГ>`, `<P>_<ДИАЛОГ>_ROLE_*`, `<P>_FIELD_*` |
 | Стили и шрифты | как выглядит разговор; какие шрифты нужны, запросами к DGX | `add_style`, `add_font` | `<P>_STYLE_*`, `<P>_FONT_*`, `<P>_FONTS(X)` |
-| Числа игры | константы игры; имена чисел для скриптов; таймеры; звуки; заставки; погони; толпы | `add_game`, `add_constants`, `add_timer`, `add_sound`, `add_show`, `add_chase`, `add_crowd` | `<P>_GAME_*`, `<P>_TIMER_*`, `<P>_SOUND_*`, `<P>_BLOB_*` |
+| Числа игры | константы игры; имена чисел для скриптов; таймеры; звуки; заставки; погони; толпы | `add_game`, `add_constants`, `add_timer`, `add_sound`, `add_show`, `add_chase`, `add_crowd` | `<P>_GAME_*`, `<P>_<ИМЯ>` (имена чисел), `<P>_TIMER_*`, `<P>_SOUND_*`, `<P>_BLOB_*` |
 | Сырые байты | всё, что игра читает сама: уровень своего формата, таблица | `add_blob` | `<P>_BLOB_*` |
 
 Код игры на C — это то, что остаётся: правила, которых данные не выражают
@@ -251,7 +251,7 @@ pack.write("main/assets/mygame.pack", "main/assets/mygame_pack.h")
 | `format`, `formatVersion` | `"dgx-ge-sprites"` и `1` | другой формат или версия новее — отказ |
 | `masks` | `[{index, name}]`: какие маски есть | `name_mask`: `<P>_MASK_<NAME>` |
 | `meets` | текст: какие маски встречаются | `add_meets` |
-| `constants` | `{NAME: число}`: имена чисел для скриптов и условий диалогов | `add_constants` |
+| `constants` | `{NAME: число}`: имена чисел для скриптов и условий диалогов | `add_constants`: в заголовке `<P>_<NAME>` с числом |
 | `sets` | наборы кадров: `{name, defaultMask, frames: [{image, width, height, origin: {x, y}, masks, points, packName}]}` | набор цветов из палитр его PNG; каждый кадр — картинка `<НАБОР>_<ФАЙЛ>` (или `packName`) с базовой точкой, масками (строки битов в шестнадцатеричных цифрах), точками; кадр без масок в наборе с `defaultMask` получает маску этого номера из своих непрозрачных точек |
 | `palettes` | наборы цветов без картинок | `add_set` |
 | `tilesets` | `{name, cellWidth, cellHeight, tiles: [{name, kind, solid, pieces, ...}]}` | `add_tileset`; имена слоёв кусков становятся слотами |
@@ -307,7 +307,7 @@ pack.write("main/assets/mygame.pack", "main/assets/mygame_pack.h")
 именем из `constants` (`signal STRIDE`). Из этого получается заголовок с
 `MYGAME_SCENE_FIELD_ACTOR_HERO`, `MYGAME_SCENE_FIELD_ZONE_EXIT`,
 `MYGAME_SCENE_FIELD_GRID_FLOOR`, `MYGAME_BRICKS_TILE_BRICK`,
-`MYGAME_GAME_START_MS` и всем остальным.
+`MYGAME_GAME_START_MS`, `MYGAME_STRIDE` и всем остальным.
 
 Документ, который не написан редактором, лучше всего сверять с тестами
 упаковщика в репозитории движка: `test/host/test_sprites.py` пишет
@@ -376,6 +376,7 @@ pack.write(...)
 | блоб с именем того, что упаковщик пишет сам | `ValueError: a blob named GAME: the packer's own blob GAME has that name (an animation, a dialog, a blob)` |
 | PNG не с палитрой | `ValueError: .../rgb.png: not a picture of a palette (RGB)` |
 | отсчёты одному звуку дважды | `ValueError: sound STEP twice` |
+| имя числа выходит в заголовке именем другого | `ValueError: constant SET_COUNT: its name in the header, MYGAME_SET_COUNT, is another thing's: '#define MYGAME_SET_COUNT 3'; give the constant another name` |
 
 Цвет картинки, которого нет в её наборе, — не ошибка, а предупреждение: он
 заменяется ближайшим, и упаковщик это говорит
@@ -471,6 +472,7 @@ CRC-32 всего файла (`dgx_ge_pack_id`): сохранение помни
 | `<P>_ZONE_*`, `<P>_SCREEN_WIDTH`, `_HEIGHT` | слова видов зон; экран игры из документа |
 | `<P>_<ГРАФ>_EXIT_*`, `_ENTRY_*`, `_MAP_*` | выходы, входы и карты графа |
 | `<P>_GAME_*` | места констант игры в блобе `GAME` |
+| `<P>_<ИМЯ>` | имена чисел, которые пишут скрипты (`add_constants`, `constants` документа), с самим числом |
 | `<P>_MASK_*`, `<P>_POINT_*` | маски и точки привязки |
 | `<P>_SOUND_*`, `<P>_TIMER_*` | звуки и таймеры по номерам |
 | `<P>_STYLE_*`, `<P>_FONT_*`, `<P>_FONTS(X)`, `<P>_FONT_COUNT` | стили, шрифты игры и их таблица по именам |
@@ -874,7 +876,7 @@ mygame/
 
 Шаги:
 
-1. **Движок в зависимости.** `idf.py add-dependency "jef-sure/dgx-ge^0.2.0"`
+1. **Движок в зависимости.** `idf.py add-dependency "jef-sure/dgx-ge^0.3.0"`
    добавляет его в `main/idf_component.yml`, DGX приходит с ним сам. DGX-DI
    (указатель, геймпад, клавиатура на дисплее) нужен платам с тачем и
    сборке для компьютера: `idf.py add-dependency "jef-sure/dgx-di^0.1.2"`.

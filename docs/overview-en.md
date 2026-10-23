@@ -308,8 +308,10 @@ pack.write("mygame.pack", "mygame_pack.h")
 
 Along with the pack you get a C header in which everything has a number:
 `MYGAME_IMG_HERO_STAND`, `MYGAME_HERO_SCRIPT_RUN`,
-`MYGAME_HERO_EVENT_JUMP`. The code refers to resources only by these
-numbers, so the compiler catches a typo in a name.
+`MYGAME_HERO_EVENT_JUMP`, and the game's own named numbers, those its
+scripts write (`Pack.add_constants(TICK_MS=83)` gives `MYGAME_TICK_MS 83`). The
+code refers to resources only by these numbers, so the compiler catches a typo
+in a name.
 
 The prefix (`MYGAME`) is written in capitals, digits and `_`, starting with
 a capital: it begins every name in the header, and the build looks for the
@@ -318,7 +320,8 @@ added: letters and digits stay, anything else becomes `_`, everything is
 upper case (`stand-1` gives `MYGAME_IMG_STAND_1`). Two names that come out
 the same, such as `stand-1` and `stand_1`, are an error, and so is a blob
 named like one the packer adds by itself (`STRINGS`, `GAME`, `TIMERS`,
-`STYLES`, `CHASE`, `SOUNDS`). `write` writes the pack and its header
+`STYLES`, `CHASE`, `SOUNDS`), or a constant whose header name is another
+thing's (`SET_COUNT`). `write` writes the pack and its header
 together: if either cannot be written, both old files stay as they were.
 
 On the board:
@@ -786,6 +789,30 @@ own STONE BODY        # your own stone can fall on your head
 
 Collisions only report; they never move anyone.
 
+When the bodies are actors, the engine also sends what their scripts say a
+meeting does (the `hit` lines, 2.7). `dgx_ge_collisions_set_actor()` puts
+an actor's body into the registry as it is drawn (its picture, place, turn,
+active masks) and keeps the actor; one that shows no picture is taken out.
+`dgx_ge_collisions_damage()` names the param a hit's damage comes off. Then
+one call a frame, `dgx_ge_collisions_hits()`, looks at the bodies and, for
+every pair of masks that met, sends the hit of each side: the damage off
+the other's param, the event to the one met, the recoil to itself. The order
+is fixed: by the bodies' handles, the lower first, then by masks, so the
+game plays the same however its actors happen to stand. A function of the
+game sees each hit before it is sent and may change it, pass it by, or stop
+the rest: in a maze game the first ghost that catches the hero ends the
+round, and nothing after it counts. A body removed by what an event did is
+not touched again.
+
+```c
+for (int i = 0; i < ACTORS; ++i) dgx_ge_collisions_set_actor(bodies, i, &pack, &actors[i], i + 1, side_of(i));
+dgx_ge_collisions_hits(bodies, now, still_playing, say, &game);
+```
+
+It costs nothing beyond the pointer to the actor a body (4 bytes on the
+board). A fight with rules of its own, a parry before the wound, still asks
+`dgx_ge_collisions_look()` and `dgx_ge_actor_hit()` itself.
+
 ### 2.9. Things, pockets, shots
 
 - A **thing** is an actor with an animation of its own: a sword, a jug, a
@@ -861,6 +888,30 @@ next, as in Pac-Man, Bomberman or Snake:
 The game says where walking is allowed. In each cell the game learns
 "arrived" at the exact moment of arrival and can choose where to go next (a
 ghost picks its way toward its target: `dgx_ge_walk_toward`).
+
+A walker can be **bound to an actor** (`dgx_ge_walk_bind_t`), and then the
+game writes no glue between them. The binding sits beside the actor, not in
+it: 16 bytes on top of the walker, and actors that walk no grid pay
+nothing. It starts from wherever the actor stands, even between two cells
+(`dgx_ge_walk_bind_start`). From then on `dgx_ge_walk_bind_play` and
+`dgx_ge_walk_bind_want` do three things:
+
+- they put the actor at the walker's point at the walker's moment, with
+  its velocity along the way, so it moves smoothly between frames on its
+  own (on the slant while cutting a corner); at each cell it is placed
+  there before the game hears "arrived";
+- when the way it goes changes, they tell its script, at the moment it
+  changes: the event `turn + side` (its pictures face that way) and,
+  if asked, the side written into a param; when it stops, the event
+  `stop`, once;
+- they take its speed from a param of the actor at the middle of each
+  cell, so the script decides how fast it runs (frightened, eaten).
+
+While bound, the binding is what moves the actor: a velocity or a path
+its script sets is overwritten at the next call. To let the script move it
+(into a house in the maze, a jump), the game unbinds it (`actor = NULL`,
+from "arrived" too) and starts the binding again later from where the
+script left it.
 
 ### 2.12. Text: labels, dialogs, fonts
 
@@ -1349,7 +1400,7 @@ a board, step by step and with what each step gives, is in its own
 document, [workflow-en.md](workflow-en.md). In short:
 
 1. Add the engine to your ESP-IDF project from the registry:
-   `idf.py add-dependency "jef-sure/dgx-ge^0.2.0"`. It lands in
+   `idf.py add-dependency "jef-sure/dgx-ge^0.3.0"`. It lands in
    `managed_components/jef-sure__dgx-ge`, `main` requires it by itself, and
    DGX comes along as its dependency (`jef-sure/dgx`).
 2. Write a Python script that builds the pack (`Pack`, section 2.2). How to

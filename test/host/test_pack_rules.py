@@ -265,6 +265,40 @@ with open(os.path.join(out, "ps.c"), "w") as f:
 r = subprocess.run([cc, "-fsyntax-only", "-I", os.path.join(here, "..", "..", "include"), "-I", out, os.path.join(out, "ps.c")], capture_output=True, text=True)
 check(r.returncode == 0, f"a pack of few params, built without them: {r.stderr[-300:]}")
 
+# the game's constants in the header, <PREFIX>_<NAME>, for its C: the numbers the scripts are given, a negative one
+# as C reads it; one name of the header for two things refused, naming the constant, the same number or not
+p = Pack("K")
+p.add_constants(TICK_MS=83, ODD=-5, LEAST=-2 ** 31, MOST=2 ** 31 - 1, WHOLE=7.0)
+p.add_constants(TICK_MS=84)  # replaced, its place kept
+p.add_anim("HERO", "script stand\n    frame 0 TICK_MS ms\n    hold\n")
+p.write(os.path.join(out, "k.pack"), os.path.join(out, "k_pack.h"))
+header = p.header("K")
+check(["#define K_TICK_MS 84", "#define K_ODD (-5)", "#define K_LEAST (-2147483647 - 1)", "#define K_MOST 2147483647", "#define K_WHOLE 7"]
+      == [line for line in header.splitlines() if line.startswith(("#define K_TICK", "#define K_ODD", "#define K_LEAST", "#define K_MOST", "#define K_WHOLE"))],
+      f"the constants in the header: {header}")
+with open(os.path.join(out, "k.c"), "w") as f:
+    f.write('#include "k_pack.h"\n_Static_assert(K_TICK_MS == 84 && K_ODD * 2 == -10 && 0 - K_ODD == 5, "numbers");\n'
+            '_Static_assert(K_LEAST == -2147483647 - 1 && K_LEAST < 0 && sizeof(K_LEAST) == sizeof(int) && K_MOST == 2147483647, "the ends");\n')
+r = subprocess.run([cc, "-fsyntax-only", "-Wall", "-Werror", "-DDGX_GE_ANIM_PARAMS=4", "-I", os.path.join(here, "..", "..", "include"), "-I", out,
+                    os.path.join(out, "k.c")], capture_output=True, text=True)
+check(r.returncode == 0, f"the constants as C reads them: {r.stderr[-300:]}")
+for bad in (2.5, "83", True, None, 2 ** 31, -2 ** 31 - 1):
+    refused(f"a constant {bad!r}", lambda: Pack("K").add_constants(X=bad), ("constant X", "whole 32-bit"))
+p = Pack("K")
+p.add_constants(GAME_LIVES=0)
+p.add_game(LIVES=3)  # K_GAME_LIVES 0, the place of LIVES: the same line, still two things
+refused("a constant named as a place of the game", lambda: p.header("K"), ("constant GAME_LIVES", "K_GAME_LIVES", "#define K_GAME_LIVES 0", "another name"))
+p = Pack("K")
+p.add_anim("HERO", SCRIPT)
+p.add_constants(EVENT_X=1, HERO_SCRIPT_STAND=1)  # an animation's name after the constants
+refused("a constant named as a script", lambda: p.header("K"), ("constant HERO_SCRIPT_STAND", "#define K_HERO_SCRIPT_STAND 0"))
+p = Pack("K")
+p.add_constants(tick=1, TICK=1)
+refused("two constants alike in upper case", lambda: p.header("K"), ("constant TICK", "K_TICK", "constant tick"))
+p = Pack("K")
+p.add_constants(SET_COUNT=0)
+refused("a constant named as the count of sets", lambda: p.header("K"), ("constant SET_COUNT", "#define K_SET_COUNT 0"))
+
 # a sound a document names (only its name) gets its samples from the game's script, at its number; a second time not
 p = Pack("SN")
 first = p.add_sound("STEP")

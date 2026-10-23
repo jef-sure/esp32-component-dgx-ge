@@ -223,8 +223,15 @@ script think
 ```
 
 `game.<name>` is the game's answer at the moment of the step: the game sets
-its function `dgx_ge_expr_ask(number, context)` and the context
-`dgx_ge_expr_ask_ctx`; with no function the answer is 0. Names are declared
+its function `dgx_ge_expr_ask(number, who, context)` and the context
+`dgx_ge_expr_ask_ctx`; with no function the answer is 0. `who` is the actor
+whose script asks, so one function answers every actor of a kind, each about
+itself: the actor being advanced or sent an event, and also an actor that an
+event reaches from inside another's step (the game's `say` sending it one).
+An actor the engine makes for a moment to play a script (a cell's life, a
+thing lying or in a pocket, a control of a dialog) asks as itself too; its
+params and kind are there, and the pointer is valid only during the call.
+`who` is NULL when no actor asks. Names are declared
 before they are read, and their numbers are in the pack header as
 `<PREFIX>_<ANIMATION>_GAME_<NAME>`. This costs an actor nothing. There are
 no questions in `path` or in tiles: a path is computed from `t` alone.
@@ -287,7 +294,13 @@ too. The game gives the packer its own numbers as constants
 (`Pack.add_constants(TICK_MS=83, TILE_FLOOR=2)`, or the `constants` field in
 the editor's file): their names can go anywhere a number can, like a
 script's own `define` (`define tick 1000 / TICK_MS`, `signal CLOCK_OUT`).
-Such a name cannot be redefined by a `define`.
+Such a name cannot be redefined by a `define`. The header gives the same
+numbers to the game's C as `<PREFIX>_<NAME>` (`#define MYGAME_TICK_MS 83`), so
+a signal or a tile is written once, in the data, and C does not repeat it. A
+value is a whole 32-bit number, as the scripts' numbers are: `2.5` or `"83"`
+is refused, not cut to a number the data did not say. A constant whose header
+name is already another thing's (`GAME_LIVES` beside `add_game(LIVES=…)`,
+`SET_COUNT`, `HERO_SCRIPT_STAND`) is refused too, even with the same number.
 
 ### `path`: position by a formula
 
@@ -474,7 +487,8 @@ script flee
 Who can be found is the game's decision: the actor's terrain has a `sense`
 callback, and the answers to it come from `dgx_ge_sense_bodies` (the body
 registry: bodies for which the game has named an actor with
-`dgx_ge_collisions_actor`; the kind is known for animations opened through
+`dgx_ge_collisions_actor` or that it put in with
+`dgx_ge_collisions_set_actor`; the kind is known for animations opened through
 `dgx_ge_kind`) and `dgx_ge_sense_cells` (the grid: cells that are not
 empty). The game joins the two and gives a cell its own number. Without the
 callback `sense` finds nobody. The search happens at the moment of the step, by
@@ -783,12 +797,18 @@ script strike
   lines, a `masks` command or another script replaces them: a blow is part
   of the movement it is written in.
 - The meeting of masks is found by `dgx_ge_collisions_look` (collisions,
-  overview-en.md, 2.8). The game asks `dgx_ge_actor_hit(actor, own mask,
-  other's mask, &hit)` and sends the events itself. What an event means is
-  decided by the matrix of the one who gets it: the same blow is a wound in
-  a stance, a stagger in a block, and nothing at all on someone lying down.
-- The game takes off the damage by its own rules: in full, partly in a
-  block, less and less in a series. The engine only passes the damage on.
+  overview-en.md, 2.8). For the bodies of actors `dgx_ge_collisions_hits`
+  does the rest: it asks `dgx_ge_actor_hit(actor, own mask, other's mask,
+  &hit)` of both and sends the events and the recoils, in the order of the
+  bodies' handles. A game with rules of its own asks `dgx_ge_actor_hit`
+  itself and sends what it decides. What an event means is decided by the
+  matrix of the one who gets it: the same blow is a wound in a stance, a
+  stagger in a block, and nothing at all on someone lying down.
+- The damage comes off the param the game names for a body
+  (`dgx_ge_collisions_damage`); with none named it comes off nothing. Other
+  rules (partly in a block, less and less in a series) are the game's: its
+  function sees each hit before it is sent and may change the damage, or
+  the game sends the hits itself.
 
 PoP's sword fighting is described this way: the sword's picture has two
 masks, the tip (`TIP`) and the whole blade (`BLADE`). On the strike frames

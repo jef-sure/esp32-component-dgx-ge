@@ -62,7 +62,13 @@ static void at_middle(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g)
     if (off && *off) w->pos = *off * (DX[w->dir] + DY[w->dir]), *off = 0;
 }
 
-void dgx_ge_walk_play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx)
+/* The binding's side of a middle (or of a want): below. */
+static void came(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g, uint32_t at_ms, dgx_ge_anim_say_fn say, void *ctx);
+static void told(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g, uint32_t at_ms, dgx_ge_anim_say_fn say, void *ctx);
+
+/* On to now; a binding (b, while bound) put and told at every middle. */
+static void play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx, dgx_ge_walk_bind_t *b,
+                 dgx_ge_anim_say_fn say)
 {
     for (int guard = 0; guard < 4096 && (int32_t)(now_ms - w->at_ms) > 0; ++guard) {
         if (w->dir < 0 || !w->speed) {
@@ -89,16 +95,25 @@ void dgx_ge_walk_play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t 
         int c = w->col, r = w->row;
         if (to && !beside(g, w->col, w->row, w->dir, &c, &r)) c = w->col, r = w->row;
         w->col = (int16_t)c, w->row = (int16_t)r, w->pos = 0;
+        const uint32_t at = w->at_ms;
+        if (b && b->actor) came(b, g, at, say, ctx);
         if (to && arrive) arrive(w, w->at_ms, ctx); /* the middle of its own cell: it came there before */
         const int was = w->dir;
         at_middle(w, g);
         if (w->dir != was) w->rest = 0; /* turned or stood: from the middle */
+        if (b && b->actor) told(b, g, at, say, ctx);
     }
 }
 
-void dgx_ge_walk_want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx)
+void dgx_ge_walk_play(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx)
 {
-    dgx_ge_walk_play(w, g, now_ms, arrive, ctx);
+    play(w, g, now_ms, arrive, ctx, NULL, NULL);
+}
+
+/* A side asked for, the walker on to the moment already. */
+static void want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx,
+                 dgx_ge_walk_bind_t *b, dgx_ge_anim_say_fn say)
+{
     w->want = (int8_t)side;
     if (side < 0) return;
     if (w->dir >= 0 && side == back_of(w->dir) && w->pos < 0) {
@@ -132,6 +147,7 @@ void dgx_ge_walk_want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side,
             /* before the middle of the next cell: there now, so far short of its middle along the old way */
             w->off_x = -DX[w->dir] * left, w->off_y = -DY[w->dir] * left;
             w->col = (int16_t)c, w->row = (int16_t)r, w->pos = 0, w->rest = 0, w->dir = (int8_t)side, w->want = -1;
+            if (b && b->actor) came(b, g, now_ms, say, ctx);
             if (arrive) arrive(w, now_ms, ctx);
             return;
         }
@@ -143,6 +159,12 @@ void dgx_ge_walk_want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side,
         }
     }
     if (w->dir < 0 || w->pos == 0) at_middle(w, g); /* standing (or at a middle): it goes now if it may */
+}
+
+void dgx_ge_walk_want(dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int side, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive, void *ctx)
+{
+    dgx_ge_walk_play(w, g, now_ms, arrive, ctx);
+    want(w, g, side, now_ms, arrive, ctx, NULL, NULL);
 }
 
 void dgx_ge_walk_xy(const dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, int *x, int *y)
@@ -167,4 +189,109 @@ int dgx_ge_walk_toward(const dgx_ge_walker_t *w, const dgx_ge_walk_grid_t *g, in
     }
     if (best < 0 && w->dir >= 0 && open_side(w, g, w->col, w->row, back_of(w->dir))) best = back_of(w->dir); /* a dead end: back */
     return best;
+}
+
+/* ---- a walker bound to an actor ---- */
+
+/* x / d rounded down, as the cells of a grid lie on both sides of 0 (a tunnel). */
+static int floor_div(int x, int d)
+{
+    return x >= 0 ? x / d : -((-x + d - 1) / d);
+}
+
+static uint32_t speed_of(const dgx_ge_walk_bind_t *b)
+{
+    if (b->speed < 0 || b->speed >= DGX_GE_ANIM_PARAMS) return b->walker.speed;
+    const int32_t v = b->actor->params[b->speed];
+    return v > 0 ? (uint32_t)v : 0;
+}
+
+/* The actor where the walker is, from the walker's moment on, at its velocity: along its way, and to the middle's line across it while off. */
+static void put(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g)
+{
+    const dgx_ge_walker_t *w = &b->walker;
+    int                    x, y;
+    int32_t                vx = 0, vy = 0;
+    dgx_ge_walk_xy(w, g, &x, &y);
+    if (w->dir >= 0) {
+        const int32_t s = (int32_t)w->speed;
+        vx = DX[w->dir] * s - (w->off_x > 0 ? s : w->off_x < 0 ? -s : 0);
+        vy = DY[w->dir] * s - (w->off_y > 0 ? s : w->off_y < 0 ? -s : 0);
+    }
+    dgx_ge_actor_restart(b->actor, w->at_ms, (x + b->dx) * 256, (y + b->dy) * 256, vx, vy);
+}
+
+/* At a middle, at its moment: the actor advanced to it and put there, its speed the param's. */
+static void came(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g, uint32_t at_ms, dgx_ge_anim_say_fn say, void *ctx)
+{
+    if (b->actor->anim) dgx_ge_actor_advance(b->actor, at_ms, say, ctx);
+    if (!b->actor) return; /* unbound by what its steps told */
+    b->walker.speed = speed_of(b);
+    put(b, g);
+}
+
+/* The side it goes now told if it changed, at a moment; standing, stop once. The actor put where the walker is after. */
+static void told(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g, uint32_t at_ms, dgx_ge_anim_say_fn say, void *ctx)
+{
+    dgx_ge_actor_t *a   = b->actor;
+    const int       dir = b->walker.dir;
+    if (dir < 0) {
+        if (b->stop >= 0 && !b->stood) {
+            b->stood = true;
+            dgx_ge_actor_event(a, b->stop, at_ms, say, ctx);
+        }
+    } else {
+        const bool has_way = b->way >= 0 && b->way < DGX_GE_ANIM_PARAMS;
+        const int  was     = has_way ? (int)a->params[b->way] : b->side;
+        if (dir != was || b->stood) {
+            b->side = (int8_t)dir, b->stood = false;
+            if (has_way) a->params[b->way] = dir;
+            if (b->turn >= 0) dgx_ge_actor_event(a, b->turn + dir, at_ms, say, ctx);
+        }
+    }
+    if (b->actor) put(b, g); /* what its script did to its motion, told, is the binding's again */
+}
+
+void dgx_ge_walk_bind_start(dgx_ge_walk_bind_t *b, dgx_ge_actor_t *actor, const dgx_ge_walk_grid_t *g, int side, uint32_t now_ms)
+{
+    dgx_ge_walker_t *w = &b->walker;
+    b->actor = actor, b->side = -1, b->stood = false;
+    /* the cell its point is in (past an edge, in a tunnel: the cell there, the other side's as it goes on), how far off its middle (points) */
+    const int px = dgx_ge_actor_x(actor) - b->dx, py = dgx_ge_actor_y(actor) - b->dy;
+    const int col = floor_div(px, g->cell_w), row = floor_div(py, g->cell_h);
+    const int ox = px - (col * g->cell_w + g->cell_w / 2), oy = py - (row * g->cell_h + g->cell_h / 2);
+    dgx_ge_walk_start(w, col, row, speed_of(b), now_ms);
+    if (side < 0 || side > 3) {
+        w->off_x = ox * 256, w->off_y = oy * 256; /* standing where it is: off the middle along the way it takes, it goes from there */
+    } else {
+        const int along = side < 2 ? ox * DX[side] : oy * DY[side];
+        int       c, r;
+        w->dir = (int8_t)side;
+        if (side < 2) w->off_y = oy * 256;
+        else w->off_x = ox * 256;
+        w->pos = along * 256;
+        if (along < 0 && beside(g, col, row, back_of(side), &c, &r)) {
+            /* short of the middle: past the one behind, so it comes to its own */
+            w->col = (int16_t)c, w->row = (int16_t)r, w->pos += step_of(g, side);
+        }
+    }
+    put(b, g);
+}
+
+void dgx_ge_walk_bind_play(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive,
+                           dgx_ge_anim_say_fn say, void *ctx)
+{
+    dgx_ge_walker_t *w = &b->walker;
+    /* what changed since (a start, a side the game set itself): told at the moment the walker had come to */
+    if (b->actor) told(b, g, (int32_t)(now_ms - w->at_ms) < 0 ? now_ms : w->at_ms, say, ctx);
+    play(w, g, now_ms, arrive, ctx, b, say);
+    if (b->actor) put(b, g);
+}
+
+void dgx_ge_walk_bind_want(dgx_ge_walk_bind_t *b, const dgx_ge_walk_grid_t *g, int side, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive,
+                           dgx_ge_anim_say_fn say, void *ctx)
+{
+    dgx_ge_walk_bind_play(b, g, now_ms, arrive, say, ctx);
+    want(&b->walker, g, side, now_ms, arrive, ctx, b, say);
+    if (b->actor) told(b, g, now_ms, say, ctx);
 }

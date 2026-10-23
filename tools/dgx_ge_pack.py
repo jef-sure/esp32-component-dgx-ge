@@ -1442,12 +1442,16 @@ class Pack:
         """
         Names of numbers of the game its scripts and the conditions of its dialogs write instead of the numbers (the
         ticks of a second, the frame of a cut scene, the numbers of its tiles, its signals, the bits of what a board
-        can): in the text as people read it, numbers in the pack, the packer makes one of the other. Given before the
-        animations and dialogs that write them; the same name again: its value replaced.
+        can): in the text as people read it, numbers in the pack, the packer makes one of the other; and the game's C
+        reads them in the header, <PREFIX>_<NAME> (one name of the header for two things is refused, header). Given
+        before the animations and dialogs that write them; the same name again: its value replaced, its place kept.
+        A value is a whole 32-bit number, as the scripts' numbers are (83, or 83.0 as a JSON writer may give it): 2.5,
+        "83", True are refused, not cut to a number the text did not say.
         """
         for name, value in constants.items():
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or not -2 ** 31 <= int(value) < 2 ** 31:
-                raise ValueError(f"constant {name}: a name and a 32-bit number, not {value}")
+            whole = not isinstance(value, bool) and (isinstance(value, int) or isinstance(value, float) and value.is_integer())
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or not whole or not -2 ** 31 <= value < 2 ** 31:
+                raise ValueError(f"constant {name}: a name and a whole 32-bit number, not {value!r}")
             self.constants[name] = int(value)
 
     def add_field(self, name, size, keyboard=None, letters=None):
@@ -1786,6 +1790,19 @@ class Pack:
             lines.append(f"#define {self.prefix}_GAME_{name_of(n)} {i}")
         if self.game:
             lines.append("")
+        # the game's constants (add_constants) for its C, as its scripts name them: the number itself (a negative one in
+        # parentheses, the least as C can write it)
+        constant_of, constant_line = {}, {}  # macro -> the constant's name, its line: for the clash below
+        for name, value in self.constants.items():
+            macro = f"{self.prefix}_{name_of(name)}"
+            if macro in constant_of:
+                raise ValueError(f"constant {name}: its name in the header, {macro}, is the constant {constant_of[macro]}'s too (names "
+                                 "alike in upper case); give one of them another name")
+            constant_of[macro] = name
+            constant_line[macro] = f"#define {macro} " + (str(value) if value >= 0 else f"({value})" if value > -2 ** 31 else "(-2147483647 - 1)")
+            lines.append(constant_line[macro])
+        if self.constants:
+            lines.append("")
         for g in self.graphs:
             for kind, names in (("EXIT", g.exit_names), ("ENTRY", g.entry_names), ("MAP", [m[0] for m in g.maps])):
                 for i, n in enumerate(names):
@@ -1857,6 +1874,10 @@ class Pack:
         for line in lines:
             if line.startswith("#define "):
                 macro = line.split()[1].split("(")[0]
+                if macro in seen and macro in constant_of:  # a constant is refused even with the same number: alike by chance
+                    other = line if seen[macro] == constant_line[macro] else seen[macro]  # the line of the other thing
+                    raise ValueError(f"constant {constant_of[macro]}: its name in the header, {macro}, is another thing's: {other!r}; "
+                                     "give the constant another name")
                 if macro in seen and seen[macro] != line:
                     raise ValueError(f"the header names two things {macro}: {seen[macro]!r} and {line!r} (names alike once letters "
                                      "other than A-Z and 0-9 are _)")

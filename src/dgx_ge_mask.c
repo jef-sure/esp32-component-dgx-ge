@@ -236,11 +236,12 @@ typedef struct {
     dgx_ge_rect_t bounds; /* of its active masks in the scene; empty: it meets nothing */
     uint16_t      owner, side;
     bool          used, changed;
+    uint8_t       damage; /* the param of its actor a hit's damage is taken off + 1, 0 none */
 } collider_t;
 
 struct dgx_ge_collisions {
     collider_t    *bodies;
-    const struct dgx_ge_actor **actors; /* the actor of each body, NULL none; NULL until one is given */
+    struct dgx_ge_actor **actors; /* the actor of each body, NULL none; NULL until one is given */
     uint16_t      *order; /* used bodies by the left of their bounds */
     int            capacity, count, tile;
     dgx_ge_meets_t meets;
@@ -318,7 +319,8 @@ void dgx_ge_collisions_set(dgx_ge_collisions_t *c, int handle, const dgx_ge_body
 void dgx_ge_collisions_remove(dgx_ge_collisions_t *c, int handle)
 {
     if (handle < 0 || handle >= c->capacity || !c->bodies[handle].used) return;
-    c->bodies[handle].used = false;
+    c->bodies[handle].used   = false;
+    c->bodies[handle].damage = 0;
     if (c->actors) c->actors[handle] = NULL;
     int kept = 0;
     for (int i = 0; i < c->count; ++i)
@@ -460,7 +462,7 @@ unsigned dgx_ge_collisions_touch_sides(const dgx_ge_collisions_t *c, const dgx_g
     return bits;
 }
 
-void dgx_ge_collisions_actor(dgx_ge_collisions_t *c, int handle, const struct dgx_ge_actor *actor)
+void dgx_ge_collisions_actor(dgx_ge_collisions_t *c, int handle, struct dgx_ge_actor *actor)
 {
     if (handle < 0 || handle >= c->capacity) return;
     if (!c->actors) {
@@ -471,9 +473,20 @@ void dgx_ge_collisions_actor(dgx_ge_collisions_t *c, int handle, const struct dg
     c->actors[handle] = actor;
 }
 
-const struct dgx_ge_actor *dgx_ge_collisions_actor_of(const dgx_ge_collisions_t *c, int handle)
+struct dgx_ge_actor *dgx_ge_collisions_actor_of(const dgx_ge_collisions_t *c, int handle)
 {
     return c->actors && handle >= 0 && handle < c->capacity ? c->actors[handle] : NULL;
+}
+
+void dgx_ge_collisions_damage(dgx_ge_collisions_t *c, int handle, int param)
+{
+    if (handle < 0 || handle >= c->capacity || !c->bodies[handle].used) return;
+    c->bodies[handle].damage = param >= 0 && param < 255 ? (uint8_t)(param + 1) : 0;
+}
+
+int dgx_ge_collisions_damage_of(const dgx_ge_collisions_t *c, int handle)
+{
+    return handle >= 0 && handle < c->capacity && c->bodies[handle].used ? c->bodies[handle].damage - 1 : -1;
 }
 
 int dgx_ge_collisions_nearest(const dgx_ge_collisions_t *c, int x, int y, int radius, uint16_t owner, dgx_ge_near_fn fn, void *ctx, int *dx,

@@ -118,7 +118,7 @@ int main(void)
     CHECK(dgx_ge_collisions_nearest(col, 30, 20, 50, 2, NULL, NULL, &ndx, &ndy) == 0 && ndx == -10);
     CHECK(dgx_ge_collisions_nearest(col, 30, 20, 5, 2, NULL, NULL, NULL, NULL) == -1);
     /* by what it is: only a body that is an actor counts; the actor is forgotten with its body */
-    const dgx_ge_actor_t *who = (const dgx_ge_actor_t *)&far; /* any address: the registry only keeps it */
+    dgx_ge_actor_t *who = (dgx_ge_actor_t *)(void *)&far; /* any address: the registry only keeps it */
     CHECK(dgx_ge_collisions_actor_of(col, 3) == NULL);
     dgx_ge_collisions_actor(col, 3, who);
     CHECK(dgx_ge_collisions_actor_of(col, 3) == who);

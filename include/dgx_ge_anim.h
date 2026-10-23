@@ -419,8 +419,15 @@ extern uint32_t *dgx_ge_dice;
  * game.<name> of an expression: a question to the game, by its number (the
  * names an animation declares with game, in their order), answered by the
  * game's function with its context, at the moment of the step; NULL: 0.
+ * who is the actor whose script asks: the one advanced or told, or the one an
+ * event reaches from inside another's step (the game's say telling it), each
+ * asking of itself. An actor the engine makes for a moment to play a script
+ * (a cell's life, a thing lying or in a pocket, a control of a dialog) asks as
+ * itself too: its params and kind are there, the pointer is good only while it
+ * asks. NULL: no actor asks (an expression of no actor: none the assembler
+ * makes asks the game).
  */
-typedef float (*dgx_ge_ask_fn)(int what, void *ctx);
+typedef float (*dgx_ge_ask_fn)(int what, const dgx_ge_actor_t *who, void *ctx);
 extern dgx_ge_ask_fn dgx_ge_expr_ask;
 extern void         *dgx_ge_expr_ask_ctx;
 
@@ -452,6 +459,35 @@ bool dgx_ge_actor_event(dgx_ge_actor_t *actor, int event, uint32_t now_ms, dgx_g
  * is paused.
  */
 void dgx_ge_actor_advance(dgx_ge_actor_t *actor, uint32_t now_ms, dgx_ge_anim_say_fn say, void *ctx);
+
+/* What the game says of a hit about to be sent: send it, pass it by, or send none more in this look. */
+typedef enum {
+    DGX_GE_HIT_SEND = 0,
+    DGX_GE_HIT_PASS = 1,
+    DGX_GE_HIT_STOP = 2,
+} dgx_ge_hit_verdict_t;
+
+/*
+ * A hit the actor of body by does to the actor of body on, as its script
+ * says (dgx_ge_actor_hit). The game may change it (no damage while one cannot
+ * be hurt) or judge it: a meeting that ends the round stops the rest.
+ */
+typedef dgx_ge_hit_verdict_t (*dgx_ge_hit_fn)(int by, dgx_ge_actor_t *actor, int on, dgx_ge_actor_t *other, dgx_ge_hit_t *hit, void *ctx);
+
+/*
+ * The hits of the frame: the registry looks at its bodies
+ * (dgx_ge_collisions_look), and for every pair of masks of two actors that
+ * met each does to the other what its script says, both ways, the lower
+ * body's first: the damage off the other's param (dgx_ge_collisions_damage),
+ * the event to the other, the recoil to itself, sent at now_ms with say and
+ * ctx. The meetings go by their bodies' handles, the lower first, then by
+ * their masks. What a hit does is read as it is sent, so an event sent before
+ * counts (a sheep that died bites no more). A body removed by what an event
+ * did, or given another actor, is not touched afterwards. fn (NULL: send
+ * every one) judges each hit, its ctx the same. Bodies that are no actors
+ * meet as the look has them and get nothing. How many hits were sent.
+ */
+int dgx_ge_collisions_hits(struct dgx_ge_collisions *c, uint32_t now_ms, dgx_ge_hit_fn fn, dgx_ge_anim_say_fn say, void *ctx);
 
 /* The value of an expression of the blobs (dgx_ge_anim.py, Expr) for an actor: its params, its pockets (count), now its last step. */
 float dgx_ge_actor_eval(const dgx_ge_actor_t *actor, const uint8_t *expr);

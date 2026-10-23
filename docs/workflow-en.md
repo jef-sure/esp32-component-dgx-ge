@@ -139,7 +139,7 @@ sys.path.insert(0, os.path.join(engine, "tools"))
 from dgx_ge_pack import Pack  # noqa: E402
 
 pack = Pack("MYGAME")
-pack.add_constants(STEP=3)              # a name the script writes for a number
+pack.add_constants(STEP=3, STRIDE=1)    # names the script writes for numbers, MYGAME_STEP in C too
 pack.add_game(walk_edge=12)             # a number the C reads: MYGAME_GAME_WALK_EDGE
 
 hero = pack.add_set("HERO", [(230, 80, 60), (250, 220, 120), (40, 40, 60)])
@@ -181,7 +181,7 @@ label stride
     frame HERO_STAND 120ms
     dx STEP
     add strides 1
-    signal 1                 # a stride made
+    signal STRIDE            # a stride made
     sound 0                  # the pack's first sound, STEP
     branch
     goto stride
@@ -204,7 +204,7 @@ The methods, each described in full in its docstring:
 | `add_image(name, set, w, h, values, bits)` | a picture from values, made by the script itself |
 | `add_mask`, `name_mask`, `add_meets` | collision masks of a picture, their names, which of them meet |
 | `add_point(image, name, x, y, z)` | a named point of a picture (a hand) |
-| `add_constants(**names)` | names of numbers the scripts and dialogs write |
+| `add_constants(**names)` | names of numbers the scripts and dialogs write; the C reads them as `<P>_<NAME>` |
 | `add_anim(name, text, path)`, `add_anims([...])` | a kind's script; kinds that sense one another, together |
 | `add_tileset(name, w, h, tiles, slots)` | a set of tiles and their rules |
 | `add_links`, `add_graph(Graph)` | a map's links; a graph of scenes (`tools/dgx_ge_graph.py`) |
@@ -258,7 +258,7 @@ A small document of a whole scene:
 {
   "format": "dgx-ge-sprites", "formatVersion": 1, "name": "mygame",
   "masks": [],
-  "constants": {"STEP": 3},
+  "constants": {"STEP": 3, "STRIDE": 1},
   "game": [{"name": "walk_edge", "value": 12}],
   "screen": {"width": 320, "height": 200},
   "sets": [
@@ -289,7 +289,7 @@ The format in outline, key by key:
 | --- | --- |
 | `format`, `formatVersion` | `"dgx-ge-sprites"`, 1; anything else is refused |
 | `masks`, `meets` | the names of mask indices (`<PREFIX>_MASK_<NAME>`); which masks meet, as `add_meets` text |
-| `constants` | `add_constants`: names of numbers for the scripts and dialogs |
+| `constants` | `add_constants`: names of numbers for the scripts and dialogs, and `<PREFIX>_<NAME>` for the C |
 | `sets` | a set of colors each; its `frames` pictures `<SET>_<FILE>` (or a frame's `packName`) with `origin`, drawn `masks` (rows of hex), `points`; `defaultMask`: a mask made of a picture's own pixels where none is drawn |
 | `palettes` | sets of colors with no pictures, named as sets |
 | `tilesets` | `add_tileset`: tiles and their pieces, which name pictures by set and file; a piece's `layer` becomes a slot |
@@ -401,8 +401,9 @@ translation that shows a `{name}` its line does not have. Others: a
 picture whose value has no color in its set, the frames of a set that disagree
 on a color, two names that make the same name of the header (`stand-1` and
 `stand_1`), a blob named like one the packer makes itself (`STRINGS`, `GAME`,
-`TIMERS`, `STYLES`, `CHASE`, `SOUNDS`), a sound given samples twice, a timer
-read and never described.
+`TIMERS`, `STYLES`, `CHASE`, `SOUNDS`), a constant whose header name is
+another thing's or whose value is not a whole number, a sound given samples
+twice, a timer read and never described.
 Every one of them would otherwise be a game misbehaving on a board; here it is
 a line to fix before anything is built.
 
@@ -470,6 +471,7 @@ The families of names:
 | `<P>_<KIND>_SCRIPT_<s>`, `_EVENT_<e>`, `_PARAM_<p>`, `_GAME_<q>` | a kind's scripts, events, params, questions to the game |
 | `<P>_EVENT_<e>` | the pack's events, one number for every kind |
 | `<P>_GAME_<NAME>`, `<P>_TIMER_<NAME>`, `<P>_SOUND_<NAME>` | the game's constants, timers, sounds |
+| `<P>_<NAME>` | the names of numbers the scripts write (`add_constants`, a document's `constants`), with the number itself |
 | `<P>_MASK_<NAME>`, `<P>_POINT_<NAME>` | masks and points |
 | `<P>_<TILESET>_TILE_<t>`, `_SLOT_<s>` | tiles (from 1; 0 is empty) and slots |
 | `<P>_<GRAPH>_EXIT_`, `_ENTRY_`, `_MAP_` | names of the scene graph |
@@ -664,7 +666,7 @@ extern const uint8_t pack_end[] asm("_binary_mygame_pack_end");
 static void say(dgx_ge_actor_t *actor, dgx_ge_anim_say_t what, uint8_t value, uint32_t at_ms, void *ctx)
 {
     if (what == DGX_GE_ANIM_SOUND) dgx_ge_sound_play(&sound, value);
-    if (what == DGX_GE_ANIM_SIGNAL && value == SIGNAL_STRIDE) ++strides;
+    if (what == DGX_GE_ANIM_SIGNAL && value == MYGAME_STRIDE) ++strides;
 }
 
 void app_main(void)

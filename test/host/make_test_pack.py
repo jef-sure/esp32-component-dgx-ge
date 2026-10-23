@@ -237,6 +237,16 @@ script lazy                           # and, or, ?: lazy: the dice cast only for
     set power game.near > 2 ? 7 : rnd(1000)
     hold
 
+script whoami                         # each asks of itself; between, a signal: the game may tell another meanwhile
+    set action game.near
+    signal 9
+    set hp game.near
+    hold
+
+script told                           # told from inside another's signal, it asks of itself too
+    set power game.near
+    hold
+
 script stick                          # the pad of the game's input: the sticks -1..1, a trigger 0..1
     set action axis(lx) * 100
     set hp axis(ly) * 100
@@ -261,6 +271,7 @@ on landed: glass -> broken now
 on fell: walker -> fall now
 on landed: walker -> edge_stand now
 on landed: plunge -> edge_stand now
+on jump: whoami -> told now
 """)
 # a set of tiles of 8 x 8: a block solid all round, a floor solid at its top drawn before the people
 pack.add_tileset("TILES", 8, 8, [
@@ -911,6 +922,76 @@ script tick                           # a frame of 166 ms for ever: half an hour
 
 on go: caller -> gone now
 on go: runner -> gone now
+""")
+
+# walked from cell to cell (dgx_ge_walk_bind_t): told the side it goes and standing, each script says so as it begins
+pack.add_anim("GRIDDER", """
+event left, right, up, down, stop, drift
+param speed 20480                     # 80 points a second
+param way -1
+
+script stand
+    frame ONE 1000ms
+    hold
+
+script left
+    signal 0
+    frame ONE 1000ms
+    hold
+
+script right
+    signal 1
+    frame ONE 1000ms
+    hold
+
+script up
+    signal 2
+    frame ONE 1000ms
+    hold
+
+script down
+    signal 3
+    frame ONE 1000ms
+    hold
+
+script still
+    signal 4
+    frame ONE 1000ms
+    hold
+
+script drift                          # moves itself: the binding moves it while bound
+    velocity 0 50
+    frame ONE 1000ms
+    hold
+
+group any: stand, left, right, up, down, still, drift
+on left: any -> left now
+on right: any -> right now
+on up: any -> up now
+on down: any -> down now
+on stop: any -> still now
+on drift: any -> drift now
+""")
+# two that bite each other (dgx_ge_collisions_hits): the jaws of one on the body of the other, damage, an event to it, a
+# recoil to itself; each tells the game what it got (signal 1 struck, 2 bounced)
+pack.add_anim("BRAWLER", """
+event struck, bounced
+param hp 10
+
+script stand
+    masks 1 2
+    hit 2 on 1 damage 3 event struck recoil bounced
+    frame WOLFP 1000ms
+    goto stand
+script hurt
+    signal 1
+    goto stand
+script back
+    signal 2
+    goto stand
+
+on struck: stand -> hurt now
+on bounced: stand -> back now
 """)
 pack.write(sys.argv[1], sys.argv[2])
 

@@ -202,9 +202,24 @@ static void clock_tests(const dgx_ge_pack_t *pack)
 }
 
 /* The questions of the test's game: far (0) is 21, near (1) what ctx says. */
-static float answer(int what, void *ctx)
+static float answer(int what, const dgx_ge_actor_t *who, void *ctx)
 {
     return what == 0 ? 21.0f : what == 1 ? (float)*(const int *)ctx : 0.0f;
+}
+
+/* The game that answers each asker of itself: game.near is where the one asking stands (x), the context counts the asks. */
+static float whose(int what, const dgx_ge_actor_t *who, void *ctx)
+{
+    ++*(int *)ctx;
+    return what == 1 && who ? (float)dgx_ge_actor_x(who) : -1.0f;
+}
+
+/* Its say: signal 9 of the one at 10 tells the other (jump) at that moment, from inside the step. */
+static dgx_ge_actor_t *other_asker;
+
+static void whose_say(dgx_ge_actor_t *a, dgx_ge_anim_say_t what, uint8_t value, uint32_t at_ms, void *ctx)
+{
+    if (what == DGX_GE_ANIM_SIGNAL && value == 9 && dgx_ge_actor_x(a) == 10 && other_asker) dgx_ge_actor_event(other_asker, TEST_HERO_EVENT_JUMP, at_ms, whose_say, ctx);
 }
 
 int main(int argc, char **argv)
@@ -217,7 +232,7 @@ int main(int argc, char **argv)
     const uint8_t *blob = dgx_ge_pack_blob(&pack, TEST_BLOB_HERO, &n);
     dgx_ge_anim_t  anim;
     CHECK(blob && dgx_ge_anim_open(&anim, blob, n));
-    CHECK(anim.scripts == 27 && anim.events == 6 && anim.params == 3);
+    CHECK(anim.scripts == 29 && anim.events == 6 && anim.params == 3);
 
     /* a run: frames at their times, the moves between them */
     dgx_ge_actor_t a;
@@ -629,6 +644,27 @@ int main(int argc, char **argv)
     dgx_ge_actor_advance(&asker, 0, say, NULL);
     CHECK(asker.params[TEST_HERO_PARAM_ACTION] == 0);
     dgx_ge_dice = dice;
+
+    /*
+     * who asks: two of one kind, at 10 and at 20, each told where it stands; the one at 20 asks first (20, 20), then the
+     * one at 10 tells it from inside its step (its signal): told, it asks as itself (20), and the one at 10 goes on as
+     * itself (10, 10); four asks and one, none without an asker
+     */
+    dgx_ge_actor_t first, second;
+    int            asks = 0;
+    dgx_ge_expr_ask     = whose;
+    dgx_ge_expr_ask_ctx = &asks;
+    dgx_ge_actor_start(&first, &anim, TEST_HERO_SCRIPT_WHOAMI, 10, 0, 0);
+    dgx_ge_actor_start(&second, &anim, TEST_HERO_SCRIPT_WHOAMI, 20, 0, 0);
+    other_asker = &second;
+    dgx_ge_actor_advance(&second, 0, whose_say, NULL);
+    CHECK(second.params[TEST_HERO_PARAM_ACTION] == 20 && second.params[TEST_HERO_PARAM_HP] == 20 && second.script == TEST_HERO_SCRIPT_WHOAMI);
+    dgx_ge_actor_advance(&first, 0, whose_say, NULL);
+    CHECK(second.script == TEST_HERO_SCRIPT_TOLD && second.params[TEST_HERO_PARAM_POWER] == 20);
+    CHECK(first.params[TEST_HERO_PARAM_ACTION] == 10 && first.params[TEST_HERO_PARAM_HP] == 10 && asks == 5);
+    other_asker         = NULL;
+    dgx_ge_expr_ask     = NULL;
+    dgx_ge_expr_ask_ctx = NULL;
 
     /* axis(): the pad of the input the game gave, -1..1 (half to the right, all the way up, a trigger pulled); none: 0 */
     dgx_ge_input_t pad = {0};

@@ -12,7 +12,7 @@ CFLAGS  += -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
 PYTHON  ?= python3
 BUILD   := build
 
-TESTS := test_pack test_scene test_frame test_anim test_mask test_tiles test_world test_save test_widgets test_shots test_pockets test_cells test_graph test_timers test_show test_chase test_walk test_dialog test_text test_label test_sound test_mixer test_talk_view test_crowd test_input test_layout test_host_nvs
+TESTS := test_pack test_scene test_frame test_anim test_mask test_tiles test_world test_save test_widgets test_shots test_pockets test_cells test_graph test_timers test_show test_chase test_walk test_walk_bind test_dialog test_text test_label test_sound test_mixer test_talk_view test_crowd test_input test_layout test_host_nvs test_hits
 
 # what of DGX the engine stands on, as DGX gives it for a computer (DGX 0.8: host/dgx_host.mk, its sources by group, the
 # stubs of ESP-IDF); its fonts each test names
@@ -64,6 +64,9 @@ run-test_show: $(BUILD)/test_show $(BUILD)/test.pack
 run-test_crowd: $(BUILD)/test_crowd $(BUILD)/test.pack
 	./$(BUILD)/test_crowd $(BUILD)/test.pack
 
+run-test_hits: $(BUILD)/test_hits $(BUILD)/test.pack
+	./$(BUILD)/test_hits $(BUILD)/test.pack
+
 run-test_layout: $(BUILD)/test_layout $(BUILD)/layout/layout.pack
 	./$(BUILD)/test_layout $(BUILD)/layout/layout.pack
 
@@ -72,6 +75,9 @@ run-test_chase: $(BUILD)/test_chase $(BUILD)/test.pack
 
 run-test_walk: $(BUILD)/test_walk
 	./$(BUILD)/test_walk
+
+run-test_walk_bind: $(BUILD)/test_walk_bind $(BUILD)/test.pack
+	./$(BUILD)/test_walk_bind $(BUILD)/test.pack
 
 run-test_dialog: $(BUILD)/test_dialog $(BUILD)/test.pack
 	./$(BUILD)/test_dialog $(BUILD)/test.pack
@@ -140,6 +146,9 @@ $(BUILD)/test_mask: test_mask.c $(ROOT)/src/dgx_ge_mask.c $(ROOT)/src/dgx_ge_pac
 $(BUILD)/test_anim: test_anim.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_anim.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c -lm -o $@
 
+$(BUILD)/test_hits: test_hits.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) test_hits.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c -lm -o $@
+
 # a sheet of the pictures of a pack, to look at: build/pack_sheet <pack> <first> <count> <set> <out.ppm>
 $(BUILD)/pack_sheet: pack_sheet.c $(ROOT)/src/dgx_ge_pack.c $(ROOT)/src/dgx_ge_image.c $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) pack_sheet.c $(ROOT)/src/dgx_ge_pack.c $(ROOT)/src/dgx_ge_image.c $(DGX_SRCS) -lm -o $@
@@ -206,8 +215,12 @@ $(BUILD)/test_show: test_show.c $(ROOT)/src/dgx_ge_show.c $(ANIM_SRCS) $(ROOT)/s
 $(BUILD)/test_chase: test_chase.c $(ROOT)/src/dgx_ge_chase.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_chase.c $(ROOT)/src/dgx_ge_chase.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
 
-$(BUILD)/test_walk: test_walk.c $(ROOT)/src/dgx_ge_walk.c $(HEADERS) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) test_walk.c $(ROOT)/src/dgx_ge_walk.c -o $@
+# the walker moves an actor bound to it: the scripts go with it
+$(BUILD)/test_walk: test_walk.c $(ROOT)/src/dgx_ge_walk.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(HEADERS) | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) test_walk.c $(ROOT)/src/dgx_ge_walk.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c -lm -o $@
+
+$(BUILD)/test_walk_bind: test_walk_bind.c $(ROOT)/src/dgx_ge_walk.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
+	$(CC) $(CPPFLAGS) $(CFLAGS) test_walk_bind.c $(ROOT)/src/dgx_ge_walk.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c -lm -o $@
 
 $(BUILD)/test_dialog: test_dialog.c $(ROOT)/src/dgx_ge_dialog.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_dialog.c $(ROOT)/src/dgx_ge_dialog.c $(ANIM_SRCS) $(ROOT)/src/dgx_ge_expr.c $(ROOT)/src/dgx_ge_pack.c -lm -o $@

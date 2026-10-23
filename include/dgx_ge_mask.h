@@ -180,13 +180,32 @@ unsigned dgx_ge_collisions_touch_sides(const dgx_ge_collisions_t *c, const dgx_g
 
 /*
  * The actor a body is (NULL: none), for those who look for it by what it is:
- * its kind, its params (sense). Kept until the body is removed. The first
- * actor given makes room for a pointer a body; a registry never given one
- * costs nothing more.
+ * its kind, its params (sense), and for the hits sent to it
+ * (dgx_ge_collisions_hits). Kept until the body is removed. The first actor
+ * given makes room for a pointer a body; a registry never given one costs
+ * nothing more.
  */
 struct dgx_ge_actor;
-void                       dgx_ge_collisions_actor(dgx_ge_collisions_t *c, int handle, const struct dgx_ge_actor *actor);
-const struct dgx_ge_actor *dgx_ge_collisions_actor_of(const dgx_ge_collisions_t *c, int handle);
+void                 dgx_ge_collisions_actor(dgx_ge_collisions_t *c, int handle, struct dgx_ge_actor *actor);
+struct dgx_ge_actor *dgx_ge_collisions_actor_of(const dgx_ge_collisions_t *c, int handle);
+
+/*
+ * The body of an actor, as it is drawn: its picture of pack, where it stands
+ * (its place and the picture's offset, mirrored with it), its turn, its
+ * active masks; of an owner and a side (dgx_ge_collisions_set). One that
+ * shows no picture is removed. The registry keeps the actor. Given again
+ * every frame, it is looked at only when something of it has changed.
+ */
+void dgx_ge_collisions_set_actor(dgx_ge_collisions_t *c, int handle, const dgx_ge_pack_t *pack, struct dgx_ge_actor *actor, uint16_t owner,
+                                 uint16_t side);
+
+/*
+ * The param of a body's actor that a hit's damage is taken off (-1: none, as
+ * a body starts), as dgx_ge_collisions_hits sends hits. Kept until the body
+ * is removed; a body not in the registry takes none.
+ */
+void dgx_ge_collisions_damage(dgx_ge_collisions_t *c, int handle, int param);
+int  dgx_ge_collisions_damage_of(const dgx_ge_collisions_t *c, int handle);
 
 /* Does a body count (its handle, its actor or NULL)? */
 typedef bool (*dgx_ge_near_fn)(int handle, const struct dgx_ge_actor *actor, void *ctx);

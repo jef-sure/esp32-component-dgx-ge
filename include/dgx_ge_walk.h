@@ -6,6 +6,8 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "dgx_ge_anim.h"
+
 /*
  * Walking a grid: from the middle of a cell to the middle of the next, at a
  * speed (points a second), as in a maze (Pac-Man), a board (Bomberman,
@@ -85,6 +87,67 @@ void dgx_ge_walk_xy(const dgx_ge_walker_t *walker, const dgx_ge_walk_grid_t *gri
  * down, right. -1 when nothing is open.
  */
 int dgx_ge_walk_toward(const dgx_ge_walker_t *walker, const dgx_ge_walk_grid_t *grid, int target_col, int target_row);
+
+/*
+ * A walker bound to an actor: the walker moves it, as a maze game's runner
+ * and its chasers. Kept beside the actor, not in it: an actor that walks no
+ * grid pays nothing (a binding is 16 bytes more than its walker).
+ *
+ * While bound (actor not NULL) the binding is the actor's mover: each play
+ * (and want) puts the actor where the walker is, at the walker's moment, at
+ * its velocity along the way (diagonal while it cuts a corner), so between
+ * the calls it goes on smoothly by itself; a path or a velocity of its
+ * script is overwritten there. At every middle of a cell it is put there at
+ * that moment, advanced to it first, before the game hears arrive (an
+ * event the game tells it then begins where it is). To let its script move
+ * it (into a house in the maze, a jump), unbind it (actor = NULL, in arrive
+ * too: from that moment on the binding does not touch it, it goes on at
+ * the velocity it was last given till its script moves it; the walker
+ * walks alone) and start it again from where the script left it.
+ *
+ * What it is told: the side it goes, as it changes, at the moment it
+ * changes (the middle where it turned, the moment of want): the event
+ * turn + side (DGX_GE_SIDE_*: its scripts face that way), and the side in
+ * the param way. With way the side is told when it differs from the param
+ * (its scripts may set it), else from the side told last. Standing, the
+ * event stop, once; after a stop told, the side it goes is told again.
+ * Its speed: the param speed (points a second x 256) is taken at every
+ * middle, before arrive (so the game may set another there). -1: none of
+ * them (the game sets walker.speed itself).
+ */
+typedef struct {
+    dgx_ge_walker_t walker;
+    dgx_ge_actor_t *actor;  /* bound to, NULL none */
+    int16_t         dx, dy; /* where the grid's corner is in the scene, points: the actor is at the walker's point moved so */
+    int16_t         turn;   /* the event of the side it goes: turn + side, -1 none */
+    int16_t         stop;   /* the event of standing, -1 none */
+    int8_t          speed;  /* the param of its speed, -1 none */
+    int8_t          way;    /* the param of the side it goes, -1 none */
+    int8_t          side;   /* the side told last, -1 none since the start (the way it goes, or went last) */
+    bool            stood;  /* stop told since */
+} dgx_ge_walk_bind_t;
+
+/*
+ * Bound to an actor from where it is: the cell its point is in (its place
+ * less dx, dy), going a side from there (DGX_GE_WALK_STILL: standing), the
+ * actor's place kept to the point. Short of the cell's middle on that side,
+ * it is past the middle of the cell behind (it hears arrive at its own);
+ * off the line of the middles across its way, it goes to it as it goes on,
+ * as out of a corner. Its speed the param's (or walker.speed as it is), its
+ * corner and kind kept. Nothing is told yet: the side at the first play.
+ */
+void dgx_ge_walk_bind_start(dgx_ge_walk_bind_t *bind, dgx_ge_actor_t *actor, const dgx_ge_walk_grid_t *grid, int side, uint32_t now_ms);
+
+/*
+ * On to now as dgx_ge_walk_play, the actor put and told as it goes; ctx is
+ * given to arrive and to say (what the actor's steps tell the game).
+ */
+void dgx_ge_walk_bind_play(dgx_ge_walk_bind_t *bind, const dgx_ge_walk_grid_t *grid, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive,
+                           dgx_ge_anim_say_fn say, void *ctx);
+
+/* A side asked for at a moment, as dgx_ge_walk_want, the actor put and told. */
+void dgx_ge_walk_bind_want(dgx_ge_walk_bind_t *bind, const dgx_ge_walk_grid_t *grid, int side, uint32_t now_ms, dgx_ge_walk_arrive_fn arrive,
+                           dgx_ge_anim_say_fn say, void *ctx);
 
 #ifdef __cplusplus
 }

@@ -26,7 +26,7 @@
  * of the one a sense found (dgx_ge_expr_its): its param k, or below
  * ITS_VX and on: its velocity, picture, script, turn, a cell's tile,
  * modifier, number; 0 when nothing is found or it has none. GAME u8: the
- * game's answer to its question of that number (dgx_ge_expr_ask; none: 0).
+ * game's answer to its question of that number, asked by who (dgx_ge_expr_ask; none: 0).
  * AXIS u8: an axis of the pad of the input the game gave (dgx_ge_expr_input:
  * DGX_GE_AXIS_*), -1..1 (a trigger 0..1); no input, no such axis: 0.
  *
@@ -62,11 +62,12 @@ typedef struct {
 extern const dgx_ge_its_t *dgx_ge_expr_its;
 
 /* How many of a kind (a blob of the pack) one has: count(KIND); kind 0xFFFF: how many it is itself (amount). */
-typedef int (*dgx_ge_expr_count_fn)(const void *who, unsigned kind);
+typedef int (*dgx_ge_expr_count_fn)(const dgx_ge_actor_t *who, unsigned kind);
 
 /*
  * What an expression reads beside its code: its params, words (NULL: none), the tables of its animation (NULL: none),
- * the time t, a velocity vx, vy, a place x, y, the moment now (ms), counts of kinds (NULL: 0). Made once by whoever
+ * the time t, a velocity vx, vy, a place x, y, the moment now (ms), counts of kinds (NULL: 0), the actor whose expression
+ * it is (NULL: none; who asks game.<name>). Made once by whoever
  * works out several expressions of one owner (the pieces of a cell, a path's four): a call takes a pointer, not
  * fifteen numbers (past the sixth, a number of a call goes through the stack of an Xtensa).
  */
@@ -80,7 +81,7 @@ typedef struct {
     float                t, vx, vy, x, y;
     uint32_t             now_ms;
     dgx_ge_expr_count_fn count;
-    const void          *who;
+    const dgx_ge_actor_t *who;
 } dgx_ge_expr_ctx_t;
 
 /* The value of an expression at p, of what c gives; 0 when it is broken. */

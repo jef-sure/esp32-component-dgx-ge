@@ -238,6 +238,7 @@ check(fourth[14] == 3 and fourth[19:21] == (4, 2) and fourth[15] == 0 and fourth
 check(pack.points == {(0, 0): (4, -1, 1), (0, 1): (-1, -1, -2)}, f"the points of hit-1, z 1 unless given {pack.points}")
 header = pack.header("T")
 check("#define T_POINT_HAND 0" in header and "#define T_POINT_BACK 1" in header, "names of points")
+check("#define T_STEP 100" in header, "the file's constants in the header")
 check("#define T_STONE_TILE_LEDGE 2" in header and "#define T_STONE_SLOT_FRONT 1" in header, "names of tiles and slots")
 blob = pack.build()
 check(struct.unpack_from("<H", blob, 18)[0] == 3, "three masks in the pack")

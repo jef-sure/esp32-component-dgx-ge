@@ -258,41 +258,25 @@ static void settle(dgx_ge_crowd_t *c)
     }
 }
 
-/* What a mask of one does to the other as its script says: the event for the other, the recoil for itself, the damage off the other's param. */
-static void struck(dgx_ge_crowd_t *c, int by, int mask, int on, int on_mask)
+/* A hit between two of the crowd: none on one gone, or by it (it is seen until the play is over, but does nothing). */
+static dgx_ge_hit_verdict_t living(int by, dgx_ge_actor_t *a, int on, dgx_ge_actor_t *b, dgx_ge_hit_t *hit, void *ctx)
 {
-    dgx_ge_member_t *a = &c->members[by], *b = &c->members[on];
-    dgx_ge_hit_t     hit;
-    if (a->kind == DGX_GE_CROWD_FREE || b->kind == DGX_GE_CROWD_FREE || a->gone || b->gone || !dgx_ge_actor_hit(&a->actor, mask, on_mask, &hit)) return;
-    const uint8_t p = kind_at(c, b->entry)[5];
-    if (hit.damage && p != NO_PARAM && p < b->actor.anim->params) {
-        b->actor.params[p] = dgx_ge_param((int64_t)b->actor.params[p] - hit.damage);
-    }
-    if (hit.event >= 0) dgx_ge_actor_event(&b->actor, hit.event, c->now_ms, said, c);
-    if (hit.recoil >= 0) dgx_ge_actor_event(&a->actor, hit.recoil, c->now_ms, said, c);
+    (void)by, (void)on, (void)hit, (void)ctx;
+    return ((dgx_ge_member_t *)(void *)a)->gone || ((dgx_ge_member_t *)(void *)b)->gone ? DGX_GE_HIT_PASS : DGX_GE_HIT_SEND;
 }
 
-static void met(int ha, int ia, int hb, int ib, const dgx_ge_area_t *areas, int count, void *ctx)
-{
-    (void)areas, (void)count;
-    struck(ctx, ha, ia, hb, ib);
-    struck(ctx, hb, ib, ha, ia);
-}
-
-/* The bodies as they are now: a place showing a picture is a body, its owner the place, its side its kind's. */
+/* The bodies as they are now: a place showing a picture is a body, its owner the place, its side its kind's, its damage off its kind's param. */
 static void bodies(dgx_ge_crowd_t *c)
 {
     for (int i = 0; i < c->places; ++i) {
-        const dgx_ge_member_t *m = &c->members[i];
-        if (m->kind == DGX_GE_CROWD_FREE || m->actor.image < 0) {
+        dgx_ge_member_t *m = &c->members[i];
+        if (m->kind == DGX_GE_CROWD_FREE) {
             dgx_ge_collisions_remove(c->bodies, i);
             continue;
         }
-        int ox, oy;
-        origin_of(&m->actor, m->actor.x, m->actor.y, &ox, &oy);
-        const dgx_ge_body_t body = {c->pack, m->actor.image, ox, oy, m->actor.flip, m->actor.masks};
-        dgx_ge_collisions_set(c->bodies, i, &body, (uint16_t)(i + 1), u16_at(kind_at(c, m->entry) + 2));
-        dgx_ge_collisions_actor(c->bodies, i, &m->actor);
+        const uint8_t *k = kind_at(c, m->entry);
+        dgx_ge_collisions_set_actor(c->bodies, i, c->pack, &m->actor, (uint16_t)(i + 1), u16_at(k + 2));
+        dgx_ge_collisions_damage(c->bodies, i, k[5] == NO_PARAM ? -1 : k[5]);
     }
 }
 
@@ -306,7 +290,7 @@ void dgx_ge_crowd_play(dgx_ge_crowd_t *c, uint32_t now_ms, dgx_ge_anim_say_fn sa
         if (c->members[i].kind != DGX_GE_CROWD_FREE && !c->members[i].gone) dgx_ge_actor_advance(&c->members[i].actor, now_ms, said, c);
     settle(c);
     bodies(c);
-    dgx_ge_collisions_look(c->bodies, met, c);
+    dgx_ge_collisions_hits(c->bodies, now_ms, living, said, c);
     settle(c);
     bodies(c);
     c->say = NULL, c->say_ctx = NULL;

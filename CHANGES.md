@@ -1,5 +1,43 @@
 # Changes
 
+## 0.3.0 - 2026-10-23
+
+Four pieces of glue a maze game had to write in C, now the engine's. A minor version: the game's answer to `game.<name>` takes one more parameter.
+
+- **Changed (breaking): the game's answer to `game.<name>` is told who
+  asks:** `dgx_ge_ask_fn(what, who, ctx)`, `who` the actor whose script
+  asks (the one advanced or sent an event, one an event reaches from inside
+  another's step, an actor the engine makes for a moment to play a script:
+  a cell's life, a thing, a control of a dialog, valid only during the
+  call); NULL when no actor asks. One function answers every actor of a
+  kind about itself, with no context swapped around each call.
+- **The pack's header gives the game's constants to C:** `#define
+  <PREFIX>_<NAME> <number>` for each of `Pack.add_constants` and a
+  document's `constants` (a negative number in parentheses). A constant
+  whose header name is another thing's, or another constant's, is refused,
+  naming the constant. `add_constants` takes whole 32-bit numbers only
+  (`83`, or `83.0` from JSON): `2.5`, `"83"` and `True` are refused instead
+  of being cut by `int()`.
+- **A walker bound to an actor** (`dgx_ge_walk_bind_t`,
+  `dgx_ge_walk_bind_start`, `_play`, `_want`): the actor is put at the
+  walker's point at its moment with its velocity along the way, so it moves
+  smoothly between calls; it is told the side it goes as that changes, at
+  that moment (`turn + side`, optionally into a param), and `stop` once when
+  it stands; its speed comes from a param at each cell's middle; it starts
+  from where the actor stands, even between cells. While bound the binding
+  moves the actor; `actor = NULL` unbinds it, from arrive too. 16 bytes
+  beside the walker on a 32-bit chip; nothing in the actor.
+- **`dgx_ge_collisions_hits()`**: one call a frame sends the `hit` lines of
+  the actors whose masks met, both ways (damage off the param named by
+  `dgx_ge_collisions_damage()`, the event to the one met, the recoil to
+  itself), in the order of the bodies' handles, then masks; an optional
+  function of the game changes a hit, passes it by or stops the rest; a body
+  removed by an event is not touched again. `dgx_ge_collisions_set_actor()`
+  puts an actor's body in as it is drawn and keeps the actor.
+  `dgx_ge_collisions_actor()` takes, and `_actor_of()` returns, a non-const
+  actor. The crowd sends its hits so too: meetings of one frame now go in
+  the order of the bodies' handles.
+
 ## 0.2.0 - 2026-10-22
 
 Fixes after a review of 0.1.1, each with a host test that fails without it.

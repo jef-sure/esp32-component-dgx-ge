@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -180,9 +181,8 @@ bool dgx_ge_anim_open(dgx_ge_anim_t *anim, const void *data, size_t size)
     return true;
 }
 
-static int count_of(const void *who, unsigned kind)
+static int count_of(const dgx_ge_actor_t *a, unsigned kind)
 {
-    const dgx_ge_actor_t *a = who;
     if (kind == 0xFFFF) return a->amount;
     return a->pockets ? dgx_ge_pockets_count(a->pockets, (int)kind) : 0;
 }
@@ -1171,6 +1171,120 @@ bool dgx_ge_actor_hit(const dgx_ge_actor_t *a, int mask, int on_mask, dgx_ge_hit
         return true;
     }
     return false;
+}
+
+/* ---- the hits of the bodies of actors ---- */
+
+void dgx_ge_collisions_set_actor(struct dgx_ge_collisions *c, int handle, const dgx_ge_pack_t *pack, dgx_ge_actor_t *a, uint16_t owner,
+                                 uint16_t side)
+{
+    if (a->image < 0) {
+        dgx_ge_collisions_remove(c, handle);
+        return;
+    }
+    const dgx_ge_body_t body = {pack, a->image, dgx_ge_actor_x(a) + (a->flip ? -a->image_dx : a->image_dx), dgx_ge_actor_y(a) + a->image_dy, a->flip,
+                                a->masks};
+    dgx_ge_collisions_set(c, handle, &body, owner, side);
+    dgx_ge_collisions_actor(c, handle, a);
+}
+
+/* A pair of masks of two actors met: the bodies (a the lower), their masks, their actors as they were looked at. */
+typedef struct {
+    uint16_t        a, b;
+    uint8_t         mask_a, mask_b;
+    dgx_ge_actor_t *actor_a, *actor_b;
+} meeting_t;
+
+#define MEETINGS_AT_HAND 8 /* so many need no heap */
+
+typedef struct {
+    const struct dgx_ge_collisions *c;
+    meeting_t                      *list;
+    meeting_t                       at_hand[MEETINGS_AT_HAND];
+    int                             count, room;
+    bool                            lost;
+} meetings_t;
+
+static void meeting(int ha, int ia, int hb, int ib, const dgx_ge_area_t *areas, int count, void *ctx)
+{
+    (void)areas, (void)count;
+    meetings_t     *m  = ctx;
+    dgx_ge_actor_t *aa = dgx_ge_collisions_actor_of(m->c, ha), *ab = dgx_ge_collisions_actor_of(m->c, hb);
+    if (!aa || !ab) return; /* a body that is no actor has nothing to send or take */
+    if (m->count == m->room) {
+        meeting_t *more = malloc((size_t)m->room * 2 * sizeof(meeting_t));
+        if (!more) {
+            m->lost = true;
+            return;
+        }
+        memcpy(more, m->list, (size_t)m->count * sizeof(meeting_t));
+        if (m->list != m->at_hand) free(m->list);
+        m->list = more, m->room *= 2;
+    }
+    m->list[m->count++] = ha < hb ? (meeting_t){(uint16_t)ha, (uint16_t)hb, (uint8_t)ia, (uint8_t)ib, aa, ab}
+                                  : (meeting_t){(uint16_t)hb, (uint16_t)ha, (uint8_t)ib, (uint8_t)ia, ab, aa};
+}
+
+static int meeting_order(const void *x, const void *y)
+{
+    const meeting_t *p = x, *q = y;
+    if (p->a != q->a) return p->a < q->a ? -1 : 1;
+    if (p->b != q->b) return p->b < q->b ? -1 : 1;
+    if (p->mask_a != q->mask_a) return p->mask_a < q->mask_a ? -1 : 1;
+    return p->mask_b < q->mask_b ? -1 : p->mask_b > q->mask_b;
+}
+
+typedef struct {
+    struct dgx_ge_collisions *c;
+    uint32_t                  now_ms;
+    dgx_ge_hit_fn             fn;
+    dgx_ge_anim_say_fn        say;
+    void                     *ctx;
+    int                       sent;
+} sending_t;
+
+/* Is the actor still the one of its body? */
+static bool still(const struct dgx_ge_collisions *c, int handle, const dgx_ge_actor_t *a)
+{
+    return dgx_ge_collisions_actor_of(c, handle) == a;
+}
+
+/* What a mask of one does to a mask of the other as its script says now; false: the game stopped the hits. */
+static bool strike(sending_t *s, int by, dgx_ge_actor_t *a, int mask, int on, dgx_ge_actor_t *b, int on_mask)
+{
+    dgx_ge_hit_t hit;
+    if (!still(s->c, by, a) || !still(s->c, on, b) || !dgx_ge_actor_hit(a, mask, on_mask, &hit)) return true;
+    if (s->fn) {
+        const dgx_ge_hit_verdict_t v = s->fn(by, a, on, b, &hit, s->ctx);
+        if (v == DGX_GE_HIT_STOP) return false;
+        if (v != DGX_GE_HIT_SEND) return true;
+    }
+    if (still(s->c, on, b)) {
+        const int p = dgx_ge_collisions_damage_of(s->c, on);
+        if (hit.damage && p >= 0 && p < b->anim->params) b->params[p] = dgx_ge_param((int64_t)b->params[p] - hit.damage);
+        if (hit.event >= 0) dgx_ge_actor_event(b, hit.event, s->now_ms, s->say, s->ctx);
+    }
+    if (hit.recoil >= 0 && still(s->c, by, a)) dgx_ge_actor_event(a, hit.recoil, s->now_ms, s->say, s->ctx);
+    ++s->sent;
+    return true;
+}
+
+int dgx_ge_collisions_hits(struct dgx_ge_collisions *c, uint32_t now_ms, dgx_ge_hit_fn fn, dgx_ge_anim_say_fn say, void *ctx)
+{
+    /* the meetings first, all of them: the events sent may change the bodies, and the order is by handles, not as the look finds them */
+    meetings_t m = {.c = c, .room = MEETINGS_AT_HAND};
+    m.list       = m.at_hand;
+    dgx_ge_collisions_look(c, meeting, &m);
+    if (m.lost) ESP_LOGE("dgx-ge", "hits: no memory for more than %d meetings, the rest not sent", m.count);
+    qsort(m.list, (size_t)m.count, sizeof(meeting_t), meeting_order);
+    sending_t s = {c, now_ms, fn, say, ctx, 0};
+    for (int i = 0; i < m.count; ++i) {
+        const meeting_t *e = &m.list[i];
+        if (!strike(&s, e->a, e->actor_a, e->mask_a, e->b, e->actor_b, e->mask_b) || !strike(&s, e->b, e->actor_b, e->mask_b, e->a, e->actor_a, e->mask_a))
+            break;
+    }
+    if (m.list != m.at_hand) free(m.list);
+    return s.sent;
 }
 
 bool dgx_ge_actor_carry(dgx_ge_actor_t *a, int point, int picture)
