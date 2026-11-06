@@ -1,5 +1,5 @@
 ## IDF Component Manager Manifest File
-version: "0.4.0"
+version: "0.5.0"
 description: "A small engine of 2D and 2.5D games on top of DGX: an indexed frame sent by its changes and scaled, pictures from a pack in flash, actors living by animation scripts, tiles, masks, a world that lives on, dialogs, a sound mixer"
 url: https://github.com/jef-sure/esp32-component-dgx-ge
 repository: https://github.com/jef-sure/esp32-component-dgx-ge.git
@@ -10,7 +10,7 @@ dependencies:
   idf:
     version: ">=5.3.0"
   jef-sure/dgx:
-    version: "^0.8.0"  # 0.8.0: Arial and Verdana gone (free fonts only), the licenses of the fonts shown, its host build in host/dgx_host.mk (the engine's host tests and PoP's host take it); 0.7.3: configures on CMake older than 3.19; 0.7.2: fonts made at build time from requests (dgx_ge_fonts); 0.7.0: one set of flags for every transfer, Scale3x and the SFX smoothing; 0.6.6: the overlay layer of a screen; 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
+    version: "^0.10.10"  # 0.10.10: the mouse of its window on the computer a finger, for DGX-DI 0.1.5 (jef-sure/boards 0.0.5 takes 0.10.11, with the keys and a script for its window); 0.10.8: its window on the computer, built for the linux target of ESP-IDF, the screen of jef-sure/boards' host; 0.8.0: Arial and Verdana gone (free fonts only), the licenses of the fonts shown, its host build in host/dgx_host.mk (the engine's host tests and PoP's host take it); 0.7.3: configures on CMake older than 3.19; 0.7.2: fonts made at build time from requests (dgx_ge_fonts); 0.7.0: one set of flags for every transfer, Scale3x and the SFX smoothing; 0.6.6: the overlay layer of a screen; 0.6.5: scaling faster; 0.6.4: DGX_LUT_SCALE(n) and DGX_LUT_SMOOTH, 8-bit pictures to a turned DSI panel by DMA; 0.6.3: SSD1309 and SH1106, dgx_dsi_advise keeps DGX_DSI_ADVISE_TWO_FRAMES only, dgx_dsi_tuning_text; 0.6.2: the JD9365 panel (800x1280 over MIPI-DSI), dgx_dsi_advise, dgx_scroll_no_fill; 0.6.1: a glyph a font lacks moves on by its advance times the scale
     # to work on DGX together with the engine, put a copy of its checkout (not a link: a link makes it two
     # components) into the project's components/ as jef-sure__dgx; override_path names it after its directory,
     # and the engine and DGX-DI, which require jef-sure__dgx, do not find it
@@ -36,31 +36,31 @@ files:
   include:
     - "idf_component.yml"
     - "CMakeLists.txt"
+    - "Kconfig"
     - "project_include.cmake"
     - "dgx_ge.cmake"
+    - "dgx_ge_di.cmake"
     - "src/**/*.c"
     - "src/**/*.h"
     - "include/**/*.h"
-    # the boards games have run on: taken by a game into its own build, not built by the library
-    - "boards/*.h"
-    - "boards/*/*.c"
-    - "boards/*/board.cmake"
-    - "boards/*/sdkconfig.defaults*"
-    # the computer as a board: its build for a game (host.mk) and its stubs of ESP-IDF
-    - "boards/host/host.mk"
-    - "boards/host/stubs/**/*.h"
-    # the example, its sources and its art (not what a build of it leaves)
+    # the example, its sources and its data, the folder the sprite editor keeps (not what a build of it leaves: the
+    # pack is made by the build)
     - "examples/*/README.md"
-    - "examples/*/Makefile"
     - "examples/*/CMakeLists.txt"
+    # the boards of the example, as board_select.py of jef-sure/boards wrote them, and the game's own settings
+    - "examples/*/CMakePresets.json"
     - "examples/*/sdkconfig.defaults"
+    - "examples/*/sdkconfig.defaults.*"
     - "examples/*/.gitignore"
     - "examples/*/main/*.c"
     - "examples/*/main/CMakeLists.txt"
     - "examples/*/main/idf_component.yml"
-    - "examples/*/main/assets/*"
-    - "examples/*/anim/*.anim"
-    - "examples/*/art/*.png"
+    - "examples/*/game_data/*.json"
+    - "examples/*/game_data/*.anim"
+    - "examples/*/game_data/*/*.png"
+    - "examples/*/game_data/dialogs/*.dlg"
+    - "examples/*/game_data/sounds/*.wav"
+    - "examples/*/game_data/music/*.mml"
     - "examples/*/tools/*.py"
     - "tools/**/*.py"
     # the tools' data: the engine's sets of instruments and palettes, the song player for a computer and an editor

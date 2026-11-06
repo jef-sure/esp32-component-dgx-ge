@@ -4,81 +4,100 @@ The smallest whole game of DGX-GE: one actor on a scene. A robot walks while
 an arrow is held and hops at a tap or a button, with a sound; a label counts
 the hops, and the count is kept over a restart.
 
-The same `main/main.c` builds two ways:
+The same `main/main.c` builds for every board of
+[jef-sure/boards](https://github.com/jef-sure/esp32-component-boards) and for
+the computer, its board `host`. It talks to the hardware only through
+`boards.h`, and asks for the parts by kind: the display, the touch, the
+sound, the board's button. The boards of this example, as `board_select.py`
+of jef-sure/boards chose them: the CYD (`cyd_s028r`, the current one), the
+Guition JC8012P4A1C (10"), JC1060P470C (7") and JC4827W543C (4.3"), and the
+computer showing the 10".
 
-- **for the computer**, with `make`: a window of SDL2 shows the display of a
-  board, the mouse is a finger, the keys are buttons;
-- **for a board** of the engine, with `idf.py`: the CYD, the Guition
-  JC8012P4A1C (10") or the JC1060P470 (7").
-
-It talks to the hardware only through `boards/dgx_ge_board.h` of the engine,
-and on the computer the engine's board `boards/host` takes the place of a
-real one: how that is built and run, and what each step does, is in
-[../../docs/host-en.md](../../docs/host-en.md) ([по-русски](../../docs/host-ru.md)).
+Its data are a game of the sprite editor,
+[dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), laid out as the
+editor's [workflow.md](https://github.com/jef-sure/dgx-ge-editor/blob/main/workflow.md)
+says a game is: open `game_data/` in the editor to change them.
 
 ## What is where
 
 | File | What it is |
 | --- | --- |
 | `main/main.c` | the game: the frame, the scene, the robot, the label, the sound, the count in NVS, the loop |
-| `anim/bot.anim` | what the robot does: its pictures, strides, the hop, its sound and its signal, the rules between them |
-| `art/*.png` | its pictures and the ground, PNGs of a palette |
-| `tools/hello_assets.py` | the pack from them: `main/assets/hello.pack` and `hello_pack.h` |
-| `Makefile` | the build for the computer (includes the engine's `boards/host/host.mk`) |
-| `CMakeLists.txt`, `main/CMakeLists.txt`, `main/idf_component.yml`, `sdkconfig.defaults` | the build for a board |
-
-## On the computer
-
-Needs: Linux, gcc, SDL2 (`libsdl2-dev`), python3 with Pillow, and DGX 0.8.0 or
-later with DGX-DI 0.1.1 or later, as checkouts or as ESP-IDF downloaded them
-into `managed_components/` (an `idf.py build` of this example does that).
-
-```sh
-make DGX=<dgx> DGX_DI=<dgx-di>      # build-host/hello
-make run DGX=<dgx> DGX_DI=<dgx-di>
-```
-
-Without `DGX=` and `DGX_DI=` the ones in `managed_components/` are taken.
-
-| Key | Button |
-| --- | --- |
-| arrows | the cross |
-| Shift | A |
-| Z, X, C | B, X, Y |
-| Enter | START |
-| Space | SELECT (BACK) |
-| the mouse | a finger: a tap is a touch |
-
-The window shows the 10"'s display, 1280x800, the game's 320x200 four times
-larger. Another board's: `make HOST_DISPLAY=320x240 HOST_MM=58x43` (the CYD).
-The count is kept in `nvs/hello/hops`, beside where the program runs.
-
-With nobody at the computer, for a check or a picture:
-
-```sh
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-DGX_GE_HOST_INPUT="300 right+, 1300 right-, 1600 a+, 1650 a-, 2400 tap 640 400" \
-DGX_GE_HOST_QUIT_MS=3000 DGX_GE_HOST_SHOT=hello.ppm ./build-host/hello
-```
+| `game_data/` | the data, the folder the editor keeps: |
+| `game_data/hello.json` | the document: the kinds, the game's screen (320x200) and its colors (the palette UI: the sky, the label's ink), the sound's name |
+| `game_data/BOT/*.png`, `game_data/GROUND/ground.png` | the robot's pictures and the ground, PNGs of a palette |
+| `game_data/BOT.anim` | what the robot does: its pictures, strides, the hop, its sound and its signal, the rules between them |
+| `game_data/sounds/hop.wav` | the chirp of a hop |
+| `tools/pack.py` | the engine's packer over `game_data/`: `main/assets/hello.pack` and `hello_pack.h` (the build runs it) |
+| `CMakeLists.txt`, `main/CMakeLists.txt`, `main/idf_component.yml`, `sdkconfig.defaults` | the build, for a board and for the computer |
+| `sdkconfig.defaults.<board>`, `CMakePresets.json` | the boards, as `board_select.py` wrote them: not to edit, run it again |
 
 ## On a board
 
+ESP-IDF 5.5 or later; 6 reads the presets, each board builds in
+`build/<board>`:
+
 ```sh
-idf.py build flash monitor                                                     # the CYD
-idf.py -B build-p4 -D SDKCONFIG=build-p4/sdkconfig -D HELLO_BOARD=jc8012p4a1c build flash
-idf.py -B build-p7 -D SDKCONFIG=build-p7/sdkconfig -D HELLO_BOARD=jc1060p470 build flash
+idf.py build flash monitor                        # the CYD, the current board
+idf.py --preset jc8012p4a1c build flash monitor   # the 10"; jc1060p470c, the 7"; jc4827w543c, the 4.3"
 ```
+
+ESP-IDF 5 does not read them:
+`idf.py -B build/<board> -D SDKCONFIG=build/<board>/sdkconfig -D BOARD=<board> build`.
+
+The touch, where the board has one, is the pointer: a tap hops, and the pad
+on the display (DGX-DI's) gives the arrows where the board has none of its
+own. The board's buttons are taken by their names: those of a gamepad's
+(`left`, `a`, `start`…) as theirs, another (BOOT) as A, a hop.
 
 The 10" needs its touch panel's firmware, which may not be given away: make
 `main/jc8012p4a1c_touch.fw` from the board's package with DGX-DI's
-`tools/gsl_firmware.py`.
+`tools/gsl_firmware.py` (jef-sure/boards: `docs/en/touch-firmware.md`).
+Without it the 10" runs with its touch off.
 
-An example made from the registry (`idf.py create-project-from-example`) has
-no engine around it: copy the board's directory `boards/<board>/` of the
-engine (its `sdkconfig.defaults*`) into `boards/` beside this README. ESP-IDF
-looks for the files of `SDKCONFIG_DEFAULTS` before it downloads the engine.
+Another board: `python3 <boards>/tools/board_select.py <board> .`, where
+`<boards>` is a checkout of jef-sure/boards or
+`managed_components/jef-sure__boards` after a first build.
+
+## On the computer
+
+The board `host` of jef-sure/boards: the linux target of ESP-IDF, the display
+a window of DGX as large as the 10"'s (1280x800, the game's 320x200 four
+times larger), the mouse a finger on it, the keys its buttons, the
+computer's sound. Needs SDL2 (`libsdl2-dev`) and the system's python3 with
+Pillow for the pack.
+
+```sh
+idf.py --preset host build
+./build/host/hello.elf
+```
+
+| Key | Button |
+| --- | --- |
+| the arrows, WASD | walk |
+| Space, J (A); K, Backspace (B); B (the board's BOOT) | hop |
+| the mouse | a finger: a click hops |
+
+The count is kept in `build/host/flash.bin`; delete it to start from zero.
+The window shows another board after `board_select.py host --as <board> .`
+and `rm build/host/sdkconfig` (`cyd_s028r`: 320x240).
+
+With nobody at the computer: `DGX_HOST_SCRIPT` plays a file of keys and the
+mouse, `DGX_HOST_QUIT_MS` ends the program, `DGX_HOST_SHOT` keeps the
+window's last picture (the engine's `docs/host-en.md`, section 7):
+
+```sh
+printf '300 key down Right\n1300 key up Right\n1600 key down Space\n1650 key up Space\n' > hop.script
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy DGX_HOST_SCRIPT=hop.script DGX_HOST_QUIT_MS=2500 \
+    DGX_HOST_SHOT=hello.ppm ./build/host/hello.elf
+```
 
 ## The pack again
 
-After a change of `art/` or `anim/`: `python3 tools/hello_assets.py`. The
-Makefile does it itself when they are newer than the pack.
+The build makes it whenever something in `game_data/` is newer than it, as it
+configures. By hand: `python3 tools/pack.py ../..` (the engine's folder).
+
+## A game of your own from it
+
+`python3 ../../tools/dgx_ge_new.py <folder>` makes a project of its own
+from this example, anywhere, renamed for the game: see the engine's README.

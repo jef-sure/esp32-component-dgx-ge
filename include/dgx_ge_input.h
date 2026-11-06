@@ -138,6 +138,13 @@ typedef struct {
 /* What a script holds at a moment; 0 before its first step, its last step after the end. */
 uint32_t dgx_ge_input_scripted(const dgx_ge_input_step_t *steps, int count, uint32_t since_ms);
 
+/*
+ * A button of a gamepad by its name, as SDL and the browsers name them and jef-sure/boards names the buttons of a board
+ * that control a program (board_button_name): up, down, left, right, a, b, x, y, start, select, home, lb, rb, lt, rt,
+ * l3, r3, and action and back for a and select; in small letters. Its bit, DGX_GE_KEY_*; 0 for another name, or NULL.
+ */
+uint32_t dgx_ge_key_named(const char *name);
+
 #ifdef __cplusplus
 }
 #endif

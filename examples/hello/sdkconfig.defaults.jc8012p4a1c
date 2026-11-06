@@ -1,0 +1,34 @@
+# board_select.py jc8012p4a1c
+# from jef-sure/boards 0.0.5, commit 2857470: board_select.py --again PROJECT_DIR makes it again when the component changes
+# The board of this project, chosen by tools/board_select.py of jef-sure/boards: jc8012p4a1c
+# Read before the project's own sdkconfig.defaults. Made from the data of the component: do not edit,
+# run board_select.py again to change the board.
+# The Guition JC8012P4A1C (10.1-inch): what its chip, its memory and its flash need, read
+# before the program's own defaults (SDKCONFIG_DEFAULTS of the project, tools/board_select.py
+# puts this file there). The first two lines are the choice of the board: the chip, and the
+# board in the menu of the configuration. The DGX drivers its panel needs (DSI, JD9365) come
+# with that choice.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_BOARD_SELECT_JC8012P4A1C=y
+
+# 16 MB flash, a Boya chip: its own driver, as ESP-IDF advises at start. On four lines at 80 MHz, as Anton's
+# handwritten clock runs on this board (2026-11-04). The bootloader for revision 3 of the chip on four lines takes
+# 24896 bytes of the 24576 before the partition table at 0x8000; with its log at warnings it takes 22160 (ESP-IDF 6.1),
+# and the table stays where programs expect it. A program that wants the boot log at info moves its table itself.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# 32 MB PSRAM, hexagonal. Its speed and the CPU follow the revision of the chip: tools/board_select.py
+# writes them, a build for one revision does not start on the other.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# What revision 3.2 of the chip takes, from catalog/mcu/
+CONFIG_ESP32P4_REV_MIN_301=y
+CONFIG_SPIRAM_SPEED_250M=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400=y

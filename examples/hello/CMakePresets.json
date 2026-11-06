@@ -1,0 +1,54 @@
+{
+    "version": 3,
+    "vendor": {"jef-sure/boards": {"made by": "board_select.py --again .", "follows": "cyd_s028r"}},
+    "configurePresets": [
+        {
+            "name": "cyd_s028r",
+            "displayName": "CYD (ESP32-2432S028R)",
+            "binaryDir": "build/cyd_s028r",
+            "cacheVariables": {"BOARD": "cyd_s028r", "IDF_TARGET": "esp32", "SDKCONFIG": "build/cyd_s028r/sdkconfig"}
+        },
+        {
+            "name": "jc8012p4a1c",
+            "displayName": "Guition JC8012P4A1C",
+            "binaryDir": "build/jc8012p4a1c",
+            "cacheVariables": {
+                "BOARD": "jc8012p4a1c",
+                "IDF_TARGET": "esp32p4",
+                "SDKCONFIG": "build/jc8012p4a1c/sdkconfig"
+            }
+        },
+        {
+            "name": "jc1060p470c",
+            "displayName": "Guition JC1060P470C",
+            "binaryDir": "build/jc1060p470c",
+            "cacheVariables": {
+                "BOARD": "jc1060p470c",
+                "IDF_TARGET": "esp32p4",
+                "SDKCONFIG": "build/jc1060p470c/sdkconfig"
+            }
+        },
+        {
+            "name": "jc4827w543c",
+            "displayName": "Guition JC4827W543C",
+            "binaryDir": "build/jc4827w543c",
+            "cacheVariables": {
+                "BOARD": "jc4827w543c",
+                "IDF_TARGET": "esp32s3",
+                "SDKCONFIG": "build/jc4827w543c/sdkconfig"
+            }
+        },
+        {
+            "name": "host",
+            "displayName": "the computer",
+            "binaryDir": "build/host",
+            "cacheVariables": {"BOARD": "host", "IDF_TARGET": "linux", "SDKCONFIG": "build/host/sdkconfig"}
+        },
+        {
+            "name": "default",
+            "displayName": "The current board: CYD (ESP32-2432S028R)",
+            "binaryDir": "build/cyd_s028r",
+            "cacheVariables": {"BOARD": "cyd_s028r", "IDF_TARGET": "esp32", "SDKCONFIG": "build/cyd_s028r/sdkconfig"}
+        }
+    ]
+}

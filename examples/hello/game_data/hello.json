@@ -1,0 +1,540 @@
+{
+    "format": "dgx-ge-sprites",
+    "formatVersion": 1,
+    "name": "hello",
+    "masks": [],
+    "sets": [
+        {
+            "name": "BOT",
+            "defaultMask": null,
+            "canvas": {
+                "left": -8,
+                "top": -19,
+                "width": 16,
+                "height": 20
+            },
+            "frames": [
+                {
+                    "image": "hop.png",
+                    "width": 16,
+                    "height": 20,
+                    "origin": {
+                        "x": 8,
+                        "y": 19
+                    },
+                    "masks": {},
+                    "points": {}
+                },
+                {
+                    "image": "stand.png",
+                    "width": 16,
+                    "height": 20,
+                    "origin": {
+                        "x": 8,
+                        "y": 19
+                    },
+                    "masks": {},
+                    "points": {}
+                },
+                {
+                    "image": "walk_1.png",
+                    "width": 16,
+                    "height": 20,
+                    "origin": {
+                        "x": 8,
+                        "y": 19
+                    },
+                    "masks": {},
+                    "points": {}
+                },
+                {
+                    "image": "walk_2.png",
+                    "width": 16,
+                    "height": 20,
+                    "origin": {
+                        "x": 8,
+                        "y": 19
+                    },
+                    "masks": {},
+                    "points": {}
+                }
+            ],
+            "animation": {
+                "events": [
+                    "walk",
+                    "stop",
+                    "hop"
+                ],
+                "defines": [],
+                "tables": [],
+                "questions": [],
+                "params": [],
+                "groups": [],
+                "scripts": [
+                    {
+                        "name": "stand",
+                        "lines": [
+                            {
+                                "op": "frame",
+                                "image": "stand.png",
+                                "ms": 1000
+                            },
+                            {
+                                "op": "goto",
+                                "target": "stand"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "walk",
+                        "lines": [
+                            {
+                                "op": "label",
+                                "name": "stride"
+                            },
+                            {
+                                "op": "frame",
+                                "image": "walk_1.png",
+                                "ms": 100
+                            },
+                            {
+                                "op": "dx",
+                                "value": 2
+                            },
+                            {
+                                "op": "frame",
+                                "image": "walk_2.png",
+                                "ms": 100
+                            },
+                            {
+                                "op": "dx",
+                                "value": 2
+                            },
+                            {
+                                "op": "branch",
+                                "note": " a stop is taken here, between strides, not in the middle of one"
+                            },
+                            {
+                                "op": "goto",
+                                "target": "stride"
+                            }
+                        ],
+                        "above": [
+                            " a stride: two pictures, 2 points forward each (back when it faces left: dx is forward)"
+                        ]
+                    },
+                    {
+                        "name": "hop",
+                        "lines": [
+                            {
+                                "op": "sound",
+                                "value": 0,
+                                "note": " the document's first sound, hop"
+                            },
+                            {
+                                "op": "signal",
+                                "value": 1,
+                                "note": " the game counts the hops"
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": -6
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": -5
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": -4
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": -3
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": -2
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": -1
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": 1
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": 2
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": 3
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": 4
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": 5
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dy",
+                                "value": 6
+                            },
+                            {
+                                "op": "goto",
+                                "target": "stand"
+                            }
+                        ],
+                        "above": [
+                            " a hop: up 21 points and down again, by steps that add up to nothing, so it always lands where it began"
+                        ]
+                    },
+                    {
+                        "name": "leap",
+                        "lines": [
+                            {
+                                "op": "sound",
+                                "value": 0
+                            },
+                            {
+                                "op": "signal",
+                                "value": 1
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": -6
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": -5
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": -4
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": -3
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": -2
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": -1
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": 1
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": 2
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": 3
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": 4
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": 5
+                            },
+                            {
+                                "op": "frame",
+                                "image": "hop.png",
+                                "ms": 35
+                            },
+                            {
+                                "op": "dx",
+                                "value": 1
+                            },
+                            {
+                                "op": "dy",
+                                "value": 6
+                            },
+                            {
+                                "op": "goto",
+                                "target": "stand"
+                            }
+                        ],
+                        "above": [
+                            " a hop on the way: the same arc, and forward a point a picture (about as fast as it walks), so a hop",
+                            " taken while walking goes on in the walk's direction; it walks on after it if the arrow is still held"
+                        ]
+                    }
+                ],
+                "rules": [
+                    {
+                        "event": "walk",
+                        "source": "stand",
+                        "to": "walk",
+                        "when": "now"
+                    },
+                    {
+                        "event": "stop",
+                        "source": "walk",
+                        "to": "stand",
+                        "when": "branch"
+                    },
+                    {
+                        "event": "hop",
+                        "source": "stand",
+                        "to": "hop",
+                        "when": "now"
+                    },
+                    {
+                        "event": "hop",
+                        "source": "walk",
+                        "to": "leap",
+                        "when": "now"
+                    }
+                ],
+                "heads": {
+                    "event": {
+                        "above": [
+                            " The one actor of hello: it stands, walks while an arrow is held, hops at a tap or a button.",
+                            " What it does is here, as data; the game only tells it what happened (its events) and hears",
+                            " what it says (a sound to play, a signal that it has hopped)."
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "name": "GROUND",
+            "defaultMask": null,
+            "canvas": {
+                "left": 0,
+                "top": 0,
+                "width": 320,
+                "height": 24
+            },
+            "frames": [
+                {
+                    "image": "ground.png",
+                    "packName": "GROUND",
+                    "width": 320,
+                    "height": 24,
+                    "origin": {
+                        "x": 0,
+                        "y": 0
+                    },
+                    "masks": {},
+                    "points": {}
+                }
+            ],
+            "animation": {
+                "events": [],
+                "defines": [],
+                "tables": [],
+                "questions": [],
+                "params": [],
+                "groups": [],
+                "scripts": [],
+                "rules": []
+            }
+        }
+    ],
+    "screen": {
+        "width": 320,
+        "height": 200
+    },
+    "tilesets": [],
+    "scenes": [],
+    "styles": [],
+    "palettes": [
+        {
+            "name": "UI",
+            "colors": [
+                [
+                    150,
+                    205,
+                    250
+                ],
+                [
+                    20,
+                    40,
+                    80
+                ]
+            ]
+        }
+    ],
+    "dialogs": [],
+    "game": [],
+    "constants": {},
+    "timers": [],
+    "sounds": [
+        "hop"
+    ],
+    "shows": [],
+    "chases": [],
+    "crops": []
+}

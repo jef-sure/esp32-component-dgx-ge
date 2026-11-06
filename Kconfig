@@ -1,0 +1,7 @@
+# What the engine takes of DGX, whatever the board: the virtual screen (a picture drawn in memory, dgx_vscreen_init) is
+# its canvas of a text and of a picture laid out (dgx_ge_text.c, dgx_ge_image.c). A board of jef-sure/boards turns on
+# in DGX only what its display needs. No prompt: nothing to choose, nothing shown in the menu.
+config DGX_GE_DGX_PARTS
+    bool
+    default y
+    select DGX_ENABLE_VSCREEN

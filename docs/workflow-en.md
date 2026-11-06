@@ -26,8 +26,10 @@ in [host-en.md](host-en.md), and the smallest whole game is the example
 The way described here was checked by following it from nothing: two small
 games, one with a pack script of its own and one with an editor's document,
 were built and run on the computer with nobody at it, and both were built for
-the CYD with ESP-IDF 6.0.1. The output quoted below comes from those runs
-(long paths shortened to `…`).
+the CYD with ESP-IDF 6.0.1. The output quoted below comes from those runs,
+made on the engine's own board of the computer before the boards became
+jef-sure/boards', and from `examples/hello` on jef-sure/boards 0.0.5 (long
+paths shortened to `…`).
 
 ## Contents
 
@@ -63,7 +65,7 @@ The code of a game is C, and the engine's rule is to keep it small: as much as
 possible as data, as little special C as possible. What typically stays C:
 
 - the board and the frame: which display, how large the frame is shown
-  (`dgx_ge_board.h`, `dgx_ge_frame_fit`);
+  (`boards.h` of jef-sure/boards, `dgx_ge_frame_fit`);
 - the loop and the clock: read the input, move the actors on to now, draw;
 - what the input means: buttons and touches made events of actors;
 - the answers to what scripts say (`say`): play a sound, count a signal,
@@ -92,8 +94,8 @@ same is checked by nobody until it misbehaves.
                                                     mygame.pot ──────► translators ─► po/<lang>.po ─► the packer
                                                     mygame.sounds ───► (optional) the samples, apart
 
-  the firmware: idf.py build flash        (ESP-IDF, a board of boards/<board>/)
-  the computer: make, make run            (boards/host/host.mk, the same main.c in a window of SDL2)
+  the firmware: idf.py build flash        (ESP-IDF, a board of jef-sure/boards)
+  the computer: idf.py --preset host build (its board host: the same main.c in a window of DGX)
 ```
 
 The pack and the header always come together and always from the packer. The
@@ -110,8 +112,7 @@ are three ways to feed it, and they mix freely.
 ### 2.1. A script of your own
 
 The plainest way: a short Python script of the game finds its files and calls
-the packer. `examples/hello/tools/hello_assets.py` is the smallest such script.
-For a made-up `mygame`:
+the packer. For a made-up `mygame`:
 
 ```
 mygame/
@@ -236,7 +237,8 @@ The second way: a tool writes one JSON document, and the packer reads all of
 it with one call, `Pack.add_sprites(<document>)`. The format is named
 `dgx-ge-sprites` (version 1). My sprite editor,
 [dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor), writes it, and any other editor or generator may write
-it too. The format is described in full beside that editor,
+it too. The smallest game made so is `examples/hello`: its `game_data/` is
+the folder the editor keeps, its `tools/pack.py` the whole packer. The format is described in full beside that editor,
 [sprite-format.md](https://github.com/jef-sure/dgx-ge-editor/blob/main/sprite-format.md); what the engine goes by is
 the packer itself (`add_sprites` and the methods it calls, with their
 docstrings) and the engine's tests, which write such documents and check what
@@ -455,8 +457,8 @@ another color, which the artist should draw again in a color of the palette.
 | File | What it is | Who reads it |
 | --- | --- | --- |
 | `mygame.pack` | the pack: a table of sets, pictures, blobs, masks, points, which masks meet, then the data; its last field is its fingerprint, the CRC-32 of the whole | the firmware, embedded whole (`EMBED_FILES`) |
-| `mygame_pack.h` | the numbers of everything in the pack, by name | the game's C; the build (`dgx_ge_params_of_pack`, `host.mk`) |
-| `mygame.fonts` | the game's fonts as requests of DGX's fonts (`write_fonts`) | DGX, which makes the fonts at build time (`dgx_ge_fonts`, `GAME_FONTS`) |
+| `mygame_pack.h` | the numbers of everything in the pack, by name | the game's C; the build (`dgx_ge_params_of_pack`) |
+| `mygame.fonts` | the game's fonts as requests of DGX's fonts (`write_fonts`) | DGX, which makes the fonts at build time (`dgx_ge_fonts`) |
 | `mygame.letters` | the letters the pack can print in its language (`write_letters`) | the font requests: a font made has these letters and no more |
 | `mygame.typed` | what can be typed into the game's text fields (written by `write_fonts` when a font is `typed`) | the request of that font |
 | `mygame.pot` | every line of the dialogs in its context, untranslated (`write_pot`) | translators: it becomes `po/<language>.po` |
@@ -532,14 +534,13 @@ fewer:
 #define MYGAME_ANIM_PARAMS 2
 #include "dgx_ge_anim.h"
 #if DGX_GE_ANIM_PARAMS < MYGAME_ANIM_PARAMS
-#error "the actors of this pack keep 2 params, the build fewer (DGX_GE_ANIM_PARAMS): dgx_ge_params_of_pack(<this header>) in the game's CMakeLists, GAME_PACK_H in its Makefile of the computer"
+#error "the actors of this pack keep 2 params, the build fewer (DGX_GE_ANIM_PARAMS): dgx_ge_params_of_pack(<this header>) in the game's main/CMakeLists.txt"
 #endif
 ```
 
 `dgx_ge_params_of_pack(assets/mygame_pack.h)` in `main/CMakeLists.txt` hands
-the number to the whole firmware build, the engine included; `GAME_PACK_H` in
-the Makefile does the same for the computer. Every actor then costs as much
-as the pack needs and no more.
+the number to the whole build, the engine included, for a board and for the
+computer alike. Every actor then costs as much as the pack needs and no more.
 
 **The fonts, the letters and the translation** come from the dialogs. For the
 document of 2.2 with its Russian `.po`:
@@ -560,9 +561,10 @@ $ cat main/assets/mygame.letters
 ## 4. The pack made again by the build
 
 The pack has to follow its data without anyone remembering to run the pack
-script. In projects made this way both builds run it themselves.
+script. In projects made this way the build runs it itself, the same for a
+board and for the computer (the board `host` is a build of ESP-IDF too).
 
-**The firmware.** `main/CMakeLists.txt` runs the pack script while the build
+`main/CMakeLists.txt` runs the pack script while the build
 is configured (`execute_process`) and lists the data among the files whose
 change configures it again (`CMAKE_CONFIGURE_DEPENDS`). After a change of the
 data, `idf.py build` configures again, which makes the pack, and the
@@ -610,66 +612,36 @@ mygame.pack: 3520 bytes
 [7/13] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/main.c.obj
 ```
 
-**The computer.** The engine's `host.mk` takes the params from the pack's
-header while make reads the Makefiles, before any rule runs, so the pack has
-to be made then, not by a rule. `host.mk` does it itself: the game's Makefile
-names the command that makes the pack and what the pack is made from, before
-it includes `host.mk`:
-
-```make
-# the pack made again, before its header is read, whenever one of its inputs is newer than the header
-GAME_PACK_MAKE   := python3 tools/mygame_pack.py $(ENGINE)
-GAME_PACK_INPUTS := tools/mygame_pack.py $(wildcard anim/*.anim art/*.png $(ENGINE)/tools/dgx_ge_*.py)
-
-include $(ENGINE)/boards/host/host.mk
-```
-
-When one of `GAME_PACK_INPUTS` is newer than `GAME_PACK_H` (or there is no
-header yet), `host.mk` runs `GAME_PACK_MAKE` as it is read, then takes the
-params from the new header; `make clean` never runs it. For a document the
-inputs are its folder, `$(shell find game_data -type f)`, and the script.
-The engine's packer (`$(ENGINE)/tools/dgx_ge_*.py`) is an input too: a new
-engine that writes a blob in a new version makes the pack again, and the
-engine reads only its own version.
-After four params were added to `hero.anim`, one `make` did it all:
-
-```text
-the pack: python3 tools/mygame_pack.py …
-mygame.pack: 3228 bytes
-…
-```
-
-and every object was built with `DGX_GE_ANIM_PARAMS=5`. A pack that cannot be
-made stops the build before anything is compiled:
-
-```text
-dgx_ge_anim.AnimError: …/anim/hero.anim: line 11: no picture 'HERO_STEPP'
-…/boards/host/host.mk:70: *** the pack was not made: python3 tools/mygame_pack.py … failed (it says why above).  Stop.
-```
-
-`examples/hello/Makefile` does the same with its own script.
+`examples/hello/main/CMakeLists.txt` does the same with its `tools/pack.py`
+over `game_data/`.
 
 ---
 
 ## 5. The C side
 
 A game is an ESP-IDF program whose `app_main` sets the board up, opens the
-pack and runs a loop. The same `main.c` builds for a board and for the
-computer, because it talks to the hardware only through
-`boards/dgx_ge_board.h`. Its parts, in the order they run, with the names of
+pack and runs a loop. The same `main.c` builds for every board and for the
+computer, because it talks to the hardware only through `boards.h` of
+jef-sure/boards, and asks for the parts by kind. Its parts, in the order they run, with the names of
 the engine (the whole of the loop and its reasons are in
 [overview-en.md, 2.18](overview-en.md#218-the-whole-game-loop)):
 
-1. **The board**: `board_display_init(&board)` gives a DGX screen in
-   landscape. `board_pointer_start`, `board_buttons`, `board_sound_start`
-   say what else the board has (the CYD of the engine has no touch and no
-   sound; the computer has all of them).
+1. **The board**: `board_display_init(&display)` and
+   `board_dgx_screen(&display)` give a DGX screen in landscape, its size in
+   millimetres in `display.mm_w`, `mm_h`. `board_touch_start` (where
+   `CONFIG_BOARD_TOUCH` says the board has one), `board_sound_init` and
+   `board_button` say what else the board has; a part it has not answers
+   `false`. What the game does over them is the engine's: the touch, the
+   pad and the keyboard on the display (`dgx_ge_di_start`, `dgx_ge_pad_*`,
+   `dgx_ge_keyboard_*`), the sound (`dgx_ge_sound_open`)
+   ([overview-en.md, 2.17](overview-en.md#217-the-board)).
 2. **The pack**: the build embeds it, and the game takes its bytes by the
    symbols of the file's name, `_binary_mygame_pack_start` and `_end`, then
    `dgx_ge_pack_open`.
-3. **The frame**: `dgx_ge_frame_fit(board.lcd, 320, 200, 0, board_band)`
-   makes it at the game's own size (320x200 points), as large as the display
-   shows it whole, in the middle of the display, sent as the board asks. The
+3. **The frame**: `dgx_ge_frame_fit(lcd, 320, 200, 0, band)` makes it at
+   the game's own size (320x200 points), as large as the display shows it
+   whole, in the middle of the display, sent in bands of `band` bytes (128 KB
+   to a panel of MIPI-DSI, 0, a strip, to a panel on a bus). The
    colors of all the sets go into the frame at once
    (`dgx_ge_frame_pack_colors`), which gives each set a map of its values to
    the frame's indices, `map_of[set]`.
@@ -682,12 +654,12 @@ the engine (the whole of the loop and its reasons are in
    `dgx_ge_actor_start(&hero, anim, MYGAME_HERO_SCRIPT_STAND, x, y, now)`, or
    `dgx_ge_layout_actor_start(&room, MYGAME_SCENE_ROOM_ACTOR_HERO, &hero, &kinds,
    now)` for an actor the document placed.
-6. **The loop**: the input (`dgx_ge_input_update(&input, board_buttons())`),
+6. **The loop**: the input (`dgx_ge_input_update(&input, dgx_ge_pad_buttons())`),
    then every actor moved on to now (`dgx_ge_actor_advance`), then the
    decisions, sent as events (`dgx_ge_actor_event`), then the frame's actors
    (`dgx_ge_scene_actors_begin`, `dgx_ge_scene_show_actor`) and
    `dgx_ge_scene_render`, which draws what changed and sends it. At the end
-   `board_pace`: the rest of the step waited, and at least one tick given up
+   `dgx_ge_pace`: the rest of the step waited, and at least one tick given up
    (on a board other tasks need it, and on the computer that is where the
    window is shown and the input read).
 7. **`say`**: what scripts tell the game as their steps are made comes to one
@@ -700,8 +672,9 @@ about 150 lines):
 
 ```c
 #include "assets/mygame_pack.h"
+#include "boards.h"
+#include "boards_dgx.h"
 #include "dgx_fonts.h"
-#include "dgx_ge_board.h"
 #include "dgx_ge_layout.h"
 #include "dgx_ge_pockets.h"
 #include "dgx_ge_talk_view.h"
@@ -718,10 +691,11 @@ static void say(dgx_ge_actor_t *actor, dgx_ge_anim_say_t what, uint8_t value, ui
 
 void app_main(void)
 {
-    board_t board;
-    if (!board_display_init(&board)) return;
+    board_display_t display;
+    if (!board_display_init(&display)) return;
     if (!dgx_ge_pack_open(&pack, pack_start, (size_t)(pack_end - pack_start))) return;
-    /* … the frame (dgx_ge_frame_fit), the scene of 3 layers, every set's colors into the frame (dgx_ge_frame_pack_colors: map_of[set]) */
+    /* … the frame (dgx_ge_frame_fit on board_dgx_screen(&display)), the scene of 3 layers, every set's colors into the
+       frame (dgx_ge_frame_pack_colors: map_of[set]); the touch and the pad, the sound (overview-en.md, 2.17) */
 
     /* the scene as the document lays it: its layers and pictures, its actor started by its name */
     size_t         size;
@@ -753,7 +727,7 @@ void app_main(void)
     for (;;) {
         const int64_t t0 = esp_timer_get_time();
         now              = (uint32_t)(t0 / 1000);
-        dgx_ge_input_update(&input, board_buttons());
+        dgx_ge_input_update(&input, dgx_ge_pad_buttons());
         dgx_ge_talk_view_play(&view, &talk, &strings, now, now);
         dgx_ge_actor_advance(&hero, now, say, NULL);
         const bool on = (input.held & DGX_GE_KEY_RIGHT) && dgx_ge_actor_x(&hero) < FRAME_W - edge;
@@ -764,7 +738,7 @@ void app_main(void)
         dgx_ge_scene_show_actor(scene, &hero, LAYER_ACTORS, &pack, map_of, &hero_picture);
         dgx_ge_talk_view_show(&view, &talk, scene, LAYER_TALK);
         dgx_ge_scene_render(scene);
-        board_pace(t0, 20000); /* a pass every 20 ms at most, a tick given up at least */
+        dgx_ge_pace(t0, 20000); /* a pass every 20 ms at most, a tick given up at least */
     }
 }
 ```
@@ -788,8 +762,8 @@ it.
 - **Saving**: the game begins a save with the pack's fingerprint
   (`dgx_ge_save_begin(&s, buffer, size, dgx_ge_pack_id(&pack), now)`), each
   part writes its own chunk (`dgx_ge_world_save`, `dgx_ge_timers_save`, …),
-  the game its own, and keeps the bytes where it likes (NVS on a board, a
-  file on the computer) ([overview-en.md, 2.15](overview-en.md#215-saving-the-game)).
+  the game its own, and keeps the bytes where it likes (NVS, a file of an
+  SD card) ([overview-en.md, 2.15](overview-en.md#215-saving-the-game)).
 
 ---
 
@@ -797,29 +771,43 @@ it.
 
 ### The firmware
 
-The engine is an ESP-IDF component in the registry; DGX comes with it. A
-game adds it, and DGX-DI, which the boards with a touch screen and the
-computer build need:
+The engine is an ESP-IDF component in the registry; DGX comes with it. The
+boards are [jef-sure/boards](https://github.com/jef-sure/esp32-component-boards),
+which brings what the board chosen needs and nothing else: DGX-DI for a
+touch screen, the drivers of its sound. A game adds both:
 
 ```sh
 idf.py add-dependency "jef-sure/dgx-ge"
-idf.py add-dependency "jef-sure/dgx-di"
+idf.py add-dependency "jef-sure/boards>=0.0.5"
 ```
 
-With no version they are the newest; `dependencies.lock` keeps the versions taken until `idf.py
-update-dependencies`.
-The boards with an ESP32-P4 need two more components (their sound chip, the
-7"'s touch panel); `examples/hello/main/idf_component.yml` lists them.
+With no version the engine is the newest; `dependencies.lock.<board>` keeps
+the versions taken until `idf.py update-dependencies`.
+
+What this section writes by hand, `tools/dgx_ge_new.py` writes for a new
+game at once, from `examples/hello` or from a game of the editor, in a folder
+anywhere, for every board the example has and for the computer
+(`python3 tools/dgx_ge_new.py ../mygame [--from <a game's folder>]`; the
+README's Getting started). What follows is what its files do.
+
+The boards are chosen once, by `tools/board_select.py` of jef-sure/boards
+(a checkout of it, or `managed_components/jef-sure__boards/tools/` after a
+first build):
+
+```sh
+python3 <boards>/tools/board_select.py cyd_s028r .
+```
 
 The files of a firmware project for the CYD:
 
 ```
 mygame/
   CMakeLists.txt                  the project: the board's ESP-IDF settings, the engine's place, project(mygame)
+  CMakePresets.json               a preset a board, building in build/<board> (board_select.py)
+  sdkconfig.defaults.cyd_s028r    the board's settings: its chip, memory, flash, the line that chooses it (board_select.py)
   sdkconfig.defaults              the game's own settings, over the board's
-  boards/cyd/sdkconfig.defaults   the board's settings, copied from the engine's boards/cyd/
-  main/CMakeLists.txt             the board's file, the pack, the component
-  main/idf_component.yml          the engine and DGX-DI
+  main/CMakeLists.txt             the touch of the engine, the pack, the component
+  main/idf_component.yml          the engine and the boards
   main/main.c
 ```
 
@@ -827,14 +815,21 @@ mygame/
 
 ```cmake
 cmake_minimum_required(VERSION 3.22)
-# the board's ESP-IDF settings first, the game's own over them (copied from the engine's boards/cyd/)
-set(SDKCONFIG_DEFAULTS "boards/cyd/sdkconfig.defaults;sdkconfig.defaults")
-if(NOT IDF_TARGET AND NOT DEFINED ENV{IDF_TARGET})
-    set(IDF_TARGET esp32)
+# BOARD=<board>, which the preset of a board sets: the board's ESP-IDF settings first, the game's own over them
+set(BOARD "" CACHE STRING "a board of this project: its file sdkconfig.defaults.<board>")
+if(NOT SDKCONFIG_DEFAULTS AND BOARD)
+    set(SDKCONFIG_DEFAULTS "sdkconfig.defaults.${BOARD};sdkconfig.defaults")
 endif()
-# where the engine is: the registry's download unless -D MYGAME_ENGINE=<path> says another
-set(MYGAME_ENGINE ${CMAKE_CURRENT_LIST_DIR}/managed_components/jef-sure__dgx-ge CACHE PATH "the engine")
+# where the engine is: a clone linked as components/jef-sure__dgx-ge, else the registry's download
+set(MYGAME_ENGINE ${CMAKE_CURRENT_LIST_DIR}/components/jef-sure__dgx-ge)
+if(NOT EXISTS ${MYGAME_ENGINE}/dgx_ge_di.cmake)
+    set(MYGAME_ENGINE ${CMAKE_CURRENT_LIST_DIR}/managed_components/jef-sure__dgx-ge)
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# each board its lock of the components
+if(BOARD)
+    idf_build_set_property(DEPENDENCIES_LOCK ${CMAKE_CURRENT_LIST_DIR}/dependencies.lock.${BOARD})
+endif()
 # for main/CMakeLists.txt: a property of the build reaches it even where ESP-IDF reads it early
 idf_build_set_property(MYGAME_ENGINE ${MYGAME_ENGINE})
 project(mygame)
@@ -844,15 +839,16 @@ project(mygame)
 
 ```cmake
 idf_build_get_property(engine MYGAME_ENGINE)
-include(${engine}/boards/cyd/board.cmake)
+# the touch of the display as the game's, the engine's over DGX-DI: every board, one without touch too
+include(${engine}/dgx_ge_di.cmake)
 
 # … the pack made as the build is configured (section 4)
 
 idf_component_register(
-    SRCS "main.c" ${BOARD_SRCS}
+    SRCS "main.c" ${DGX_GE_DI_SRCS}
     INCLUDE_DIRS "."
     REQUIRES jef-sure__dgx-ge jef-sure__dgx
-    PRIV_REQUIRES esp_timer jef-sure__dgx-di ${BOARD_REQUIRES}
+    PRIV_REQUIRES esp_timer nvs_flash
     EMBED_FILES "assets/mygame.pack"
 )
 # the params an actor keeps, as many as the pack's animations need
@@ -868,82 +864,84 @@ dgx_fonts_scale(1)
 dgx_fonts_rules(../fonts.rules)
 ```
 
+`main/idf_component.yml`:
+
+```yaml
+dependencies:
+  jef-sure/dgx-ge: "*"
+  jef-sure/boards: ">=0.0.5"
+```
+
 Why each piece:
 
 | Piece | Why |
 | --- | --- |
-| the board's `sdkconfig.defaults`, copied | DGX builds only what the `sdkconfig` turns on: the CYD's needs its SPI bus, its ILI9341 and the virtual screens the frame is. ESP-IDF reads the list of defaults before it downloads any component, so the board's file has to be in the project ([overview-en.md, 2.17](overview-en.md#217-the-board)) |
-| `MYGAME_ENGINE` as a property of the build | `main/CMakeLists.txt` is also read early, only to learn what `main` requires, and `board.cmake` must be included there already, since it names some of that. In that early reading a component's properties are not there yet (`idf_component_get_property` on the engine fails), but a property of the build is |
-| `board.cmake` | the board's file (`BOARD_SRCS`: a file of `main`'s build directory that includes the board's file, so that `main` builds no file of the engine's directory, which ESP-IDF 6 would warn of), the components it needs (`BOARD_REQUIRES`), its display in pixels and millimetres. `dgx_ge_board.h` comes with the engine itself; `BOARD_INCLUDE_DIRS` is empty and kept only for games that name it |
+| `sdkconfig.defaults.<board>`, by `BOARD` | DGX builds only what the `sdkconfig` turns on; jef-sure/boards turns on the board's display, its bus and driver, and the engine its virtual screens. The board's file comes before the game's own, which may change what it says ([overview-en.md, 2.17](overview-en.md#217-the-board)) |
+| `MYGAME_ENGINE` as a property of the build | `main/CMakeLists.txt` is also read early, only to learn what `main` requires. In that early reading a component's properties are not there yet (`idf_component_get_property` on the engine fails), but a property of the build is |
+| `dgx_ge_di.cmake` | the touch of the display as the game's, the pad and the keyboard on it (`DGX_GE_DI_SRCS`: a file of `main`'s build directory that includes the engine's, so that `main` builds no file of the engine's directory, which ESP-IDF 6 would warn of). On a board without touch the same functions with nothing behind them |
 | `EMBED_FILES` | the pack in the firmware's flash; `mygame.pack` gives the symbols `_binary_mygame_pack_start` and `_end` |
 | `dgx_ge_params_of_pack` | `DGX_GE_ANIM_PARAMS` for the whole build, from the header (section 3) |
 | `dgx_ge_now_events` | `DGX_GE_ANIM_NOW_EVENTS` for the whole build: how many `now` events the game may send to an actor from that actor's own step, taken in turn (animation-en.md, section 4); 2 bytes a place in every actor; 1 to 255, 4 if not said. The number is written out so the reader sees where it is set |
 | `dgx_ge_synths` | `DGX_GE_SYNTH_<NAME>=1` for the whole build: the synthesizers of music the firmware carries (`chip`, `nes`, `fm`, those the songs play on; overview-en.md, 2.16); the others are not in the flash, a song of one of them plays nothing. FM alone if not said; written out so the reader sees where it is set |
-| `dgx_ge_fonts` and DGX's `dgx_fonts_*` | the game's font requests handed to DGX with the display, the frame's scale and the rules of which faces may be taken; DGX makes them at build time, `dgx_font_<name>()` each. A game without fonts of its own leaves these out |
+| `dgx_ge_fonts` and DGX's `dgx_fonts_*` | the game's font requests handed to DGX with the display (`BOARD_PIXELS`, `BOARD_MM`: jef-sure/boards gives them for the board chosen), the frame's scale and the rules of which faces may be taken; DGX makes them at build time, `dgx_font_<name>()` each. A game without fonts of its own leaves these out |
 
-Then:
+Then, with ESP-IDF 6, which reads the presets:
 
 ```sh
 idf.py build flash monitor
 ```
 
-The CYD build of the game of 2.2:
+ESP-IDF 5: `idf.py -B build/cyd_s028r -D SDKCONFIG=build/cyd_s028r/sdkconfig
+-D BOARD=cyd_s028r build flash monitor`. The CYD build of `examples/hello`,
+its touch and its sound included:
 
 ```text
--- DGX fonts: 1 need(s) and 0 list(s), generated into …/build/dgx_fonts; …
-[143/1094] DGX: the fonts of the program by its needs
-text: DejaVu Sans Mono Book 8 px (8 pt x 1), 23 glyphs
-…
-mygame.bin binary size 0x444b0 bytes. Smallest app partition is 0x100000 bytes. 0xbbb50 bytes (73%) free.
+hello.bin binary size 0x5bc50 bytes. Smallest app partition is 0x100000 bytes. 0xa43b0 bytes (64%) free.
 ```
 
-**Another board, or several.** Another of the engine's boards is another
-`board.cmake`, another copied `sdkconfig.defaults` (on an ESP32-P4 a second
-file, of the chip's revision) and another target. A game for several boards
-makes the board a choice of the build: a cache variable in `CMakeLists.txt`
-that picks the target and the list of defaults, handed to
-`main/CMakeLists.txt` as a property of the build, as
-`examples/hello/CMakeLists.txt` does with `HELLO_BOARD`
-(`idf.py -B build-p4 -D SDKCONFIG=build-p4/sdkconfig -D HELLO_BOARD=jc8012p4a1c build`).
-A board the engine does not have is the game's own: a file that implements
-`dgx_ge_board.h`, or a DGX screen given straight to `dgx_ge_frame_fit`.
+**Another board, or several.** `board_select.py` names them all at once
+(`board_select.py cyd_s028r jc8012p4a1c jc4827w543c .`), each a file of
+settings and a preset; the first is the current one, `idf.py build`'s, the
+others `idf.py --preset <board> build`, each in `build/<board>`.
+`board_select.py --current <board> .` makes another the current one. A board
+jef-sure/boards does not know is described as data in the project
+(its docs), or the game gives its own DGX screen straight to
+`dgx_ge_frame_fit`.
 
-**The engine from a checkout.** To build against a clone of the engine
-instead of the registry's, name it in `main/idf_component.yml`
-(`override_path:` under `jef-sure/dgx-ge`) and pass the same path as
-`-D MYGAME_ENGINE=<engine>`.
+**The engine from a clone.** To build against a clone of the engine instead
+of the registry's, link it as `components/jef-sure__dgx-ge`: ESP-IDF takes a
+component of the project over the registry's, and `MYGAME_ENGINE` above
+finds it there. Not `override_path`: ESP-IDF names such a component after
+its folder (`esp32-component-dgx-ge`), and the component manager then does
+not find `jef-sure__dgx-ge`.
 
 ### The computer
 
-The same `main.c` builds for Linux with the engine's board `host`: a window of
-SDL2 shows the board's display, the mouse is a finger, the keys are buttons.
-All of it is in [host-en.md](host-en.md); the essentials are a Makefile beside
-the project's `CMakeLists.txt` that names what `main/CMakeLists.txt` names
-and includes the engine's `host.mk` last:
+The same `main.c` builds for Linux as the board `host` of jef-sure/boards:
+ESP-IDF builds the project for its `linux` target, a window of DGX shows the
+display of the board named, the mouse is a finger, the keys are buttons. All of it is in
+[host-en.md](host-en.md); the essentials are the board chosen, and two lines
+in `CMakeLists.txt` before `project.cmake`:
 
-```make
-# mygame on the computer: make, make run, make clean.
-GAME             := mygame
-GAME_SRCS        := main/main.c
-GAME_INCLUDES    := main
-GAME_EMBED       := main/assets/mygame.pack
-GAME_PACK_H      := main/assets/mygame_pack.h
-GAME_DEFINES     := DGX_GE_ANIM_NOW_EVENTS=4 DGX_GE_SYNTH_FM=1 # as dgx_ge_now_events, dgx_ge_synths in main/CMakeLists.txt
-GAME_FONTS       := main/assets/mygame.fonts
-GAME_FONT_RULES  := fonts.rules
-HOST_DISPLAY     ?= 320x240
-HOST_MM          ?= 58x43
-ENGINE           ?= managed_components/jef-sure__dgx-ge
-# the pack made again before its header is read (section 4)
-GAME_PACK_MAKE   := python3 tools/pack.py $(ENGINE) ru
-GAME_PACK_INPUTS := tools/pack.py $(shell find game_data -type f) $(wildcard $(ENGINE)/tools/dgx_ge_*.py)
-
-include $(ENGINE)/boards/host/host.mk
+```sh
+python3 <boards>/tools/board_select.py host --as cyd_s028r .
 ```
 
-DGX and DGX-DI are taken from `managed_components/` (after one `idf.py
-build`) or given as `DGX=` and `DGX_DI=`. Build in a shell where ESP-IDF is
-not activated: its `ld` is the chip's, and `host.mk` stops on it.
+```cmake
+# the computer: main and what it requires (not every component of ESP-IDF builds there); the computer's linker
+if(BOARD STREQUAL "host")
+    set(COMPONENTS main)
+    set(CMAKE_EXE_LINKER_FLAGS "-B/usr/bin/")
+endif()
+```
+
+```sh
+idf.py --preset host build
+./build/host/mygame.elf
+```
+
+It builds in the same shell as the firmware, with ESP-IDF activated, and
+needs SDL2 (`libsdl2-dev`).
 
 ---
 
@@ -951,33 +949,35 @@ not activated: its `ld` is the chip's, and `host.mk` stops on it.
 
 | You changed | Run | What it shows |
 | --- | --- | --- |
-| a picture, a script, a dialog, the document | the pack script, or just `make` | the packer's checks pass: names, colors, rules, the header |
-| anything | `make run` | the game in a window, played by hand |
+| a picture, a script, a dialog, the document | the pack script, or just `idf.py --preset host build` | the packer's checks pass: names, colors, rules, the header |
+| anything | `idf.py --preset host build`, `./build/host/mygame.elf` | the game in a window, played by hand: the keys its buttons, the mouse a finger |
 | anything, before a commit | a run with nobody at the computer (below) | the game still does what it did: its log, its exit status, a picture |
 | something heavy (more actors, a larger scene, a new font) | `idf.py build flash monitor` | what only the board can tell: RAM free, the time of a frame |
 | a line of a dialog | `.pot` → `.po` → the pack | the translation is in, its letters in the fonts |
 
-**Without anyone at the computer.** SDL's dummy drivers, a scripted hand and
-a picture of the display at the end ([host-en.md, 9](host-en.md#9-with-nobody-at-the-computer)).
-The game of 2.1, walking right for 1.2 seconds:
+**Without anyone at the computer.** SDL's dummy drivers, a script of keys
+and mouse presses, an end after so many milliseconds and a picture of the
+display at the end ([host-en.md, 7](host-en.md#7-with-nobody-at-the-computer)).
+`examples/hello`, walking right for a second and hopping twice with A
+(Space), by a script `hops.script` of section 7 of host-en.md:
 
 ```text
-$ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy DGX_GE_HOST_INPUT="300 right+, 1500 right-" \
-  DGX_GE_HOST_QUIT_MS=2500 DGX_GE_HOST_SHOT=a.ppm ./build-host/mygame
-I host: a display of 320x240 pixels, 58x43 mm, in a window of 640x480
-I mygame: strides 1, x 46
-I mygame: strides 2, x 52
-I mygame: strides 3, x 58
-I mygame: strides 4, x 64
-I mygame: strides 5, x 70
-I host: the display written to a.ppm
+$ SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy DGX_HOST_SCRIPT=hops.script DGX_HOST_QUIT_MS=3500 \
+  DGX_HOST_SHOT=hello.ppm ./build/host/hello.elf
+I (…) hello: hops 0
+I (…) hello: a frame of 320x200, x4, on a display of 1280x800 of host; sound, a pointer, buttons
+I (…) hello: hops 1
+I (…) hello: hops 2
 ```
 
-Five strides of 240 ms in 1.2 seconds, six points each: real time, not
-frames. The game of 2.2, the right arrow held for twelve seconds, logs
-`the goal, after 40 strides` as the hero reaches the zone the document
-placed. A check is such a run and a look at what it left (the exit status,
-the log, the picture), in a script of the project.
+Run again, it starts at `hops 2`: NVS is kept in `build/host/flash.bin`. A
+check is such a run and a look at what it left (the log, the picture, what
+it kept), in a script of the project. On the engine's own board of the
+computer, before jef-sure/boards, the game of 2.1, the right arrow held for
+1.2 seconds, logged five strides of 240 ms, six points each: real time, not
+frames. The game of 2.2, the right arrow held for twelve seconds, logged
+`the goal, after 40 strides` as the hero reached the zone the document
+placed.
 
 **The scripts in words.** `tools/dgx_ge_explain.py` retells scripts as text,
 which is a quick way to see what a script really says, or to show it to
@@ -1024,7 +1024,7 @@ dialog changes the letters, and the next build makes the fonts again.
 rules would take at a size.
 
 **On the board.** The computer cannot tell whether the game fits and keeps up
-([host-en.md, 10](host-en.md#10-what-the-computer-cannot-tell)). Log
+([host-en.md, 8](host-en.md#8-what-the-computer-cannot-tell-and-what-it-has-not-yet)). Log
 `heap_caps_get_free_size(MALLOC_CAP_8BIT)` after the game is set up and the
 time a pass of the loop takes; the CYD has no PSRAM, and every actor, scene
 and record of the world comes out of its internal RAM. `idf.py size` tells
@@ -1047,10 +1047,10 @@ after a change of the data.
 | the packer | `ValueError: sound STEP twice` | samples given to one sound twice (by two `add_sound` calls with samples); a sound the document only names takes them once (2.3) |
 | the packer | `ValueError: sound STEP: its samples are taken from …/sounds/STEP.wav beside the document already` | the script gives samples to a sound whose file `add_sprites` took from `sounds/`: drop that `add_sound`, or keep the file elsewhere (2.3) |
 | the build, configuring | `the pack could not be made (tools/mygame_pack.py, see above)` | the game's own message: the packer's error is printed above it |
-| the build, configuring | `include could not find requested file: …/boards/cyd/board.cmake` | the engine is not where `MYGAME_ENGINE` points, or the engine downloaded is older than this document, whose boards had another layout |
-| the build, configuring | `CMake Warning`s: `Source file '…/boards/cyd/cyd.c' belongs to component dgx-ge but is being built by component main` | ESP-IDF 6 says so when `main`'s build directory lies inside the engine's directory: an example built inside the engine's own repository. A game with the engine in `managed_components/`, or an example made from the registry, has none: `board.cmake` hands `main` a file of its own build directory that includes the board's file. Harmless either way |
-| the computer, reading the Makefiles | `the pack was not made: <command> failed (it says why above)` | `host.mk` ran `GAME_PACK_MAKE` and it failed: the packer's error is printed above it |
-| compiling | `#error "the actors of this pack keep N params, the build fewer (DGX_GE_ANIM_PARAMS)…"` | the build was not told the pack's params: `dgx_ge_params_of_pack` in `main/CMakeLists.txt`, `GAME_PACK_H` in the Makefile. On the computer, a pack made by a make rule of the game's own comes after `host.mk` read the old header: let `host.mk` make it (`GAME_PACK_MAKE`, section 4) |
+| the build, configuring | `include could not find requested file: …/dgx_ge_di.cmake` | the engine is not where `MYGAME_ENGINE` points: no link in `components/`, and nothing downloaded yet, or an engine older than this document, whose boards were its own |
+| the build, configuring | `no sdkconfig.defaults.<board> here: run board_select.py <board> . of jef-sure/boards` | the board named is not among the project's: `board_select.py <board> .` |
+| the build, configuring | `the board <board> was asked for, but the configuration chose …` | the `sdkconfig` in `build/<board>` is another board's, or the build was not started by the board's preset: remove that `sdkconfig`, build with `idf.py --preset <board> build` |
+| compiling | `#error "the actors of this pack keep N params, the build fewer (DGX_GE_ANIM_PARAMS)…"` | the build was not told the pack's params: `dgx_ge_params_of_pack` in `main/CMakeLists.txt` |
 | compiling | `MYGAME_…` undeclared | a name changed in the data: the header follows the data, the code must follow too |
 | linking | `undefined reference to '_binary_my_game_pack_start'` | the symbols come from the embedded file's name: `mygame.pack` gives `_binary_mygame_pack_start`; a `-` or `.` becomes `_` |
 | running | `the pack does not hold together` (the game's own log after `dgx_ge_pack_open` failed) | the bytes embedded are not a pack of this engine's version: a pack made by an older packer than the engine, or the wrong file embedded |
@@ -1059,10 +1059,10 @@ after a change of the data.
 | running | an actor is not seen | its set's colors not given to the frame, its layer, a later layer over it, or it is given outside `actors_begin` … `render` ([overview-en.md, If something goes wrong](overview-en.md#if-something-goes-wrong)) |
 | running | text of a dialog missing or with holes | the font was made without those letters: the pack's language changed and the fonts were not made again, or a font is not marked to have the pack's texts |
 | the board | the game resets, or `no memory for the frame` | RAM: fewer actors or layers, a smaller frame, fewer records of the world; measure with `heap_caps_get_free_size` |
-| the board | the display stays black | the board's `sdkconfig.defaults` not in the list of defaults (DGX built without its driver links nothing), or an ESP32-P4 firmware built for another revision of the chip ([overview-en.md, 2.17](overview-en.md#217-the-board)) |
+| the board | the display stays black, or the firmware does not start | an ESP32-P4 firmware built for another revision of the chip than the board's: `board_select.py --revision` ([overview-en.md, 2.17](overview-en.md#217-the-board)) |
 
 The build for the computer has its own list of what goes wrong,
-[host-en.md, 12](host-en.md#12-when-something-goes-wrong).
+[host-en.md, 10](host-en.md#10-when-something-goes-wrong).
 
 ---
 

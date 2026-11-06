@@ -63,7 +63,7 @@ extern "C" {
 /*
  * Events at once an actor's own say may give in one step, taken in turn (dgx_ge_actor_event), 2 bytes each; one more
  * is refused. One value for the whole build, the engine's and the game's: the actor's size depends on it (a game
- * says it by dgx_ge_now_events of project_include.cmake, on the computer in its GAME_DEFINES).
+ * says it by dgx_ge_now_events of project_include.cmake, for its boards and the computer alike).
  */
 #ifndef DGX_GE_ANIM_NOW_EVENTS
 #define DGX_GE_ANIM_NOW_EVENTS 4

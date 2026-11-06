@@ -1,0 +1,19 @@
+# board_select.py host --as jc8012p4a1c
+# from jef-sure/boards 0.0.5, commit 2857470: board_select.py --again PROJECT_DIR makes it again when the component changes
+# The computer, chosen by tools/board_select.py of jef-sure/boards: a window as large as jc8012p4a1c
+# Read before the project's own sdkconfig.defaults. Made from the data of the component: do not edit.
+CONFIG_IDF_TARGET="linux"
+CONFIG_BOARD_SELECT_HOST=y
+CONFIG_BOARD_HOST_SHOWS="jc8012p4a1c"
+CONFIG_BOARD_HOST_WIDTH=1280
+CONFIG_BOARD_HOST_HEIGHT=800
+CONFIG_BOARD_HOST_MM_W=217
+CONFIG_BOARD_HOST_MM_H=136
+CONFIG_BOARD_HOST_COLOR_BITS=16
+CONFIG_BOARD_HOST_DIR_X=-1
+CONFIG_BOARD_HOST_DIR_Y=1
+CONFIG_BOARD_HOST_SWAP=1
+CONFIG_BOARD_HOST_TURN=270
+CONFIG_BOARD_HOST_BUTTONS="boot"
+# the window of DGX needs 48 KB of stack left in the task that starts the display: app_main's, in words of 8 bytes here
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384

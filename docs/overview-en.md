@@ -449,7 +449,7 @@ draws and sends on its own.
 A game usually makes its frame for whatever display it is given:
 
 ```c
-dgx_ge_frame_t *frame = dgx_ge_frame_fit(display, 320, 200, 0, board_band);
+dgx_ge_frame_t *frame = dgx_ge_frame_fit(display, 320, 200, 0, band);
 ```
 
 With a scale of 0 the frame takes the largest whole scale at which all of it
@@ -457,9 +457,10 @@ is seen (8 at most; 1 when even that is too large) and stands in the middle
 of the display: on 320×240 it is ×1 with 20 pixels above and below, on
 1280×800 ×4, on 1024×600 ×3 with 32 pixels at each side. The scale it took
 is `frame->scale`. A game whose fonts are made for a known scale gives that
-scale instead of 0. The last number is the band the board asks for
-(`board_band`, section 2.17); if there is no room for the band, the frame
-is sent in strips, and `frame->band` is 0. `NULL` means there is no memory
+scale instead of 0. The last number is the band the frame is sent in: 128
+KB to a panel of MIPI-DSI, 0, a strip, to a panel on a bus (section 2.17);
+if there is no room for the band, the frame is sent in strips, and
+`frame->band` is 0. `NULL` means there is no memory
 for the frame.
 
 - **Cost.** Width × height bytes: 320×200 is 64 KB, plus about 1.5 KB on top
@@ -1240,7 +1241,7 @@ handing it to the engine. For example, buttons on the board's pins that
 connect to ground:
 
 ```c
-uint32_t board_buttons(void)
+uint32_t game_buttons(void)
 {
     uint32_t held = 0;
     if (!gpio_get_level(PIN_LEFT))  held |= DGX_GE_KEY_LEFT;
@@ -1251,10 +1252,14 @@ uint32_t board_buttons(void)
 }
 
 /* in the game loop */
-dgx_ge_input_update(&input, board_buttons());
+dgx_ge_input_update(&input, game_buttons());
 if (input.pressed & DGX_GE_KEY_UP) ...       /* just pressed */
 if (input.held & DGX_GE_KEY_RIGHT) ...       /* held down */
 ```
+
+On a board of jef-sure/boards the buttons are the board's, each found by
+the name of a gamepad's button, and `dgx_ge_key_named` gives the bit of a
+name (section 2.17).
 
 The engine does not care where the mask came from: the board's pins, a
 gamepad, a keyboard on the computer, or a **scenario**, a list of "from
@@ -1280,7 +1285,7 @@ The axes must be handed over before the buttons:
 ```c
 int16_t axes[DGX_GE_AXES] = {lx, ly, rx, ry, lt, rt};   /* as the board read them */
 dgx_ge_input_axes(&input, axes);
-dgx_ge_input_update(&input, board_buttons());
+dgx_ge_input_update(&input, game_buttons());
 ```
 
 The engine takes off the **dead zone**: a small tilt around the center that
@@ -1618,8 +1623,7 @@ B o2 l4 @acoustic-bass c g c g
 
 Which synthesizers the firmware carries, the game's build says beside its
 other settings (Part 3): `dgx_ge_synths(chip fm)` in `main/CMakeLists.txt`,
-and on the computer `DGX_GE_SYNTH_CHIP=1 DGX_GE_SYNTH_FM=1` in
-`GAME_DEFINES`. Not said, FM alone: what is not chosen is not in the
+for the boards and the computer alike. Not said, FM alone: what is not chosen is not in the
 flash, and a channel's state is as large as the largest of those chosen
 needs. A song of a synthesizer the build left out plays nothing (the mixer
 answers as if it had ended at once), and the log says so once.
@@ -1675,111 +1679,177 @@ and keeping the two apart is the mixer's job, not the game's. Whoever fills
 from a task of its own gives the mixer its lock (`lock`, a function that
 takes and gives it back) before the task starts, and every call of the
 mixer takes that lock: play, stop, the volume, filling, and the
-`dgx_ge_mixer_output` adapter as well. The boards in `boards/` do this in
-`board_sound_start`, so a game calls the mixer however it likes and never
-wraps the calls in a lock of its own. A board's sound runs for as long as
+`dgx_ge_mixer_output` adapter as well. On FreeRTOS the engine does this in
+`dgx_ge_sound_open` (`dgx_ge_freertos.h`): a mutex of FreeRTOS as the lock,
+then the board's task started, so a game calls the mixer however it likes
+and never wraps the calls in a lock of its own. A board's sound runs for as long as
 the firmware does, and the mixer has to live as long.
 
-On a board of `boards/` the sound starts with one call:
+On a board of jef-sure/boards (section 2.17) the sound starts with one call,
+where the board has one:
 
 ```c
 const uint8_t *blob = dgx_ge_pack_blob(&pack, MYGAME_BLOB_SOUNDS, &size);
-sound = board_sound_open(&mixer, &sounds, blob, size, dgx_ge_game_value(&game, MYGAME_GAME_VOICES, 4));
+board_sound_t  speaker;
+if (board_sound_init(&speaker))
+    sound = dgx_ge_sound_open(&mixer, &sounds, blob, size, dgx_ge_game_value(&game, MYGAME_GAME_VOICES, 4), speaker.rate,
+                              speaker.mixer_volume ? speaker.mixer_volume * 255 / 100 : 32, board_sound_start);
 ```
 
 It opens the sounds, makes a mixer of that many voices at the board's rate
-(mono), starts the board's task, sets the board's volume
-(`board_sound_volume`) and returns the output to play through. On a board
-without sound, with no blob, or with no room for the voices it returns an
-empty output (`play` is `NULL`) and keeps nothing: `dgx_ge_sound_play` on
-it does nothing, so the game needs no checks of its own. How many voices
-sound at once is the game's choice, here a constant of the game.
+(`speaker.rate`, mono), gives it its lock, starts the board's task
+(`board_sound_start`: the task takes its samples from the mixer, its
+source), sets the volume and returns the output to play through. The
+volume is the board's level in percent of full scale (`mixer_volume`: the
+one the person chose last, which the game keeps by
+`board_sound_volume_keep(percent)` when the player changes it, else the
+level of the board's speaker), and the game's own, here 32 of 255, where
+the board tells none. The
+board is only the hardware: the I2S or the DAC, the codec, the task that
+sends the samples. With no blob, or with no room for the voices, it returns
+an empty output (`play` is `NULL`) and keeps nothing, as `sound` stays on a
+board without sound: `dgx_ge_sound_play` on it does nothing, so the game
+needs no checks of its own. How many voices sound at once is the game's
+choice, here a constant of the game.
 
 ### 2.17. The board
 
 The engine itself knows nothing about boards. Screens and chips differ a
 great deal, so the game sets up the hardware (display, touch, sound) and
-gives the engine a DGX screen. One of the engine's boards is the computer
-itself, `boards/host`: the game in a window, with no hardware
-([host-en.md](host-en.md)). For the boards games have already run on,
-the engine has ready-made setup code in the `boards/` directory: a
-directory per board (the CYD, `cyd/`; the Guition JC8012P4A1C, 10″,
-`jc8012p4a1c/`; the JC1060P470, 7″, `jc1060p470/`), plus a shared header
-`dgx_ge_board.h`. A board's directory holds everything known about it:
-
-- the board's file (`cyd.c`, `jc8012p4a1c.c`, ...): the display, and the touch and the sound where the board has them (the CYD's file sets up neither);
-- `board.cmake`: what to take into the game's build;
-- `sdkconfig.defaults`: what the board needs of the ESP-IDF settings;
-- on the ESP32-P4 boards, a file per chip revision as well:
-  `sdkconfig.defaults.rev3` and `sdkconfig.defaults.rev1` (below 3).
-
-The engine library does not build the board files and does not depend on
-their drivers. A game picks one board explicitly, in its
-`main/CMakeLists.txt`:
-
-```cmake
-include(${CMAKE_CURRENT_LIST_DIR}/../managed_components/jef-sure__dgx-ge/boards/cyd/board.cmake)
-idf_component_register(SRCS "main.c" ${BOARD_SRCS}
-                       INCLUDE_DIRS "." ${BOARD_INCLUDE_DIRS}
-                       PRIV_REQUIRES ${BOARD_REQUIRES})
-```
-
-The ESP-IDF settings are put together from files in a list, a later one
-over an earlier: the board's file first, then the one of its chip's
-revision, the game's own file last (the partition table, the optimization,
-the FreeRTOS tick):
+gives the engine a DGX screen. The boards are
+[jef-sure/boards](https://github.com/jef-sure/esp32-component-boards)'s: a
+board is described there once, as data, and the component sets up what it
+has: the display as a screen of DGX, the touch as DGX-DI's pointer,
+calibrated, the sound, the buttons. A game asks for them by kind
+(`boards.h`, `boards_dgx.h`, `boards_dgx_di.h`), never by the name of a
+board, so one `main.c` builds for every board, and for the computer, the
+board `host` ([host-en.md](host-en.md)). The game takes both components in
+its `main`:
 
 ```sh
-idf.py -D SDKCONFIG_DEFAULTS="components/dgx-ge/boards/jc8012p4a1c/sdkconfig.defaults;components/dgx-ge/boards/jc8012p4a1c/sdkconfig.defaults.rev3;sdkconfig.defaults" build
+idf.py add-dependency "jef-sure/dgx-ge"
+idf.py add-dependency "jef-sure/boards>=0.0.5"
 ```
 
-A game can name the board's files like this when the engine lies in the
-project itself (`components/dgx-ge`). A game that takes the engine from the
-registry copies them into its own project: ESP-IDF checks that the files of
-the list exist before it downloads the components into
-`managed_components/`, and in a fresh project the build stops ("does not
-exist").
+The boards of a project are chosen once, by `tools/board_select.py` of
+jef-sure/boards. For each board it writes `sdkconfig.defaults.<board>` (the
+board's chip, its revision, memory and flash, and the line that chooses the
+board) and a preset in `CMakePresets.json`, which builds the board in
+`build/<board>`:
+
+```sh
+python3 <boards>/tools/board_select.py cyd_s028r jc8012p4a1c .   # <boards>: a checkout, or managed_components/jef-sure__boards
+idf.py build                                                     # the current board, the first named
+idf.py --preset jc8012p4a1c build                                # another
+```
+
+ESP-IDF 5 doesn't read the presets: `idf.py -B build/<board> -D
+SDKCONFIG=build/<board>/sdkconfig -D BOARD=<board> build`. Either way the
+project's `CMakeLists.txt` takes the board's file, then the game's own
+(`sdkconfig.defaults`: the partition table, the optimization, the FreeRTOS
+tick), a later one over an earlier, before `project.cmake`:
+
+```cmake
+set(BOARD "" CACHE STRING "a board of this project: its file sdkconfig.defaults.<board>")
+if(NOT SDKCONFIG_DEFAULTS AND BOARD)
+	set(SDKCONFIG_DEFAULTS "sdkconfig.defaults.${BOARD};sdkconfig.defaults")
+endif()
+```
+
+`examples/hello` has the whole of it, with the two lines the computer needs
+(host-en.md, section 4).
 
 Why the board needs these settings. DGX builds only what the project's
-`sdkconfig` turns on. The engine's
-frame needs DGX's virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`), and the
-board's display needs its bus and driver: `CONFIG_DGX_ENABLE_SPI` and
-`CONFIG_DGX_ENABLE_SPI_ILI_9341` on the CYD, `CONFIG_DGX_ENABLE_DSI` and
-`CONFIG_DGX_ENABLE_JD9365` (10″) or `CONFIG_DGX_ENABLE_JD9165` (7″) on the
-Guition boards. Leave one out and the link fails on the functions it would
-have built. The Guition boards also need PSRAM (`CONFIG_SPIRAM`,
-`CONFIG_SPIRAM_MODE_HEX`): it holds the panel's two frame buffers and the
-band of the scaled frame, and without it the display does not start. Then
-there is the ESP32-P4's revision. An ESP-IDF that knows revision 3 builds
-for 3.1 and later by default, and such a firmware does not start on a chip
-below revision 3 (nor the other way round). A chip below 3 needs
-`CONFIG_ESP32P4_SELECTS_REV_LESS_V3`, and its clocks are lower: 360 MHz for
-the CPU and 200 MHz for PSRAM, while 400 and 250 are revision 3's only. My
-7″ has a chip of revision 1.3 (`sdkconfig.defaults.rev1`), my 10″ one of
-3.2 (`sdkconfig.defaults.rev3`). The JC8012P4A1C is sold with older chips
-too, and its `sdkconfig.defaults.rev1` is for them; it has not been tried
-on such a board, only built. The bootloader prints the revision at start
-(`chip revision`), and so does esptool when it connects. Each board's files
-say all this too.
+`sdkconfig` turns on. The engine turns on what it needs of DGX itself, the
+virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`, by its `Kconfig`), and
+jef-sure/boards the board's display, its bus and driver, and the PSRAM a
+large display holds its frame buffers in. On the ESP32-P4 the revision of
+the chip matters too: a firmware for revision 3 does not start on a chip
+below 3, nor the other way round, and the clocks of the CPU and the PSRAM
+follow it. `board_select.py` takes the revision the board's data names (my
+7″ has 1.3, my 10″ 3.2) and `--revision` another.
 
-Boards with a touch screen have DGX-DI's on-screen gamepad and keyboard
-(`board_pad_*`, `board_keyboard_*`). The keyboard draws itself straight onto
+The display:
+
+```c
+board_display_t display;
+if (!board_display_init(&display)) return;
+dgx_screen_t              *lcd   = board_dgx_screen(&display);
+const dgx_bus_protocols_t *bus   = board_dgx_bus(&display);
+dgx_ge_frame_t            *frame = dgx_ge_frame_fit(lcd, 320, 200, 0, bus && bus->bus_type == DGX_BUS_DSI ? 128 * 1024 : 0);
+```
+
+`display.mm_w` and `display.mm_h` are its size in millimetres, for the
+fonts and the touch. The band is the game's: a panel of MIPI-DSI keeps its
+picture in memory and takes the frame 128 KB at a time, as the Guition
+boards were measured; a panel on a bus (SPI, QSPI) a strip a row. A game
+that turns the display round (`board_display_orientation`) turns the touch
+with it.
+
+A board with a touch screen gives its touch panel as DGX-DI's pointer,
+calibrated. What the game does with it is the engine's and the same on
+every board (`dgx_ge_input_di.h`, `src/dgx_ge_di.c`, which the game
+compiles through `dgx_ge_di.cmake`):
+
+```cmake
+include(${CMAKE_CURRENT_LIST_DIR}/../managed_components/jef-sure__dgx-ge/dgx_ge_di.cmake)
+idf_component_register(SRCS "main.c" ${DGX_GE_DI_SRCS} INCLUDE_DIRS "." PRIV_REQUIRES nvs_flash esp_timer)
+```
+
+```c
+#if CONFIG_BOARD_TOUCH
+    board_touch_t touch;
+    pointing = board_touch_start(&display, &touch) && dgx_ge_di_start(board_dgx_di_pointer(&touch), display.mm_w, display.mm_h);
+#endif
+```
+
+`dgx_ge_di_start` takes it, `dgx_ge_di_read` reads it once a pass and
+hands out the fingers (the on-screen keyboard's first, then the gamepad's,
+the first of the rest is the game's), and DGX-DI's on-screen gamepad and
+keyboard are `dgx_ge_pad_*` and `dgx_ge_keyboard_*`. When the game turns
+the display round it calls `dgx_ge_di_turned` as well, so the gamepad is
+made anew for the turned display. The keyboard draws itself straight onto
 the display, in a band at the bottom or the top, so while it is open the
 game's frame must not draw there: `dgx_ge_frame_cover(frame, band)` covers
-those pixels, and once it is closed the frame redraws them.
+those pixels, and once it is closed the frame redraws them. A board without
+touch (`CONFIG_BOARD_TOUCH` is 0) has no DGX-DI at all, jef-sure/boards
+brings it only for a touch: the engine's functions are there with nothing
+behind them, and the code that names DGX-DI's own goes under `#if
+CONFIG_BOARD_TOUCH`, as above.
 
-**The end of a pass of the loop.** `board_pace(t0, period_us)` waits for
+A board's buttons have names (`board_button_name`, `board_button_find`),
+and those that control a program have the names of a gamepad's: `up`,
+`down`, `left`, `right`, `a`, `b`, `start`, `select`. `dgx_ge_key_named`
+gives each its bit, so the buttons of any board become the game's with no
+table of its own:
+
+```c
+uint32_t held = 0;
+for (int i = 0; i < board_button_count(); ++i) {
+    bool down;
+    if (board_button_at(i, &down) && down) held |= dgx_ge_key_named(board_button_name(i));
+}
+dgx_ge_input_update(&input, held | dgx_ge_pad_buttons());
+```
+
+Most boards have only BOOT, and a game takes its arrows from the gamepad on
+the display (`dgx_ge_pad_buttons`), shown where the board has no arrows of
+its own (`board_button_find("left") < 0`). On the computer the buttons are
+its keys ([host-en.md](host-en.md), section 5).
+
+**The end of a pass of the loop.** `dgx_ge_pace(t0, period_us)` waits for
 what is left of the period since `t0`, the `esp_timer_get_time()` taken at
 the start of the pass, and in any case gives up the processor for at least
 one tick, even when the pass took longer than the period. On a board the
 other tasks need that tick (and so does the task watchdog); on the computer
 the tick is when the window is shown and the input read. A late pass is not
-made up: the game moves by time. It is in `dgx_ge_board.h` and works the
+made up: the game moves by time. It is in `dgx_ge_freertos.h` and works the
 same on every board and on the computer.
 
 **What the game keeps over a restart.** A number or two (the best score, a
-count) go into NVS, and on the computer the same calls keep them in files
-([host-en.md](host-en.md), section 8). The game's component needs
+count) go into NVS. On the computer it is ESP-IDF's own NVS, on a flash
+kept in `build/host/flash.bin` between runs ([host-en.md](host-en.md),
+section 5). The game's component needs
 `nvs_flash` among its requirements.
 
 ```c
@@ -1804,10 +1874,12 @@ memory brings it up only for a read or a write and lets it go afterwards
 way, as a blob (`nvs_set_blob`, `nvs_get_blob`).
 
 The frame's scale, the fonts, the sounds and whatever the game stores are
-not the board file's business: the game sets them. If the ready board file
-does not suit you (other pins, another display, your own sound), copy it
-into your `main/` with the other files of its directory and change them
-there: the engine does not depend on them.
+not the board's business: the game sets them. A board jef-sure/boards does
+not know is described in the project itself, as data, and `board_select.py`
+takes it as one of its own (a board of the program,
+`components/local-boards/boards/<board>/board.json`; its docs). A game with
+hardware of its own sets up its DGX screen itself and gives it to the
+engine: the engine does not depend on jef-sure/boards.
 
 ### 2.18. The whole game loop
 
@@ -1817,7 +1889,7 @@ The main loop looks roughly like this:
 for (;;) {
     const int64_t  t0  = esp_timer_get_time();
     const uint32_t now = (uint32_t)(t0 / 1000);
-    dgx_ge_input_update(&input, board_buttons());
+    dgx_ge_input_update(&input, game_buttons());
 
     /* first the steps whose time has come, then the decisions by the buttons and the world:
        the logic looks at the hero where he has already got to */
@@ -1829,14 +1901,14 @@ for (;;) {
     dgx_ge_scene_show_actor(scene, &hero, LAYER_ACTORS, &pack, map_of, &hero_picture);
 
     dgx_ge_scene_render(scene);       /* draw what changed and send it */
-    board_pace(t0, 20000);            /* the rest of 20 ms, and a tick at least */
+    dgx_ge_pace(t0, 20000);           /* the rest of 20 ms, and a tick at least */
 }
 ```
 
 The actors' time is real time, so how often the loop runs does not change
 how fast they move. A pass every 20 ms is enough: the picture changes at
 most 50 times a second, and the rest of the time goes to the board's other
-tasks. `board_pace` (section 2.17) waits for the rest of the period and
+tasks. `dgx_ge_pace` (section 2.17) waits for the rest of the period and
 always gives up at least one tick.
 
 ---
@@ -1847,8 +1919,9 @@ always gives up at least one tick.
 
 - A computer with Linux (other systems should work too, but it has been
   tested on Linux).
-- **ESP-IDF** 5.3 or newer, the build environment for the ESP32. I build
-  the engine, the boards and the game it was checked on with 6.0.
+- **ESP-IDF** 5.5 or newer, the build environment for the ESP32
+  (jef-sure/boards needs 5.5). I build the engine, the boards and the game
+  it was checked on with 6.0.
 - **Python 3** and Pillow, to build the pack.
 - For fonts made for a board: a C compiler for the computer, FreeType
   (`libfreetype-dev`, `pkg-config`) and fontconfig. A game without fonts of
@@ -1861,14 +1934,13 @@ always gives up at least one tick.
 
 A game can be built for the computer without changing its code: the same
 `main.c`, the same pack, the same fonts, with the computer in place of a
-board. The engine has one more board for that, `boards/host`: a window of
-SDL2 shows a board's display, the mouse is a finger, the keys are buttons,
-the sound goes through SDL, and what the game keeps in NVS lies in files.
-It needs Linux, GNU make 4.3, gcc or clang, SDL2 for development and DGX
-0.8.0 or newer. A Makefile beside the project's `CMakeLists.txt` says what
-the game is made of and includes the engine's `host.mk`; the example
-`examples/hello` builds both ways. The same build runs a game with nobody at
-the computer, for a check before a commit or a picture for the docs.
+board. jef-sure/boards has a board for that, `host`: ESP-IDF builds the
+project for its `linux` target, a window of DGX shows a board's display,
+the mouse is a finger, the sound goes through SDL. It needs Linux, SDL2 for
+development and two lines in the project's `CMakeLists.txt`; the example
+`examples/hello` builds for it as for its boards (`idf.py --preset host
+build`). The same build runs a game with nobody at the computer, for a
+check before a commit or a picture for the docs.
 
 All of it, from what to install to what goes wrong, is in its own
 document, [host-en.md](host-en.md).
@@ -1915,9 +1987,8 @@ document, [workflow-en.md](workflow-en.md). In short:
    It sets `DGX_GE_ANIM_NOW_EVENTS` for the whole build, the engine's code
    and the game's alike, since the size of an actor depends on it: each
    place takes 2 bytes in every actor. Any whole number from 1 to 255, said
-   once; not said, it is 4. On the computer the same value goes into
-   `GAME_DEFINES` of the game's `Makefile`: `DGX_GE_ANIM_NOW_EVENTS=4`
-   (host-en.md).
+   once; not said, it is 4. The computer builds from the same
+   `CMakeLists.txt` and takes the same value.
 
    A game with music says which synthesizers its firmware carries (2.16,
    "Synthesizers"): those its songs play on, one or more of `chip`, `nes`,
@@ -1928,21 +1999,21 @@ document, [workflow-en.md](workflow-en.md). In short:
    ```
 
    It sets `DGX_GE_SYNTH_<NAME>=1` for the whole build, said once; the ones
-   left out are not in the flash. On the computer the same goes into
-   `GAME_DEFINES`: `DGX_GE_SYNTH_FM=1`.
+   left out are not in the flash.
 
 4. Put the pack into the firmware (`EMBED_FILES "assets/mygame.pack"` in
    `main/CMakeLists.txt`). If the game has named its fonts (`Pack.add_font`),
    hand their requests to DGX in the same place: `dgx_ge_fonts(assets/mygame.fonts)`,
    `dgx_fonts_board`, `dgx_fonts_scale`, `dgx_fonts_rules` (section 2.12).
-5. Set up the board. For the CYD and the two Guition boards there is
-   ready-made setup code in `boards/` (section 2.17). For any other board,
-   create the DGX bus and screen yourself (the `examples/` of DGX show how
-   for different displays) and give the screen to the engine
-   (`dgx_ge_frame_fit`, or `dgx_ge_frame_create` at a place of your own).
-   Turn on DGX's virtual screens and the display's bus and driver in
-   `sdkconfig` (section 2.17).
-6. Build and flash: `idf.py build flash monitor`.
+5. Choose the boards: `jef-sure/boards` in `main`, its
+   `tools/board_select.py <board> .` once, and the display, the touch and
+   the sound by kind in `main.c` (section 2.17). For a board it doesn't
+   know, describe the board as data in the project, or create the DGX bus
+   and screen yourself (the `examples/` of DGX show how for different
+   displays) and give the screen to the engine (`dgx_ge_frame_fit`, or
+   `dgx_ge_frame_create` at a place of your own).
+6. Build and flash: `idf.py build flash monitor`; for the computer, `idf.py
+   --preset host build` and `./build/host/<project>.elf`.
 7. Start with one actor on an empty scene. Then add a set, then a second
    actor, then collisions. Every step can be checked on the computer.
 
@@ -1994,7 +2065,7 @@ document, [workflow-en.md](workflow-en.md). In short:
 - **A link to an object** (`to: {object: …}` in the editor): for now a
   link's target can only be a cell; the game tells a character its event.
 - **Examples shipped with the engine:** one, `examples/hello`
-  ([host-en.md](host-en.md)). Neither of the two games the engine was tested
+  ([its README](../examples/hello/README.md)). Neither of the two games the engine was tested
   on comes with it.
 
 ---

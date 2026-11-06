@@ -2218,7 +2218,7 @@ class Pack:
             params = max(max(len(p) for *_, p in self.anims), 2)
             lines += [f"#define {self.prefix}_ANIM_PARAMS {params}", '#include "dgx_ge_anim.h"', f"#if DGX_GE_ANIM_PARAMS < {self.prefix}_ANIM_PARAMS",
                       f'#error "the actors of this pack keep {params} params, the build fewer (DGX_GE_ANIM_PARAMS): '
-                      'dgx_ge_params_of_pack(<this header>) in the game\'s CMakeLists, GAME_PACK_H in its Makefile of the computer"', "#endif", ""]
+                      'dgx_ge_params_of_pack(<this header>) in the game\'s main/CMakeLists.txt"', "#endif", ""]
         for name, scripts, events, params in self.anims:
             for kind, items in (("SCRIPT", scripts), ("EVENT", events), ("PARAM", params), ("GAME", self.games.get(name, ()))):
                 for i, item in enumerate(items):

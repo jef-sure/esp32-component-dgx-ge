@@ -1,18 +1,9 @@
-## IDF Component Manager Manifest File: the engine, and what the boards need beyond it
+## IDF Component Manager Manifest File: the engine and the boards
 dependencies:
+  # the registry's; inside the engine's tree, the engine itself, a component of the project (CMakeLists.txt), takes
+  # its place
   jef-sure/dgx-ge:
     version: "*"
-    # the engine this example lies in; an example made from the registry takes the registry's
-    override_path: "../../../"
-  # the touch of a board: its fingers as fingers of the display, the pad and the keyboard on the display
-  jef-sure/dgx-di: "^0.1.1"
-  # the P4 boards' sound, an ES8311
-  espressif/esp_codec_dev:
-    version: "~1.6.2"
-    rules:
-      - if: "target == esp32p4"
-  # the 7"'s touch panel, a GT911
-  espressif/esp_lcd_touch_gt911:
-    version: "^1"
-    rules:
-      - if: "target == esp32p4"
+  # the hardware: the display, the touch, the sound of the board the build chose (sdkconfig.defaults.<board>); it
+  # brings what that board needs (DGX-DI for a touch, the drivers of its sound) and nothing else
+  jef-sure/boards: ">=0.0.5"

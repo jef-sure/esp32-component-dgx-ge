@@ -15,8 +15,8 @@ extern "C" {
 /*
  * What every game writes between its pack and the screen, the same in each: the colors of the pack's sets given to
  * the frame, a picture of the pack as an item of the scene, an actor as it is drawn. (The frame made for the display
- * is dgx_ge_frame_fit; the sound and the step of the loop on a board are the boards', dgx_ge_board.h.) Nothing is
- * kept: the memory is the game's, as it gives it.
+ * is dgx_ge_frame_fit; the sound and the step of the loop on FreeRTOS are dgx_ge_freertos.h, over a board of
+ * jef-sure/boards.) Nothing is kept: the memory is the game's, as it gives it.
  */
 
 /*

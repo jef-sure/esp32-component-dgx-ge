@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 # an editor's own settings
 .vscode/
+# clangd's index, made by the editor while it works
+.cache/

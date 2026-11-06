@@ -263,7 +263,7 @@ def compiles(*flags):
 
 
 r = compiles()
-check(r.returncode != 0 and "dgx_ge_params_of_pack" in r.stderr and "GAME_PACK_H" in r.stderr, f"a build without the params of the pack: {r.returncode} {r.stderr[-300:]}")
+check(r.returncode != 0 and "dgx_ge_params_of_pack" in r.stderr and "main/CMakeLists.txt" in r.stderr, f"a build without the params of the pack: {r.returncode} {r.stderr[-300:]}")
 check(compiles("-DDGX_GE_ANIM_PARAMS=5").returncode != 0, "a build with fewer params than the pack needs")
 for n in ("6", "8"):
     r = compiles(f"-DDGX_GE_ANIM_PARAMS={n}")

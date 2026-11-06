@@ -12,7 +12,7 @@ CFLAGS  += -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
 PYTHON  ?= python3
 BUILD   := build
 
-TESTS := test_pack test_scene test_frame test_anim test_mask test_tiles test_world test_save test_widgets test_shots test_pockets test_cells test_graph test_timers test_show test_chase test_walk test_walk_bind test_dialog test_text test_label test_sound test_mixer test_music test_music_chip test_synth test_synth_chip test_synth_default test_talk_view test_crowd test_input test_layout test_host_nvs test_hits test_now test_now_2 test_glue test_board test_board_mute test_game_vars test_orient
+TESTS := test_pack test_scene test_frame test_anim test_mask test_tiles test_world test_save test_widgets test_shots test_pockets test_cells test_graph test_timers test_show test_chase test_walk test_walk_bind test_dialog test_text test_label test_sound test_mixer test_music test_music_chip test_synth test_synth_chip test_synth_default test_talk_view test_crowd test_input test_layout test_hits test_now test_now_2 test_glue test_freertos test_freertos_mute test_game_vars test_orient
 
 # what of DGX the engine stands on, as DGX gives it for a computer (DGX 0.8: host/dgx_host.mk, its sources by group, the
 # stubs of ESP-IDF); its fonts each test names
@@ -151,11 +151,11 @@ run-test_tiles: $(BUILD)/test_tiles $(BUILD)/test.pack
 run-test_glue: $(BUILD)/test_glue $(BUILD)/test.pack
 	./$(BUILD)/test_glue $(BUILD)/test.pack
 
-run-test_board: $(BUILD)/test_board $(BUILD)/test.pack
-	./$(BUILD)/test_board $(BUILD)/test.pack
+run-test_freertos: $(BUILD)/test_freertos $(BUILD)/test.pack
+	./$(BUILD)/test_freertos $(BUILD)/test.pack
 
-run-test_board_mute: $(BUILD)/test_board_mute $(BUILD)/test.pack
-	./$(BUILD)/test_board_mute $(BUILD)/test.pack
+run-test_freertos_mute: $(BUILD)/test_freertos_mute $(BUILD)/test.pack
+	./$(BUILD)/test_freertos_mute $(BUILD)/test.pack
 
 run-%: $(BUILD)/%
 	./$<
@@ -170,17 +170,14 @@ $(BUILD)/test_pack: test_pack.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $
 $(BUILD)/test_glue: test_glue.c $(ROOT)/src/dgx_ge_glue.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(BUILD)/test_pack.h $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_glue.c $(ROOT)/src/dgx_ge_glue.c $(ROOT)/src/dgx_ge_pack.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@
 
-# the header of the boards, on a board of the test's own (its sound, its clock, its pause): the board host's stubs before
-# DGX's, as a game's build for the computer has them; once with sound, once without
-BOARD_TEST_DEPS := test_board.c $(ROOT)/boards/dgx_ge_board.h $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_music.c $(ROOT)/src/dgx_ge_pack.c $(BUILD)/test_pack.h $(HEADERS)
-$(BUILD)/test_board: $(BOARD_TEST_DEPS) | $(BUILD)
-	$(CC) -I$(ROOT)/boards/host/stubs -I$(ROOT)/boards $(CPPFLAGS) $(CFLAGS) test_board.c $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_music.c $(ROOT)/src/dgx_ge_pack.c -o $@
-$(BUILD)/test_board_mute: $(BOARD_TEST_DEPS) | $(BUILD)
-	$(CC) -DBOARD_MUTE -I$(ROOT)/boards/host/stubs -I$(ROOT)/boards $(CPPFLAGS) $(CFLAGS) test_board.c $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_music.c $(ROOT)/src/dgx_ge_pack.c -o $@
-
-# NVS on the computer, the board host's (boards/host): its stubs before DGX's, its file store
-$(BUILD)/test_host_nvs: test_host_nvs.c $(ROOT)/boards/host/host_nvs.c $(ROOT)/boards/host/stubs/nvs.h $(ROOT)/boards/host/stubs/nvs_flash.h check.h | $(BUILD)
-	$(CC) -I$(ROOT)/boards/host/stubs $(CPPFLAGS) $(CFLAGS) test_host_nvs.c $(ROOT)/boards/host/host_nvs.c -o $@
+# the engine on FreeRTOS (dgx_ge_freertos.h), over a board of the test's own (its sound, its clock, its pause): the
+# test's stubs before DGX's (the mutex, the pause, the clock); once with sound, once without
+FREERTOS_TEST_SRCS := test_freertos.c $(ROOT)/src/dgx_ge_freertos.c $(ROOT)/src/dgx_ge_mixer.c $(ROOT)/src/dgx_ge_music.c $(ROOT)/src/dgx_ge_pack.c
+FREERTOS_TEST_DEPS := $(FREERTOS_TEST_SRCS) $(wildcard stubs/*.h stubs/*/*.h) $(BUILD)/test_pack.h $(HEADERS)
+$(BUILD)/test_freertos: $(FREERTOS_TEST_DEPS) | $(BUILD)
+	$(CC) -Istubs $(CPPFLAGS) $(CFLAGS) $(FREERTOS_TEST_SRCS) -o $@
+$(BUILD)/test_freertos_mute: $(FREERTOS_TEST_DEPS) | $(BUILD)
+	$(CC) -DBOARD_MUTE -Istubs $(CPPFLAGS) $(CFLAGS) $(FREERTOS_TEST_SRCS) -o $@
 
 $(BUILD)/test_scene: test_scene.c $(ENGINE_SRCS) $(HEADERS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) test_scene.c $(ENGINE_SRCS) $(DGX_SRCS) -lm -o $@

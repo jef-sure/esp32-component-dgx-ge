@@ -54,24 +54,29 @@ Its interfaces will still change.
   my sprite editor ([dgx-ge-editor](https://github.com/jef-sure/dgx-ge-editor)): its sets, animations, tiles,
   scenes, graph and game.
 
-The engine itself knows no board: the game sets up its own display, touch
-and sound and gives the engine a DGX screen. For the boards games have run
-on (the CYD; the Guition JC8012P4A1C, 10", and JC1060P470, 7") `boards/`
-has ready set-up code, a directory a board, which the library does not
-build: a game takes one board into its own build
-(`boards/<board>/board.cmake`) with the ESP-IDF settings it needs
-(`boards/<board>/sdkconfig.defaults`, and on an ESP32-P4 one for its chip's
-revision), or copies them into its project and changes them.
+The engine itself knows no board: the game sets up its display, touch and
+sound and gives the engine a DGX screen. The boards are
+[jef-sure/boards](https://github.com/jef-sure/esp32-component-boards)'s:
+a board is described there once, as data, and a game asks for its parts by
+kind (`board_display_init`, `board_dgx_screen`, `board_touch_start`,
+`board_sound_start`), never by the name of a board. Its
+`tools/board_select.py` chooses the boards of a project once and writes
+their ESP-IDF settings (`sdkconfig.defaults.<board>`) and a preset of each
+(`CMakePresets.json`). What a game does over the board is the engine's:
+the touch as its pointer, the pad and the keyboard on the display
+(`dgx_ge_input_di.h`), the sound and the pace of its loop
+(`dgx_ge_freertos.h`).
 
-One of the boards is the computer itself, `boards/host`: the game's own
-`main.c` in a window of SDL2, the display of a board shown in it, the mouse
-a finger, the keys buttons, SDL's sound, NVS in files. A Makefile of the
-game includes `boards/host/host.mk` and `make` builds it (DGX 0.8.0 or
-newer). The example `examples/hello` builds both ways, for the computer and
-for the boards. All of it, from what to install to how the computer stands
-in for a board and what it cannot show (speed, memory), is in
-[docs/host-en.md](docs/host-en.md) ([по-русски](docs/host-ru.md)). The engine itself is
-plain C and is tested on a host too.
+One of the boards is the computer itself, the board `host` of jef-sure/boards:
+the linux target of ESP-IDF, the game's own `main.c` in a window of DGX as
+large as the display of the board it shows, the mouse a finger, the keys
+buttons, the computer's sound, NVS in a file kept beside the program. The example `examples/hello`, a game made in my editor
+(its `game_data/`), builds for the computer and for four boards. How the
+computer stands in for a board, how a game runs on it with nobody at it (a
+script of keys and the mouse), and what it cannot show (speed, memory), is
+in
+[docs/host-en.md](docs/host-en.md) ([по-русски](docs/host-ru.md)). The
+engine itself is plain C and is tested on a host too.
 
 ## On a board
 
@@ -110,22 +115,41 @@ same), so a game of yours can be measured the same way.
 
 ## Getting started
 
-You need ESP-IDF 5.3 or newer; I build the engine, the boards and the game
-it was checked on with 6.0. The engine is in the ESP Component Registry;
-add it to the project's `main`, and DGX comes along by itself:
+You need ESP-IDF 5.5 or newer (jef-sure/boards does); I build the engine,
+the boards and the game it was checked on with 6.0. The engine is in the
+ESP Component Registry; add it and the boards to the project's `main`, and
+DGX comes along by itself, DGX-DI with a board that has touch:
 
 ```sh
 idf.py add-dependency "jef-sure/dgx-ge"
+idf.py add-dependency "jef-sure/boards>=0.0.5"
 ```
 
 With no version it takes the newest, and `dependencies.lock` beside the
 project keeps the versions taken until `idf.py update-dependencies`.
 
-DGX builds only what the project's `sdkconfig` turns on: the engine's
-frame needs its virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`), and the
-display its bus and driver; without them the link stops at their missing
-functions. Each board's `.cmake` names its own, and the PSRAM a board with
-a large display needs for its frame buffers.
+Or a whole new game at once, in a folder of its own: `tools/dgx_ge_new.py`
+makes one from `examples/hello` or from a game of my editor, renamed for it
+(its project, pack, prefix in C, NVS), with the example's boards, building
+for them and for the computer (`idf.py`) as it is; other boards are
+`board_select.py`'s. Run it from a checkout of the engine or from
+`managed_components/jef-sure__dgx-ge/tools/`:
+
+```sh
+python3 tools/dgx_ge_new.py ../mygame                      # hello, renamed mygame
+python3 tools/dgx_ge_new.py ../worm --from snake           # the editor's snake, once it is on jef-sure/boards
+```
+
+The engine of such a game is the registry's, as git keeps it; a checkout
+instead is a link to it, `components/jef-sure__dgx-ge`, which ESP-IDF takes
+over the registry's and git ignores. Run from a checkout of the engine, the
+script links that checkout (`--engine registry`: no link); from the
+registry's download, it links none. Its README says the rest.
+
+DGX builds only what the project's `sdkconfig` turns on: the engine turns
+on its virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`, by its `Kconfig`), and
+jef-sure/boards the display's bus and driver and the PSRAM a board with a
+large display needs for its frame buffers.
 
 The component manager puts it into `managed_components/jef-sure__dgx-ge`
 and makes `main` require it, so `main/CMakeLists.txt` needs no `REQUIRES`
@@ -153,7 +177,7 @@ from it. A game with fonts of its own names them in its script
 
 ```cmake
 dgx_ge_fonts(assets/game.fonts)
-dgx_fonts_board(PIXELS 1280 800 MM 217 136)
+dgx_fonts_board(PIXELS ${BOARD_PIXELS} MM ${BOARD_MM})   # the board's display, as jef-sure/boards gives it
 dgx_fonts_scale(4)
 dgx_fonts_rules(../fonts.rules)
 ```
@@ -187,7 +211,7 @@ In English and in Russian:
 - [docs/workflow-en.md](docs/workflow-en.md) ([по-русски](docs/workflow-ru.md)):
   the way of a game from its data, whatever made them, to the board;
 - [docs/host-en.md](docs/host-en.md) ([по-русски](docs/host-ru.md)):
-  a game built and run on the computer.
+  a game built and run on the computer, the board `host` of jef-sure/boards.
 
 The API itself is described in the headers, `include/*.h`.
 

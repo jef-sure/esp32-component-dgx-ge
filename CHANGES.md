@@ -1,5 +1,112 @@
 # Changes
 
+## 0.5.0 - 2026-11-06
+
+The boards are jef-sure/boards': the engine has none of its own, and a game
+asks for the parts of any board by kind, the computer among them (its board
+`host`, a window of DGX). What a game did alike over every board, the touch
+as its pointer, the pad and the keyboard on the display, the sound and the
+pace of its loop, is the engine's. DGX 0.10.10. No repack: the packs of
+0.4.0 are read as they are.
+
+- **Changed (breaking): the boards are jef-sure/boards'.** `boards/` (the
+  CYD, the 10", the 7", the 4.3", the computer), `dgx_ge_board.h`,
+  `boards/host/host.mk` with its stubs of ESP-IDF and NVS in files are gone.
+  A game takes
+  [jef-sure/boards](https://github.com/jef-sure/esp32-component-boards)
+  0.0.5 or later: `board_display_init` and `board_dgx_screen` for the
+  display, `board_touch_start` and `board_dgx_di_pointer` for the touch,
+  `board_sound_init` and `board_sound_start` for the sound, the buttons by
+  their names, and its `tools/board_select.py`, which writes
+  `sdkconfig.defaults.<board>` and `CMakePresets.json` of the project. The
+  computer is its board `host`: the linux target of ESP-IDF, the display a
+  window of DGX, the mouse a finger, the keys buttons, NVS in
+  `build/host/flash.bin`. The band of a frame (was `board_band`) is the
+  game's: 128 KB to a panel of MIPI-DSI (`bus_type` `DGX_BUS_DSI` of
+  `board_dgx_bus`), a strip to a panel on a bus. The volume (was
+  `board_sound_volume`) is the board's level, `mixer_volume` of
+  `board_sound_t` in percent of full scale, where it tells one.
+- **Changed (breaking): DGX `^0.10.10`** (was `^0.8.0`): its window on the
+  computer, the screen of jef-sure/boards' `host`, and its mouse as a
+  finger, which DGX-DI 0.1.5 reads. The engine's `Kconfig` turns on DGX's
+  virtual screens (`CONFIG_DGX_ENABLE_VSCREEN`, the canvas of its text and
+  its laid-out pictures), which the engine's boards turned on before.
+- **Changed (breaking): a board is its hardware; what a game does over one
+  is the engine's.** The pad, the keyboard and the pointer over DGX-DI are
+  one module of the engine, `src/dgx_ge_di.c` (`dgx_ge_input_di.h`), which a
+  game compiles through `dgx_ge_di.cmake`:
+  `dgx_ge_di_start(board_dgx_di_pointer(&touch), display.mm_w,
+  display.mm_h)`, `dgx_ge_di_read`, `dgx_ge_di_turned` after
+  `board_display_orientation`, `dgx_ge_pad_*`, `dgx_ge_keyboard_*` (were
+  `board_pointer`, `board_pad_*`, `board_keyboard_*`). `dgx_ge_input_di.h`
+  names DGX-DI's pointer by its tag, `struct dgx_di_pointer`, and has the
+  rest of DGX-DI's (`dgx_ge_input_take_di`) only where DGX-DI is: a board
+  without touch (`CONFIG_BOARD_TOUCH` 0) needs no DGX-DI, and gets the same
+  functions with nothing behind them. DGX-DI comes by the manifests
+  (jef-sure/boards brings it for a board with touch); `DGX_GE_DI_REQUIRES`
+  is empty, kept for the CMakeLists that name it. The loop's pace and the
+  sound are `dgx_ge_freertos.h`: `dgx_ge_pace` (was `board_pace`) and
+  `dgx_ge_sound_open(..., speaker.rate, volume, board_sound_start)` (was
+  `board_sound_open`), whose start is as jef-sure/boards'
+  `board_sound_start(source, ctx, rate_out)` (the engine gives `NULL`). The
+  mixer's lock is a mutex of FreeRTOS, on the computer too, where
+  jef-sure/boards fills from a task as on a board. `test_board` is
+  `test_freertos`; `test_host_nvs` is gone with the NVS it tested.
+- **A button by its name:** `dgx_ge_key_named("left")` is `DGX_GE_KEY_LEFT`,
+  and so on for the names of a gamepad's buttons, as jef-sure/boards names a
+  board's that control a program (`up`, `down`, `left`, `right`, `a`, `b`,
+  `start`, `select`, and the rest of the engine's); 0 for another name. The
+  buttons of any board become a game's with no table of its own.
+- **`examples/hello` is a game of the editor,** laid out as the editor's
+  `workflow.md` says a game is: its data in `game_data/` (the document
+  `hello.json` with the game's screen and the palette UI, the robot's
+  pictures in `BOT/`, the ground in `GROUND/`, `BOT.anim`, the chirp in
+  `sounds/hop.wav`, now at 11025 Hz), `tools/pack.py` the packer over it as
+  in the editor's games; the editor opens it. The build makes the pack, and
+  git no longer keeps it; the frame's size is the document's
+  (`HELLO_SCREEN_WIDTH`, `_HEIGHT`). `art/`, `anim/` and
+  `tools/hello_assets.py` are gone; a script of a game's own is in
+  `docs/workflow-*`, section 2.1.
+- **`examples/hello` on jef-sure/boards:** the CYD (`cyd_s028r`, the
+  current board), the 10" (`jc8012p4a1c`), the 7" (`jc1060p470c`), the
+  4.3" (`jc4827w543c`), each a preset building in `build/<board>`, and the
+  computer showing the 10" (`host`, `build/host/hello.elf`). Its Makefile is
+  gone. The touch is its pointer, and the pad on the display its arrows
+  where the board has none of its own (the computer has its keys); the
+  board's buttons are taken by their names, BOOT as a hop. The sound is at
+  the board's level. The count is logged, `hops N`, for a check of a run.
+- **`examples/hello` builds inside the engine's tree again:** the engine a
+  component of the project by a link `jef-sure__dgx-ge` in the build's folder
+  (`EXTRA_COMPONENT_DIRS`), not `override_path`, which the component manager
+  3.1 no longer resolves there (see the next).
+- **The documents follow jef-sure/boards.** `docs/host-*` is the board
+  `host` of jef-sure/boards for a game of the engine: what to install, the
+  two lines of a project's `CMakeLists.txt`, what the computer stands in for
+  and how (the keys as buttons, NVS in `build/host/flash.bin`), DGX's
+  variables for a run with nobody at it (`DGX_HOST_SCRIPT`, a script of keys
+  and the mouse; `DGX_HOST_QUIT_MS`, `DGX_HOST_SHOT`, `DGX_HOST_HEAP_MAX`),
+  what it has not yet (typing on the keyboard on the display), what goes
+  wrong. The overview's board (2.17), its
+  sound and its Part 3, and the building of `docs/workflow-*` take the
+  boards, `board_select.py` and its presets. The packer's `#error` of too few
+  params names `main/CMakeLists.txt` alone (it named the Makefile of the
+  computer too).
+- **A new game in a folder of its own:** `tools/dgx_ge_new.py <folder>
+  [--from hello|snake|tetris|pacman|<a game's folder>] [--engine
+  registry|local|<a checkout>]` makes a project from `examples/hello` or a
+  game of the editor, tied to nothing around it: renamed for the game (its
+  project, program, pack, prefix in C, NVS namespace), the example's boards
+  as `board_select.py` wrote them, the pack made by the build, `.clangd` and
+  VS Code's settings, a README. It builds with `idf.py` as it is, for the
+  boards and the computer. A game still on the engine's boards of before
+  (`dgx_ge_board.h`) stops it, said so: the editor's games, until they move.
+  The engine is the registry's as git keeps it; a checkout is a link
+  `components/jef-sure__dgx-ge` (made when the script runs from a
+  checkout), which ESP-IDF takes over the registry's: not
+  `override_path`, which the component manager 3.1 no longer resolves for a
+  folder of another name (ESP-IDF names the component `esp32-component-dgx-ge`,
+  the manager asks for `jef-sure__dgx-ge`).
+
 ## 0.4.0 - 2026-10-23
 
 Music by notes on synthesizers of a game's choice (a chip, the NES, FM),

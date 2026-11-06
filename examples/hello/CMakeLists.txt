@@ -1,41 +1,50 @@
-# hello for a board of the engine: idf.py build (the CYD), or another board by its directory in the engine's boards/:
-#   idf.py -B build-p4 -D SDKCONFIG=build-p4/sdkconfig -D HELLO_BOARD=jc8012p4a1c build
-#   idf.py -B build-p7 -D SDKCONFIG=build-p7/sdkconfig -D HELLO_BOARD=jc1060p470 build
-# Its sdkconfig: the board's settings, those of its chip's revision, then the game's own (sdkconfig.defaults), a later
-# file over an earlier. For the computer it is make instead (Makefile).
+# hello for a board of jef-sure/boards, or for the computer. The boards are chosen once, by tools/board_select.py of
+# jef-sure/boards, which wrote sdkconfig.defaults.<board> here and CMakePresets.json, whose preset builds a board in
+# build/<board> (ESP-IDF 6 reads the presets; ESP-IDF 5: idf.py -B build/<board> -D SDKCONFIG=build/<board>/sdkconfig
+# -D BOARD=<board> build):
+#   idf.py build                            the CYD (cyd_s028r), the current board
+#   idf.py --preset jc8012p4a1c build       the 10", the 7" (jc1060p470c), the 4.3" (jc4827w543c)
+#   idf.py --preset host build              the computer, a window as large as the CYD's display: build/host/hello.elf
+# The pack is made by the build from game_data/, what the sprite editor keeps (main/CMakeLists.txt). Its sdkconfig: the
+# board's settings, then the game's own (sdkconfig.defaults), a later file over an earlier.
 cmake_minimum_required(VERSION 3.22)
 
-set(HELLO_BOARD cyd CACHE STRING "the board: cyd, jc8012p4a1c (10\"), jc1060p470 (7\")")
-# the boards of the engine this example lies in; an example made from the registry has copied them beside it
-# (README: ESP-IDF looks for these files before it downloads the engine into managed_components/)
-if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/../../boards/${HELLO_BOARD}/sdkconfig.defaults)
-	set(board ../../boards/${HELLO_BOARD})
+# BOARD=<board>, which the preset of a board sets, builds with sdkconfig.defaults.<board> that board_select.py wrote,
+# then with the game's own sdkconfig.defaults. A -D SDKCONFIG_DEFAULTS=... on the command line wins.
+set(BOARD "" CACHE STRING "a board of this project: its file sdkconfig.defaults.<board>")
+if(NOT SDKCONFIG_DEFAULTS AND BOARD)
+	if(NOT EXISTS ${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults.${BOARD})
+		message(FATAL_ERROR "no sdkconfig.defaults.${BOARD} here: run board_select.py ${BOARD} . of jef-sure/boards")
+	endif()
+	set(SDKCONFIG_DEFAULTS "sdkconfig.defaults.${BOARD};sdkconfig.defaults")
+endif()
+
+# the engine this example lies in; an example made from the registry has the registry's, in managed_components/
+if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/../../dgx_ge.cmake)
+	# the engine a component of the project under the name the component manager knows it by, jef-sure__dgx-ge: a link
+	# of that name in the build's folder (ESP-IDF names a component after its folder, and the engine's is
+	# esp32-component-dgx-ge, or dgx-ge; override_path in main/idf_component.yml then leaves jef-sure__dgx-ge unknown)
+	get_filename_component(engine ${CMAKE_CURRENT_LIST_DIR}/../.. ABSOLUTE)
+	file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR})
+	file(CREATE_LINK ${engine} ${CMAKE_BINARY_DIR}/jef-sure__dgx-ge SYMBOLIC)
+	list(APPEND EXTRA_COMPONENT_DIRS ${CMAKE_BINARY_DIR}/jef-sure__dgx-ge)
 else()
-	set(board boards/${HELLO_BOARD})
+	set(engine ${CMAKE_CURRENT_LIST_DIR}/managed_components/jef-sure__dgx-ge)
 endif()
-if(HELLO_BOARD STREQUAL "cyd")
-	set(board_target esp32)
-	set(board_defaults "${board}/sdkconfig.defaults")
-elseif(HELLO_BOARD STREQUAL "jc8012p4a1c")
-	set(board_target esp32p4)
-	set(board_defaults "${board}/sdkconfig.defaults;${board}/sdkconfig.defaults.rev3")
-elseif(HELLO_BOARD STREQUAL "jc1060p470")
-	set(board_target esp32p4)
-	set(board_defaults "${board}/sdkconfig.defaults;${board}/sdkconfig.defaults.rev1")
-else()
-	message(FATAL_ERROR "HELLO_BOARD ${HELLO_BOARD}: cyd, jc8012p4a1c or jc1060p470")
-endif()
-if(NOT SDKCONFIG_DEFAULTS)
-	set(SDKCONFIG_DEFAULTS "${board_defaults};sdkconfig.defaults")
-endif()
-# ESP-IDF guesses the target from an sdkconfig of the project before the defaults: the board's
-if(NOT IDF_TARGET AND NOT DEFINED ENV{IDF_TARGET})
-	set(IDF_TARGET ${board_target})
+
+# the computer (BOARD=host, the linux target of ESP-IDF): main and what it requires, the drivers of a chip are not there
+if(BOARD STREQUAL "host")
+	set(COMPONENTS main)
+	# in a shell of ESP-IDF the linker of a chip comes first in PATH: the compiler of the computer looks in /usr/bin first
+	set(CMAKE_EXE_LINKER_FLAGS "-B/usr/bin/")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-# a lock of the components for each chip: the CYD (esp32) and the P4 boards (esp32p4) side by side
-idf_build_set_property(DEPENDENCIES_LOCK ${CMAKE_CURRENT_LIST_DIR}/dependencies.lock.${IDF_TARGET})
-# the board for main/CMakeLists.txt: a property of the build, which ESP-IDF hands on even where it reads that file early
-idf_build_set_property(HELLO_BOARD ${HELLO_BOARD})
+# each board has its lock of the components beside the project: dependencies.lock.<board>
+if(BOARD)
+	idf_build_set_property(DEPENDENCIES_LOCK ${CMAKE_CURRENT_LIST_DIR}/dependencies.lock.${BOARD})
+endif()
+# the engine for main/CMakeLists.txt (its touch, its packer): a property of the build, which ESP-IDF hands on even where
+# it reads that file early
+idf_build_set_property(GAME_ENGINE ${engine})
 project(hello)

@@ -1,0 +1,32 @@
+# board_select.py jc1060p470c
+# from jef-sure/boards 0.0.5, commit 2857470: board_select.py --again PROJECT_DIR makes it again when the component changes
+# The board of this project, chosen by tools/board_select.py of jef-sure/boards: jc1060p470c
+# Read before the project's own sdkconfig.defaults. Made from the data of the component: do not edit,
+# run board_select.py again to change the board.
+# The Guition JC1060P470C (7-inch): what its chip, its memory and its flash need, read before
+# the program's own defaults (SDKCONFIG_DEFAULTS of the project, tools/board_select.py puts
+# this file there). The first two lines are the choice of the board: the chip, and the board
+# in the menu of the configuration. The DGX drivers its panel needs (DSI, JD9165) come with
+# that choice.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_BOARD_SELECT_JC1060P470C=y
+
+# 16 MB flash: a BoyaMicro chip, on four lines at 80 MHz, as in the examples of Guition
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPI_FLASH_SUPPORT_BOYA_CHIP=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# 32 MB PSRAM, hexagonal: the two frame buffers of the panel live in it. Its speed and the CPU follow
+# the revision of the chip: tools/board_select.py writes them.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+# drawing goes through the cache of the PSRAM: a larger one makes it faster and takes internal RAM
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# What revision 1.3 of the chip takes, from catalog/mcu/
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y

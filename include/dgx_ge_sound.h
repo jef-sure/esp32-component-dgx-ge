@@ -9,9 +9,9 @@ extern "C" {
  * Pack.add_sound), played or stopped by the output the game gives; with none,
  * nothing. The steps "sound N" of scripts reach the game (DGX_GE_ANIM_SOUND),
  * which hands them on here. Mostly the output is the engine's mixer
- * (dgx_ge_mixer_output), whose samples a board sends by I2S (boards/); a game
- * with hardware of its own for sound (a buzzer, a DAC) gives its own play and
- * stop.
+ * (dgx_ge_mixer_output), whose samples a board sends to its speaker
+ * (jef-sure/boards, dgx_ge_freertos.h); a game with hardware of its own for
+ * sound (a buzzer) gives its own play and stop.
  *
  * A music (<PREFIX>_MUSIC_<name>, Pack.add_music) plays one at a time, apart
  * from the sounds: "music <name>", "music stop" and "music volume" of scripts

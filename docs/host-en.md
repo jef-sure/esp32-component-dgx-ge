@@ -3,828 +3,398 @@
 [По-русски](host-ru.md)
 
 A game of DGX-GE is firmware for a board with an ESP32, but it doesn't have
-to start there. The engine has one board more than the ones in my drawer:
-the computer. Its directory is `boards/host`. The game's own `main.c`, its
-pack and its fonts are built for Linux, and a window of SDL2 shows the
-display of the board the game is meant for. The mouse in that window is a
-finger, the keys are buttons, the sound comes out of the speakers, and what
-the game keeps in NVS is stored in files. Nothing in the game changes for
-this. The same `app_main` runs, with the computer in place of the board.
+to start there. One of the boards of
+[jef-sure/boards](https://github.com/jef-sure/esp32-component-boards) is the
+computer: the board `host`. The game's own project, with its `main.c`, its
+pack and its fonts, is built by ESP-IDF for its `linux` target, and a window
+of DGX shows the display of the board the game is meant for. The mouse in
+that window is a finger, the keys are buttons, the sound comes out of the
+speakers, and what the game keeps in NVS stays from one run to the next.
+Nothing in the game changes for this. The same `app_main` runs, with the computer in
+place of the board.
 
-I made it so that a game can be written and checked without a board on the
-desk, or before the board has arrived, and so that a game can check itself
-before a commit with nobody watching. This document explains the board
-`host` from start to finish: what to install, where each piece comes from,
-what `make` does and where its results go, how each part of a board is
-stood in for and why it was done that way, how to run a game with no one at
-the computer, what the computer cannot tell you about the board, and what
-goes wrong and how to fix it.
-
-I'll be plain about the limits up front. It has been built and run on
-Linux with gcc, and once with clang; macOS and Windows have not been tried.
-More importantly, nobody has yet sat in front of the window: the window,
-the sound, the mouse and the keys have been checked only headless, with
-SDL's dummy drivers, a scripted hand (`DGX_GE_HOST_INPUT`), pictures of the
-display written to files, and the NVS files read back afterwards. If you
-have a screen, the first thing worth trying is `make run` in
-`examples/hello`. If something about the window, the sound or the input is
-wrong there, it's a part nobody has looked at yet.
+Up to DGX-GE 0.4.0 the engine had a computer board of its own,
+`boards/host`, built by `make` with the engine's `host.mk`. It went away
+with the engine's other boards (CHANGES). The board `host` of jef-sure/boards
+builds the firmware's project itself, so there is no Makefile and there are
+no stand-ins for ESP-IDF to keep in step. Since jef-sure/boards 0.0.5 and
+DGX 0.10.11 it has what the engine's host had: the keys, a script of keys
+and the mouse for a run with nobody at the computer, NVS kept. Typing on the
+keyboard on the display with the computer's keys it has not yet (section 8).
 
 ## Contents
 
 1. [What it is, and why it is made so](#1-what-it-is-and-why-it-is-made-so)
 2. [What to install](#2-what-to-install)
-3. [DGX and DGX-DI](#3-dgx-and-dgx-di)
-4. [The first run: the example hello](#4-the-first-run-the-example-hello)
-5. [A Makefile for your own game](#5-a-makefile-for-your-own-game)
-6. [What make does](#6-what-make-does)
-7. [What a game may use of ESP-IDF](#7-what-a-game-may-use-of-esp-idf)
-8. [How the computer stands in for a board](#8-how-the-computer-stands-in-for-a-board)
-9. [With nobody at the computer](#9-with-nobody-at-the-computer)
-10. [What the computer cannot tell](#10-what-the-computer-cannot-tell)
-11. [The engine's own tests](#11-the-engines-own-tests)
-12. [When something goes wrong](#12-when-something-goes-wrong)
+3. [The first run: the example hello](#3-the-first-run-the-example-hello)
+4. [Your own game on the computer](#4-your-own-game-on-the-computer)
+5. [How the computer stands in for a board](#5-how-the-computer-stands-in-for-a-board)
+6. [What a game may use of ESP-IDF](#6-what-a-game-may-use-of-esp-idf)
+7. [With nobody at the computer](#7-with-nobody-at-the-computer)
+8. [What the computer cannot tell, and what it has not yet](#8-what-the-computer-cannot-tell-and-what-it-has-not-yet)
+9. [The engine's own tests](#9-the-engines-own-tests)
+10. [When something goes wrong](#10-when-something-goes-wrong)
 
 ---
 
 ## 1. What it is, and why it is made so
 
-A game talks to its hardware through one header, `boards/dgx_ge_board.h`
-(the overview, section 2.17). It sets up the display there, reads the
-touch and the buttons, starts the sound, and shows the on-screen pad and
-keyboard. Apart from that header, a game takes very little from ESP-IDF:
-the clock (`esp_timer_get_time`), the pause at the end of each pass of its
-loop (`vTaskDelay`), the log, `heap_caps_*` memory, and NVS for whatever it
-keeps. A computer can provide all of that. So the computer became a board
-like the others: one more implementation of `dgx_ge_board.h` (`host.c`),
-NVS on files (`host_nvs.c`), small stand-ins for the few headers of ESP-IDF
-a game includes (`stubs/`), and one Makefile fragment (`host.mk`) that
-builds it all.
+A game talks to its hardware through `boards.h` of jef-sure/boards (the
+overview, section 2.17). It sets up the display there, starts the touch and
+the sound, and asks for the parts by kind, never by the name of a board.
+ESP-IDF has a target for the computer, `linux`: the same project builds as
+a program of the computer, with FreeRTOS (its tasks are threads there), the
+log, the clock, NVS and the heap. What it doesn't have is the chip's
+drivers. The board `host` fills that gap with the computer's own:
 
-The obvious alternative is a separate viewer program for each game, with
-its own loop, keys and window. I didn't want that, because such a program
-and the firmware drift apart: what you check on the computer would no
-longer be what runs on the board. A board for the computer that replaced
-`main.c` with a loop of its own would have the same flaw. So the game keeps
-its loop, and the board finds its moment inside it. Every firmware loop
-has to call `vTaskDelay`, or the task watchdog fires. On the computer,
-`vTaskDelay` is where the board shows the display in the window, reads the
-mouse and the keyboard, plays the scripted input, and decides whether it's
-time to quit. Then it sleeps for as long as the game asked. A game that ends
-each pass of its loop with the boards' `board_pace(t0, period_us)` is right
-as it is: that ends in `vTaskDelay` too, at least a tick each pass.
+- the display is a window of DGX (`dgx_host_screen_init`): a panel behind a
+  bus, as on the board shown, whose pixels go into the glass of the window
+  in place of a wire, the glass turned as the board is held;
+- the touch is the mouse, read by DGX-DI as a finger (DGX-DI 0.1.5 or
+  later);
+- the buttons are keys of the computer (DGX 0.10.11 or later);
+- the sound is SDL's audio, fed by a task as on a board;
+- the flash, and NVS on it, is a file kept beside the program.
 
-The board shows a *display*; the computer's screen doesn't become one. The
-window is the display of a particular board, in pixels and in millimetres,
-1280x800 and 217x136 mm by default (the Guition JC8012P4A1C, 10″). A game
-then picks its scale the way it does on that board, its fonts are made for
-that display, and touch gestures and the size of the on-screen pad are
-measured in the same millimetres. To see how a game looks on the CYD, you
-build it with the CYD's display (section 4).
+So what runs on the computer is the firmware, not a viewer of the game: the
+same `sdkconfig`, the same components, the same loop. The game keeps its
+loop, and the window finds its moment inside it. Every firmware loop calls
+`vTaskDelay`, or the task watchdog fires; on the computer DGX takes that
+call over (the linker's `--wrap`), and the task that made the window shows
+it there and reads the mouse, then sleeps as long as the game asked. A game
+that ends each pass of its loop with the engine's `dgx_ge_pace(t0,
+period_us)` is right as it is: that ends in `vTaskDelay` too. The keys are
+read there as well.
 
-None of this costs the boards anything. `boards/host` never goes into a
-firmware. The real boards gained only `board_buttons_able` (`false`) and an
-empty `board_buttons()`, which the computer needed for its keys.
+The window shows a *display*; the computer's screen doesn't become one. It
+is the display of a particular board, in pixels and in millimetres, the one
+`board_select.py host --as <board>` named: `examples/hello` shows the 10″,
+1280x800 and 217x136 mm, lying as it is held. `board_display_init` gives the
+width, the height and the orientation it gives on that board. A game picks
+its scale the way it does there, its fonts are made for that display, and
+the on-screen pad is measured in the same millimetres.
 
-The files:
+DGX's window also counts what a board would pay: how long the bytes the
+game sends would take on the wire of the board shown, when its display is
+on SPI or QSPI (the CYD, the 4.3″; a display on MIPI-DSI has no wire to
+count), and how much memory the program holds. It doesn't tell how long the
+chip would take to draw them (section 8).
 
-| File | What it is |
+| Where | What it is |
 | --- | --- |
-| `boards/host/host.mk` | the build: a game's Makefile includes it last |
-| `boards/host/host.c` | the board: the window, the mouse, the keys, the sound, the loop's hook, `main()` |
-| `boards/host/host_nvs.c` | NVS on files |
-| `boards/host/stubs/` | the headers of ESP-IDF the computer stands in for, ahead of DGX's own stubs |
-| `boards/dgx_ge_board.h` | the header every board implements, this one included |
-| `examples/hello/` | the example that builds both for the computer (`make`) and for the boards (`idf.py`) |
+| `src/board_host.c` of jef-sure/boards | the board: the window, the mouse, the keys, the sound |
+| `sdkconfig.defaults.host` of the project | the board chosen (`CONFIG_BOARD_SELECT_HOST`), the display shown, its bus and its buttons, the stack of `app_main`: written by `board_select.py host --as <board> .` |
+| `build/host/flash.bin` | the flash of the program, NVS on it, kept between runs |
+| `CMakePresets.json` of the project | the preset `host`, building in `build/host` |
+| `CMakeLists.txt` of the project | two lines for the computer (section 4) |
+| `host/window/` of DGX | the window, the wire's count, the memory's count |
 
 ## 2. What to install
 
-On Debian or Ubuntu:
+On Debian or Ubuntu, beside ESP-IDF 5.5 or later (its `linux` target comes
+with it; jef-sure/boards needs 5.5), with jef-sure/boards 0.0.5 or later,
+which takes DGX 0.10.11 and DGX-DI 0.1.5:
 
 ```sh
-sudo apt install build-essential libsdl2-dev python3 python3-pil git
+sudo apt install build-essential libsdl2-dev pkg-config python3-pil
 ```
 
 | Package | What it's for |
 | --- | --- |
-| `build-essential` | GNU `make` (4.3 or later), gcc (as `cc`), and binutils, whose GNU `ld` embeds the game's files (`ld -r -b binary`) |
-| `libsdl2-dev` | SDL2 and its `sdl2-config`, which tells `host.mk` how to compile against SDL and link with it |
-| `python3`, `python3-pil` | Python runs the engine's pack scripts and DGX's font maker; Pillow reads the PNGs a pack is made from |
-| `git` | to fetch the engine, DGX and DGX-DI, if you take them as clones (section 3) |
+| `build-essential` | gcc and binutils of the computer: the `linux` target builds with them, not with the chip's compiler |
+| `libsdl2-dev`, `pkg-config` | SDL2, which DGX finds by `pkg-config` and links into the program |
+| `python3-pil` | Pillow for the system's python3, which makes the pack (ESP-IDF's python has none) |
 
-A game that asks for fonts of its own (`GAME_FONTS`, section 5) also needs
-these. A game that uses only fonts shipped with DGX, like `hello`, doesn't:
+A game that asks for fonts of its own needs FreeType and fontconfig too, as
+it does for a board: `sudo apt install libfreetype-dev fontconfig
+fonts-dejavu-core`.
 
-```sh
-sudo apt install libfreetype-dev pkg-config fontconfig fonts-dejavu-core
-```
+The build runs in a shell with ESP-IDF activated, as for a board. One thing
+there gets in the way: the activation puts the inner `bin` directories of
+the chip's toolchains on the `PATH`, and they have an `ld` of their own,
+which the computer's compiler would take. The project's `CMakeLists.txt`
+tells it to look in `/usr/bin` first (section 4).
 
-| Package | What it's for |
-| --- | --- |
-| `libfreetype-dev` | FreeType: DGX's `font2c`, the program that renders glyphs, is compiled against it during the build |
-| `pkg-config` | how `dgx_fonts.py` finds FreeType's flags (on newer releases the package is `pkgconf`; `pkg-config` still installs it) |
-| `fontconfig` | `fc-list`, which `dgx_fonts.py` uses to find the faces installed on the computer |
-| `fonts-dejavu-core` | an example of faces to draw from; any installed fonts the game's requests and rules allow will do |
-
-These are the same as for fonts made for a board, because they're made the
-same way.
-
-`host.mk` needs GNU make 4.3 or later: it and the example's Makefile make
-two files by one rule (grouped targets, `&:`, new in 4.3), and `host.mk`
-reads a file with `$(file <…)` (section 6). Every current Linux distribution has a newer
-one; `make --version` tells which you have.
-
-ESP-IDF isn't needed for the computer. It's needed only for firmware, and
-it can be one way to get DGX and DGX-DI (section 3). One warning, which
-section 12 explains: **build for the computer in a shell where ESP-IDF's
-environment is not active.** That environment puts the chip's `ld` first
-on the `PATH`, and a computer's program can't be linked with it. `host.mk`
-notices this and stops at once, naming that `ld`.
-
-## 3. DGX and DGX-DI
-
-The engine stands on two other components: DGX, my display library, and
-DGX-DI, its display input (touch, the on-screen pad and keyboard). For the
-computer, `host.mk` needs DGX 0.8.0 or later. That is the release that
-carries `host/dgx_host.mk`, the list of DGX's sources for a computer build,
-and `host/stubs`, its stand-ins for ESP-IDF. DGX-DI must be 0.1.1 or later.
-I use 0.1.2, the release made for DGX 0.8.0. There are three ways to get
-them, and `host.mk` accepts any of them.
-
-**As clones, with no ESP-IDF at all.** Put the three repositories side by
-side:
-
-```sh
-git clone https://github.com/jef-sure/esp32-component-dgx-ge
-git clone --branch 0.8.0 https://github.com/jef-sure/esp32-component-dgx
-git clone --branch 0.1.2 https://github.com/jef-sure/esp32-component-dgx-di
-```
-
-Then give their directories to `make` as `DGX=` and `DGX_DI=`. The paths
-are relative to the directory `make` runs in:
-
-```sh
-cd esp32-component-dgx-ge/examples/hello
-make DGX=../../../esp32-component-dgx DGX_DI=../../../esp32-component-dgx-di
-```
-
-The engine's own tests find the two clones in this layout without being
-told (section 11).
-
-**As ESP-IDF downloads them.** In an ESP-IDF project that depends on the
-engine, the component manager puts DGX and DGX-DI into
-`managed_components/jef-sure__dgx` and `managed_components/jef-sure__dgx-di`
-the first time the project is configured (`idf.py reconfigure` or the
-first `idf.py build`). When `DGX` and `DGX_DI` aren't given, `host.mk`
-looks there, relative to the directory `make` runs in, so in such a project
-a plain `make` is enough.
-
-**As components of the project.** If you keep DGX and DGX-DI under
-`components/` as `components/jef-sure__dgx` and
-`components/jef-sure__dgx-di`, `host.mk` finds them there too, after
-`managed_components/`. Under any other name, give the path.
-
-If neither the given path nor the default holds what `host.mk` needs, it
-stops before building anything. Section 12 lists its messages.
-
-## 4. The first run: the example hello
+## 3. The first run: the example hello
 
 `examples/hello` is the smallest whole game of the engine. A robot stands
-on the ground. It walks while an arrow is held, hops at a tap or at A or B
-with a short chirp, and a label counts the hops. The count is kept in NVS
-and survives a restart. What the robot does is its script,
-`anim/bot.anim`. Its pictures are `art/*.png`, and `tools/hello_assets.py`
-turns both into the pack, `main/assets/hello.pack`, and its header,
-`hello_pack.h`. Its `main/main.c` builds for the computer with `make` and
-for the CYD and both Guition boards with `idf.py` (its
-[README](../examples/hello/README.md) has the board side).
-
-With the clones of section 3:
+on the ground. It walks while an arrow is held, hops at a tap or a button
+with a short chirp, and a label counts the hops. Its data are a game of the
+sprite editor (`game_data/`), and its `main/main.c` builds for four boards
+and for the computer (its [README](../examples/hello/README.md)).
 
 ```sh
 cd esp32-component-dgx-ge/examples/hello
-make DGX=../../../esp32-component-dgx DGX_DI=../../../esp32-component-dgx-di
+idf.py --preset host build
+./build/host/hello.elf
 ```
 
-The example's Makefile looks for the engine's `host.mk` in two places: in
-the engine around it (`../../boards/host/host.mk`), and in
-`managed_components/jef-sure__dgx-ge`, where ESP-IDF puts the engine when
-the example was made from the registry. Elsewhere, give it as
-`HOST_MK=<engine>/boards/host/host.mk`.
+ESP-IDF 5 doesn't read the presets: `idf.py -B build/host -D
+SDKCONFIG=build/host/sdkconfig -D BOARD=host build`. The first build
+downloads jef-sure/boards, DGX and DGX-DI into `managed_components/` and
+takes about a minute; then only what changed is built again.
 
-`make` prints one long `cc` line for each C file: the game's one file, the
-board, the engine, eight files of DGX-DI, and DGX with its fonts, 83 in
-all. Then it embeds the pack and links:
+The window opens, and the log goes to the terminal:
 
 ```text
-cc -I…/boards/host/stubs -Imain -I…/include -I…/boards … -c main/main.c -o build-host/obj/…_examples_hello_main_main.o
-cc … -c …/boards/host/host.c -o build-host/obj/…_boards_host_host.o
-…
-cd main/assets/ && ld -r -b binary -z noexecstack -o …/build-host/embed/hello.pack.o hello.pack
-cc -std=gnu11 -O2 -g … build-host/embed/hello.pack.o -lSDL2 -lm -o build-host/hello
+I (…) DGX HOST: window 1: a glass of 800x1280, 16 bits; no bus of the board counted
+I (…) hello: hops 0
+I (…) hello: a frame of 320x200, x4, on a display of 1280x800 of host; sound, a pointer, buttons
+I (…) DGX HOST: window 1: the glass 1 times as large, 1280x800
 ```
 
-It takes about ten seconds on one core. `make -j` uses all of them. The
-program is `build-host/hello`. To run it:
+The glass of the 10″ is 800x1280, upright as its panel is; the window turns
+it as the board is held, lying, and the game draws on a display of
+1280x800, its frame of 320x200 points four times larger. The window shows
+the glass at the largest whole multiple that fits the desktop, and may be
+stretched. The arrows (or WASD) walk, Space or J (A) and K (B) hop, and so
+does B, the board's BOOT; the mouse is a finger, a click a hop. The pad on
+the display isn't shown: the computer has arrows of its own. Closing the
+window ends the program, and DGX says what the run cost:
+
+```text
+I DGX HOST: window 1, 800x1280, no bus counted
+I DGX HOST: memory: 79768 bytes held now, 79848 at most at once, the largest block 64000
+```
+
+The 10″'s display is on MIPI-DSI, so there is no wire to count. The hops are
+kept in NVS, in `build/host/flash.bin`: the next run starts with the count
+this one left. Delete the file to start from zero.
+
+**Another board's display.** `board_select.py` of jef-sure/boards names the
+board shown; the CYD's is 320x240 pixels, 58x43 mm, on SPI at 40 MHz, whose
+wire the window counts:
 
 ```sh
-make run DGX=../../../esp32-component-dgx DGX_DI=../../../esp32-component-dgx-di
+python3 managed_components/jef-sure__boards/tools/board_select.py host --as cyd_s028r .
+rm build/host/sdkconfig
+idf.py --preset host build
 ```
 
-or just `./build-host/hello`. `make run` builds first if anything changed,
-which is why it needs the same `DGX=` and `DGX_DI=`. The window opens, and
-the log goes to the terminal (stderr):
+ESP-IDF reads the defaults only into a new `sdkconfig`, so the one made
+before has to go.
 
-```text
-I host: a display of 1280x800 pixels, 217x136 mm, in a window of 1280x800
-I hello: a frame of 320x200, x4, on a display of 1280x800; sound, a pointer, buttons
-```
+**Changing the data.** Open `game_data/` in the editor, or change
+`BOT.anim` as text. The build makes the pack again whenever anything in
+`game_data/` or `tools/pack.py` changed, as it configures. By hand: `python3
+tools/pack.py ../..` (the engine's folder).
 
-The game's frame is 320x200 points. On the 10″'s display it's shown four
-times larger. The window starts at the largest whole multiple of the
-display that fits in nine tenths of your desktop, never less than once, and
-you can resize it.
+## 4. Your own game on the computer
 
-| Key | Button |
-| --- | --- |
-| arrows | the cross |
-| Shift (either) | A |
-| Z, X, C | B, X, Y |
-| Enter | START |
-| Space | SELECT (back) |
-| the left mouse button | a finger: a click is a tap, a drag is a swipe |
+`tools/dgx_ge_new.py` of the engine makes a game that builds for the
+computer as it is (the README). By hand, a project takes three things.
 
-Closing the window ends the program. The hops are counted in the file
-`nvs/hello/hops`, under the directory the program was started from. Delete
-`nvs/` to start from zero.
-
-**Another board's display.** The CYD's display is 320x240 pixels, 58x43
-mm:
+The board, chosen by `board_select.py` of jef-sure/boards, the display shown
+named by `--as`:
 
 ```sh
-make HOST_DISPLAY=320x240 HOST_MM=58x43 DGX=… DGX_DI=…
-./build-host/hello
+python3 <boards>/tools/board_select.py host --as jc8012p4a1c .
 ```
 
-```text
-I host: a display of 320x240 pixels, 58x43 mm, in a window of 640x480
-I hello: a frame of 320x200, x1, on a display of 320x240; sound, a pointer, buttons
+It writes `sdkconfig.defaults.host`: the target `linux`, the board,
+the display's size, and `CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384` (a word of
+a stack is 8 bytes on the computer, so 128 KB: the task that makes the
+window needs 48 KB of it left for SDL). It adds the preset `host` to
+`CMakePresets.json`.
+
+Two lines in the project's `CMakeLists.txt`, before `project.cmake`, with
+the block that reads `sdkconfig.defaults.${BOARD}` (as `examples/hello`
+has it):
+
+```cmake
+if(BOARD STREQUAL "host")
+	set(COMPONENTS main)
+	set(CMAKE_EXE_LINKER_FLAGS "-B/usr/bin/")
+endif()
 ```
 
-The display's size is compiled into the board, so another display
-rebuilds all 83 objects, and so does going back to the 10″. `make` notices
-the change by itself, whether it came from the command line or from the
-Makefile (section 6). To keep both builds ready at once, give each display
-a build directory of its own: `make HOST_BUILD=build-cyd HOST_DISPLAY=…`.
+`COMPONENTS main` builds `main` and what it requires, nothing else: not
+every component of ESP-IDF builds for the `linux` target, and without it
+the build stops on the first that doesn't. So `main/CMakeLists.txt` names
+what the game uses (`nvs_flash`, `esp_timer`, the engine). `-B/usr/bin/`
+makes the computer's compiler look for its linker in `/usr/bin` before the
+`PATH` (section 2).
 
-**Changing the art or the script.** `python3 tools/hello_assets.py`
-rebuilds the pack. `make` also does it on its own when the script, `art/`
-or `anim/` is newer than the pack's header, before it builds anything. It
-prints what it runs:
+The game itself needs nothing more. Its parts are asked for as on any board,
+its buttons by their names (`board_button_find`, `board_button_name`; the
+engine's `dgx_ge_key_named` gives the bit of a gamepad's name), and a part
+the computer has not answers `false` there as it does on a board without it.
 
-```text
-the pack: python3 tools/hello_assets.py
-hello.pack: 6196 bytes
-```
+## 5. How the computer stands in for a board
 
-## 5. A Makefile for your own game
-
-A game that builds for a board with ESP-IDF builds for the computer from a
-`Makefile` placed beside its `CMakeLists.txt`. The Makefile names the same
-things `main/CMakeLists.txt` names, in make's words, and includes the
-engine's `host.mk` last. For a made-up `mygame` that takes the engine from
-the registry:
-
-```make
-GAME            := mygame
-GAME_SRCS       := main/main.c main/world.c
-GAME_INCLUDES   := main
-GAME_EMBED      := main/assets/mygame.pack
-GAME_PACK_H     := main/assets/mygame_pack.h
-GAME_PACK_MAKE   := python3 tools/mygame_assets.py
-GAME_PACK_INPUTS := tools/mygame_assets.py $(wildcard art/*.png anim/*.anim)
-GAME_FONTS      := main/assets/mygame.fonts
-GAME_FONT_RULES := fonts.rules
-GAME_DEFINES    := BOARD_SCALE=4 DGX_GE_ANIM_NOW_EVENTS=4 DGX_GE_SYNTH_FM=1
-HOST_DISPLAY    := 1280x800
-HOST_MM         := 217x136
-include managed_components/jef-sure__dgx-ge/boards/host/host.mk
-```
-
-If the engine sits in your project as `components/dgx-ge` (a clone or a
-submodule), include `components/dgx-ge/boards/host/host.mk` instead. Every
-path in the Makefile is relative to the directory `make` runs in, which
-normally means the project's root.
-
-| Variable | What it means | The same for a board |
-| --- | --- | --- |
-| `GAME` | the program's name: `build-host/<GAME>`; `game` if not set | the project's name |
-| `GAME_SRCS` | the game's C files | `SRCS` in `main/CMakeLists.txt` |
-| `GAME_INCLUDES` | the directories of its headers | `INCLUDE_DIRS` |
-| `GAME_EMBED` | files embedded in the program whole, with the same symbols as on a board: `mygame.pack` gives `_binary_mygame_pack_start` and `_end` | `EMBED_FILES` |
-| `GAME_PACK_H` | the pack's header. Its `<PREFIX>_ANIM_PARAMS` says how many params an actor keeps, and the whole build gets `DGX_GE_ANIM_PARAMS` from it | `dgx_ge_params_of_pack` |
-| `GAME_PACK_MAKE` | the command that makes the pack and its header (optional). `make` runs it before anything else when the header is missing or older than one of `GAME_PACK_INPUTS` | — |
-| `GAME_PACK_INPUTS` | what the pack is made from: its script, the art, the scripts of animation, any document it reads; and the engine's packer, `tools/dgx_ge_*.py`, so that a new version of a blob makes the pack again (the engine reads only its own version) | — |
-| `GAME_FONTS` | the game's font requests, the file the pack script writes with `Pack.write_fonts` (optional) | `dgx_ge_fonts` |
-| `GAME_FONT_RULES` | the rules of which installed faces may be taken (optional) | `dgx_fonts_rules` |
-| `GAME_FONT_SCALE` | the scale the fonts are made for, in pixels of the display per point of the frame. If not set, `BOARD_SCALE` from `GAME_DEFINES`, else 1 | `dgx_fonts_scale` |
-| `GAME_DEFINES` | the game's preprocessor definitions, without `-D`. They go to every file compiled, the engine's too, so this is also where a setting of the whole build goes: `DGX_GE_ANIM_NOW_EVENTS=4`, how many `now` events an actor's own step may send, waiting in turn, and `DGX_GE_SYNTH_FM=1`, the synthesizers of music the build carries (`_CHIP`, `_NES` the others; the engine's defaults, written out) | `target_compile_definitions`; for `DGX_GE_ANIM_NOW_EVENTS`, `dgx_ge_now_events`; for `DGX_GE_SYNTH_*`, `dgx_ge_synths` |
-| `HOST_DISPLAY` | the display shown, in pixels; `1280x800` if not set | the board's display |
-| `HOST_MM` | the same display in millimetres, for gestures and the pad's size; `217x136` if not set | the board's `board_mm_w`, `board_mm_h` |
-| `DGX`, `DGX_DI` | where DGX and DGX-DI are (section 3) | the component manager |
-| `HOST_BUILD` | where everything built goes; `build-host` if not set | `idf.py -B` |
-| `HOST_SANITIZE` | `1` builds with AddressSanitizer and UBSan: an index past an array, a read of freed memory, a signed overflow, each reported with its file and line | — |
-| `CC` | the C compiler: make's own default, `cc`, or the one given, as in `make CC=clang` | the toolchain |
-
-Only `GAME_SRCS` is strictly needed. The rest depends on what the game
-has. `make` builds, `make run` builds and runs, `make clean` deletes
-`HOST_BUILD`. Rules of your own can go in the same Makefile before the
-`include` line. `host.mk` sets the default goal to the program, so a rule
-written first won't become what a plain `make` builds.
-
-Let `GAME_PACK_MAKE` and `GAME_PACK_INPUTS` make the pack, rather than a
-make rule of your own or a `$(shell …)` line. The pack's header says how
-many params an actor keeps, and that number goes into the command of every
-file, so the header must be up to date before `host.mk` reads it. A make
-rule runs only after all the Makefiles have been read, which is too late.
-`host.mk` runs `GAME_PACK_MAKE` while it is being read, at the one moment
-that works (section 6). And keep code that only a board can run under
-`#ifdef ESP_PLATFORM` (section 7).
-
-## 6. What make does
-
-`host.mk` is short, and each step in it is there for a reason. Here they
-are in order.
-
-**It finds its pieces.** It finds the engine from its own location, so it
-works wherever the engine lies. It takes `DGX` and `DGX_DI` as given or
-looks in `managed_components/` and `components/`. It checks that DGX has
-`host/dgx_host.mk` and that DGX-DI has `include/dgx_di.h`, and otherwise
-stops with a message. Then it includes DGX's `host/dgx_host.mk`. That file
-is part of DGX's contract: the list of DGX's sources for a computer, in
-groups, and the flags they need. DGX builds its own tests from it too. An
-earlier version of this board kept its own list of DGX's files, and that
-list broke whenever DGX rearranged them. Now DGX's list belongs to DGX.
-
-**It asks SDL for its flags.** `sdl2-config --cflags` gives the include
-path (`-I/usr/include/SDL2 -D_REENTRANT` on Debian), and `sdl2-config
---libs` gives the link (`-lSDL2`). Without `sdl2-config` there is no build.
-I picked SDL2 because one library covers the window, the sound, the keys
-and text input, every Linux distribution packages it, and `sdl2-config`
-hands over the flags. I didn't consider SDL3.
-
-**It makes the pack, if it is out of date.** When the game names
-`GAME_PACK_MAKE` and the header `GAME_PACK_H` is missing or older than one
-of `GAME_PACK_INPUTS`, `host.mk` prints `the pack: <command>` and runs the
-command right there, while it is being read. That is before it reads the
-header, and so before any file is compiled. If the command fails, `host.mk`
-stops with `the pack was not made: <command> failed (it says why above)`,
-and the command's own messages are just above it. `make clean` never runs
-it.
-
-**It reads the number of params from the pack's header.** The pack script
-writes a line like `#define MYGAME_ANIM_PARAMS 2` into the header.
-`host.mk` picks the number out with `sed` and compiles everything with
-`-DDGX_GE_ANIM_PARAMS=2`, the game and the engine alike, because both must
-agree on the size of an actor. CMake's `dgx_ge_params_of_pack` does the
-same for a board. The header also guards against a mismatch: if the build
-keeps fewer params than the pack needs, it stops with `#error` naming
-`dgx_ge_params_of_pack`.
-
-**`GAME_DEFINES` go to every file, the engine's too.** That is what a
-setting of the whole build needs: `DGX_GE_ANIM_NOW_EVENTS`, the depth of an
-actor's queue of `now` events sent from its own step, changes the size of
-an actor, so the game and the engine must be compiled with the same value.
-On a board `dgx_ge_now_events(<n>)` in `main/CMakeLists.txt` sets it for
-the whole build; on the computer the same number goes into `GAME_DEFINES`
-(`DGX_GE_ANIM_NOW_EVENTS=4`). Left out on both, it is the engine's 4.
-The synthesizers of music are the same kind of setting (a channel's state is
-as large as the largest of them needs): `dgx_ge_synths(chip fm)` on a board,
-`DGX_GE_SYNTH_CHIP=1 DGX_GE_SYNTH_FM=1` here; left out, FM alone.
-
-**It makes the fonts, if the game asked for any.** The rule runs DGX's
-`font2c/dgx_fonts.py build` on `GAME_FONTS` and writes into
-`HOST_BUILD/dgx_fonts/`, with the display shown and the game's scale:
-
-```text
-python3 …/font2c/dgx_fonts.py build main/assets/mygame.fonts build-host/dgx_fonts --scale 4 \
-    --pixels 1280 800 --mm 217 136
-label: DejaVu Sans Book 32 px (8 pt x 4), 10 glyphs
-the fonts used and their licenses: …/build-host/dgx_fonts/fonts-used.txt; make sure you may use every one of them
-dgx_fonts.c and dgx_fonts.h written
-```
-
-A size in points is multiplied by the scale (8 pt at x4 is 32 px), and a
-size in millimetres is measured on the display given by `--pixels` and
-`--mm`. That's why the fonts follow `HOST_DISPLAY` and `HOST_MM`, as on a
-board they follow `dgx_fonts_board`. `dgx_fonts.py` compiles DGX's `font2c`
-against FreeType (with `cc`, flags from `pkg-config`), finds faces with
-fontconfig's `fc-list`, and writes `dgx_fonts.c`, compiled with the game,
-and `dgx_fonts.h`, which declares `dgx_font_<name>()` for each request. It
-rewrites them only when they change. `fonts-used.txt` beside them lists
-each font the game uses with what its file says of its license. The rule
-runs again when the requests, the rules, or the `.letters` and `.typed`
-files beside the requests change, and when the display or the scale does. Every object depends on `dgx_fonts.h`,
-so the fonts are made before anything is compiled. The overview's section
-2.12 says more about the requests and the rules.
-
-**It embeds the game's files.** Each file of `GAME_EMBED` becomes an object
-in `HOST_BUILD/embed/`:
-
-```text
-cd main/assets/ && ld -r -b binary -z noexecstack -o …/build-host/embed/mygame.pack.o mygame.pack
-```
-
-GNU `ld -r -b binary` wraps any file into an object with three symbols,
-`_binary_<name>_start`, `_end` and `_size`, where `<name>` is the path *as
-given to ld*, with every character that can't be in a C name turned into
-`_`. That's why `host.mk` changes into the file's directory and hands `ld`
-the bare file name. From the project root, the same file would give
-`_binary_main_assets_mygame_pack_start`. From its own directory it gives
-`_binary_mygame_pack_start`, which is the symbol ESP-IDF's `EMBED_FILES`
-makes on a board, so one `extern` declaration in the game serves both:
-
-```c
-extern const uint8_t mygame_pack_start[] asm("_binary_mygame_pack_start");
-extern const uint8_t mygame_pack_end[] asm("_binary_mygame_pack_end");
-```
-
-`-z noexecstack` marks the object as not needing an executable stack, so
-recent linkers don't warn about it. Because only the file's name counts,
-two embedded files with one name in different directories would collide.
-They would on a board too.
-
-**It compiles every C file into an object of its own.** The files are the
-game's `GAME_SRCS`. Then the board, `host.c` and `host_nvs.c`. Then every
-`src/*.c` of the engine. Then eight files of DGX-DI: the pointer, its
-calibration, the touch, rectangles, the pad and its layouts, the keyboard
-and its layouts. Then all of DGX's groups from `dgx_host.mk`: screens,
-drawing, virtual screens, text, morphing, the frame buffer, and DGX's
-fonts. Last comes `dgx_fonts.c`, if there is one. They aren't put in a
-library. All of them are linked, which costs nothing on a computer. Each
-object is named by the whole absolute path of its source with `/` turned
-into `_`, for example
-`build-host/obj/_home_me_mygame_main_world.o`. That looks clumsy, but it's
-deliberate. A game's `main/world.c` and `util/world.c`, or a game's
-`world.c` and something of the same name in DGX, would otherwise both
-become `world.o`, and one would silently replace the other. Next to each
-object, `-MMD -MP` writes a `.d` file that lists the headers it included,
-so a changed header rebuilds exactly what includes it.
-
-**It puts the include path in a particular order.** The order is the point
-of it:
-
-| Order | Directory | Why there |
-| --- | --- | --- |
-| 1 | the engine's `boards/host/stubs` | the computer's versions of `freertos/task.h`, `esp_timer.h`, `esp_heap_caps.h`, `nvs.h`, `nvs_flash.h` must be found before DGX's |
-| 2 | `GAME_INCLUDES` | the game's headers |
-| 3 | `HOST_BUILD/dgx_fonts` | `dgx_fonts.h`, if the game has fonts |
-| 4 | the engine's `include` and `boards` | the engine, and `dgx_ge_board.h` |
-| 5 | DGX-DI's `include` | the pointer, the pad, the keyboard |
-| 6 | DGX's `host/stubs` | the rest of ESP-IDF a computer build needs: `esp_err.h`, `esp_log.h`, `freertos/FreeRTOS.h`, `freertos/semphr.h`, `driver/gpio.h` and a few more |
-| 7 | DGX's `include` | DGX |
-| 8 | SDL's, from `sdl2-config` | SDL |
-
-The first row is the important one. In DGX's stubs, `vTaskDelay` is a
-macro that does nothing, which is all DGX's own tests need. The engine's
-`freertos/task.h` comes first and declares a real `vTaskDelay`, which
-`host.c` defines: the hook of section 1. The engine's `esp_heap_caps.h`
-takes DGX's with `#include_next` and adds `heap_caps_get_free_size`, which
-games ask for and DGX doesn't stub.
-
-Two headers are forced into every file with `-include`. First comes DGX's
-`esp_log.h`, where `ESP_LOGE` and `ESP_LOGW` print and the rest are
-silent. Then the engine's `esp_log_host.h` redefines `ESP_LOGI` to print
-too, because a game's informational messages are what you watch on the
-computer, just as you watch the serial port on a board. `ESP_LOGD` and
-`ESP_LOGV` stay silent.
-
-The flags are `-std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-parameter
--Wno-sign-compare -Wno-format`, with `-DHOST_DISPLAY_W`, `_H`,
-`-DHOST_MM_W`, `_H` from `HOST_DISPLAY` and `HOST_MM`,
-`-DDGX_GE_ANIM_PARAMS` from the pack, and `GAME_DEFINES`. `ESP_PLATFORM`
-is not defined. `HOST_SANITIZE=1` adds `-O1 -fsanitize=address,undefined
--fno-omit-frame-pointer`.
-
-**It links.** `cc` links the objects, the embedded files, SDL's libraries
-and `-lm` into `HOST_BUILD/<GAME>`.
-
-**What makes it rebuild.** A changed source or header rebuilds what
-depends on it. Every object also depends on the Makefiles that were read,
-the game's own and `host.mk`, so editing either rebuilds everything.
-Everything that goes into the compiler's command is kept as well, in
-`HOST_BUILD/config`: the compiler, the include path, the flags, the
-definitions with `DGX_GE_ANIM_PARAMS` from the pack, the display shown, the
-fonts' scale, and which `ld` is on the `PATH`. At each `make`, `host.mk`
-compares the command it would use now with that file and rewrites the file
-only when they differ. Every object, the embedded files and the fonts
-depend on it. So `make` again does nothing, while
-`make HOST_DISPLAY=320x240`, `make CC=clang`, other `GAME_DEFINES`, or a
-pack whose actors keep more params rebuild everything. No object is left
-compiled the old way next to new ones, which matters most for the params:
-the game and the engine must agree on the size of an actor. Because the
-pack is made before its header is read, one `make` is enough: if an actor
-gains params, that same run remakes the pack and builds everything with
-the new number.
-
-**Where things end up:**
-
-```text
-build-host/
-├── mygame                 the program
-├── config                 the compiler's command as last used: a change of it rebuilds everything
-├── obj/                   an .o and a .d per C file, named by its whole path
-├── embed/mygame.pack.o    the embedded files
-└── dgx_fonts/             dgx_fonts.c, dgx_fonts.h, fonts-used.txt, font2c and its working files
-nvs/                       what the game keeps, created where the program runs (section 8)
-```
-
-## 7. What a game may use of ESP-IDF
-
-On the computer, a game has everything `dgx_ge_board.h` gives it, plus
-this much of ESP-IDF:
-
-| What | On the computer |
+| `boards.h` | On the computer |
 | --- | --- |
-| `esp_timer_get_time()` | the computer's monotonic clock, in microseconds. Like a board's, it doesn't start at 0 |
-| `vTaskDelay(ticks)`, `pdMS_TO_TICKS` | the pause of the loop, and the board's hook (section 8). One tick is one millisecond, as on a board with `CONFIG_FREERTOS_HZ=1000` |
-| `ESP_LOGE`, `ESP_LOGW`, `ESP_LOGI` | printed to stderr as `E tag: …`, `W tag: …`, `I tag: …` |
-| `ESP_LOGD`, `ESP_LOGV` | silent |
-| `heap_caps_malloc`, `_calloc`, `_realloc`, `_free` | plain `malloc` and friends; the `MALLOC_CAP_*` flags are accepted and ignored |
-| `heap_caps_get_free_size`, `heap_caps_get_largest_free_block` | always 1 GiB |
-| `esp_err_t`, `ESP_OK`, `ESP_FAIL`, the common `ESP_ERR_*` | as in ESP-IDF; `esp_err_to_name` says only `ESP_OK` or `error` |
-| NVS: `nvs_flash_init`, `_deinit`, `_erase`, `nvs_open`, `nvs_close`, `nvs_commit`, `nvs_erase_key`, `nvs_erase_all`, `nvs_set_`/`nvs_get_` `blob`, `str`, `i8` … `u64` | on files (section 8), with ESP-IDF's error codes |
+| `board_display_init`, `board_dgx_screen` | the window of DGX, a 16-bit panel, the glass of the board shown turned as it is held; the width, the height, the orientation and the millimetres (`mm_w`, `mm_h`) as on the board |
+| `board_dgx_bus` | `NULL`: a game gives its frame a strip at a time, as to a panel on a bus |
+| `board_display_orientation` | turns the panel in the window as on the board |
+| `board_touch_start`, `board_dgx_di_pointer` | the mouse, a finger of DGX-DI while its left button is held on the window, in pixels of the glass, with no calibration; it turns with the display |
+| `board_button_count`, `_name`, `_find`, `_at` | keys: the board's own buttons first, then those of a gamepad it has not (below) |
+| `board_sound_init`, `board_sound_start` | SDL's audio: 22050 Hz, mono, 16 bits; a task of FreeRTOS, `sound`, asks the source |
+| NVS | ESP-IDF's own, on a flash kept in `build/host/flash.bin` |
+| `heap_caps_*`, `esp_timer_get_time` | DGX's window answers them: the memory it counts, the computer's clock |
 
-That covers what a game loop usually needs. The rest of ESP-IDF isn't
-there: tasks of its own (`xTaskCreate`), queues, timers of FreeRTOS, GPIO,
-I2C, SPI, Wi-Fi, `sdkconfig.h` and its `CONFIG_*` values, anything that
-talks to hardware past the board. DGX's stubs do declare a few such things
-(`driver/gpio.h` with functions that do nothing, a binary semaphore that
-exits the program if taken before it was given), but only so that DGX
-itself compiles. A game shouldn't lean on them. Its code that needs the
-real things goes under `#ifdef ESP_PLATFORM`. ESP-IDF defines that symbol
-and the computer build doesn't:
+**The display and the wire.** The game draws on the screen of DGX as on the
+board's, and what it sends goes through a bus and its buffer into the glass.
+The title of the window and the report at the end say how long those bytes
+would take on the board's wire, a pass of the loop at a time: the SPI or
+QSPI of the board shown, at its clock. A display on MIPI-DSI keeps its
+picture in memory and has no wire; nothing is counted for it.
+
+**The mouse is one finger.** While the left button is held on the window,
+the finger is on the glass where the mouse points; outside the glass it lies
+on the nearest edge. It is a device of DGX-DI read through the same pointer
+a touch board gives, so taps, swipes and their thresholds in millimetres
+behave as there, and so do the engine's pad and keyboard on the display. A
+mouse has one finger only: two buttons of the pad at once, or a gesture of
+two fingers, can't be made with it.
+
+**The keys are the buttons.** A button of the board shown that has the name
+of a gamepad's is on that button's keys; another is on the key of its first
+letter (BOOT on B). Then come the buttons of a gamepad the board has not:
+
+| Button | Keys |
+| --- | --- |
+| `up`, `left`, `down`, `right` | W, A, S, D and the arrows |
+| `a` | Space, J |
+| `b` | K, Backspace |
+| `start` | Enter |
+| `select` | Tab |
+
+A game reads them as on a board, each by its name. `hello` takes those of a
+gamepad's names as their bits and any other (BOOT) as A, and shows the pad
+on the display only where the board has no arrows: on the computer it has.
+
+**The sound.** A task of FreeRTOS asks the source the game gave
+`board_sound_start`, the engine's mixer, as a board's task does, and SDL
+plays what it gave. The engine's lock of the mixer is a mutex of FreeRTOS,
+as on a board. The level is the board's: `board_sound_t.mixer_volume`, in
+percent of full scale, is the one the person chose last
+(`board_sound_volume_keep`, kept in NVS), else that of the board's speaker
+(the 10″'s 50), else 0, and then the game chooses: `hello` gives 32 of 255.
+
+**NVS.** ESP-IDF's own NVS, on a flash it emulates in a file:
+`build/host/flash.bin`, kept between runs while the partition table of the
+build is the one it was made with. The calls and their errors are NVS's
+own, so a game's code for it is checked as it is.
+
+**The end of the program.** Closing the window ends it with status 0, after
+DGX's report. So does `DGX_HOST_QUIT_MS` (section 7).
+
+## 6. What a game may use of ESP-IDF
+
+On the computer a game has what ESP-IDF's `linux` target has: tasks,
+queues, semaphores and timers of FreeRTOS, `esp_timer_get_time`, the log,
+`heap_caps_*`, NVS, `sdkconfig.h` with its `CONFIG_*` values. What isn't
+there is the chip: GPIO, I2C, SPI, I2S, Wi-Fi, the watchdog. A game seldom
+needs them, since its board's parts come through `boards.h`; code that does
+goes under `CONFIG_IDF_TARGET_LINUX`. `ESP_PLATFORM` is defined on the
+computer too, so it tells nothing here:
 
 ```c
-#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#if !CONFIG_IDF_TARGET_LINUX
     xTaskCreate(radio_task, "radio", 4096, NULL, 5, NULL);
 #endif
 ```
 
-## 8. How the computer stands in for a board
+A component the game takes only for a chip is required in
+`main/CMakeLists.txt` under a condition on the target, as `COMPONENTS main`
+builds every component `main` requires. Not on `CONFIG_*`: ESP-IDF reads the
+requirements before the configuration is made.
 
-This is each function of `dgx_ge_board.h` as the computer does it, with
-the reason for each choice.
-
-| The board | On the computer |
-| --- | --- |
-| `board_display_init` | starts SDL's video, opens the window and makes the display: a 16-bit virtual screen of DGX of `HOST_DISPLAY`. `board.lcd` is that screen, `board.bus` is `NULL` |
-| `board_band` | 0: the display is memory, so the frame goes to it a row at a time |
-| `board_mm_w`, `board_mm_h` | `HOST_MM` |
-| `board_orient`, `board_turn` | the window lies on a desk and isn't turned round: `board_turn` does nothing, and `board_orient` refuses upside down, so a frame upside down flips its rows itself, as on the CYD |
-| `board_pointer_start`, `board_pointer` | the mouse, through DGX-DI's pointer as on the touch boards |
-| `board_touch_device` | the mouse as a device of DGX-DI, one finger, its range the display's |
-| `board_pad_able`, `board_pad_*` | `true`: DGX-DI's pad, shown over the game and pressed with the mouse |
-| `board_keyboard_able`, `board_keyboard_*` | `true`: DGX-DI's keyboard, pressed with the mouse; the computer's keyboard types into it as well |
-| `board_buttons_able`, `board_buttons` | `true`: the keys of the computer. The three real boards answer `false` and 0 |
-| `board_sound_rate`, `board_sound_volume` | 22050 Hz; 32 |
-| `board_sound_start` | starts SDL's audio on its own: mono, 16 bits, a buffer of 512 frames, pulling the mixer; `false` when there is no audio, and the game runs silent |
-
-**The display and the window.** The game draws on a 16-bit virtual screen
-of the board's size, just as it draws on the board's display. The colors
-are the same 16-bit ones the board shows, so a gradient bands the way it
-will there. When the board's hook runs, at most every 15 ms, it converts
-the screen to 32-bit pixels, uploads them as a texture, and presents it
-with a vsync renderer, or a software renderer if no vsync renderer can be
-made. SDL's logical size keeps the display's proportions when the window is
-stretched, with bars at the sides or top and bottom, and scales by nearest
-pixel, so pixel art stays sharp. The logical size also means SDL reports
-mouse positions in pixels of the display, whatever the window's size. A
-click in the bars counts as a click at the nearest edge.
-
-**The mouse is one finger.** While the left button is down, the finger is
-on the display where the mouse points. Moving with the button down is a
-drag. The mouse is a device of DGX-DI, read through the same pointer the
-touch boards use, so taps, swipes and their thresholds in millimetres
-behave as they do there. The same goes for the pad and the keyboard of
-DGX-DI, which you press with the mouse as you would with a finger. A mouse
-has only one finger, though: two pad buttons at once, or a gesture of two
-fingers, can't be made with it. The keys can hold several buttons at once.
-
-**The keys are the board's own buttons.** The real boards have no buttons
-of their own. A game takes their buttons from the on-screen pad, and the
-computer is the first board with `board_buttons_able`. I gave the keys
-this role instead of showing the pad all the time, because a keyboard is
-natural at a computer and a pad would cover the picture. A game that ORs
-`board_buttons()` with `board_pad_buttons()` works on both kinds of board.
-`hello` shows its pad only where the board has no buttons, so on the
-computer it doesn't show one.
-
-| Key | `DGX_GE_KEY_*` |
-| --- | --- |
-| Left, Right, Up, Down | `LEFT`, `RIGHT`, `UP`, `DOWN` |
-| left or right Shift | `A` |
-| Z | `B` |
-| X | `X` |
-| C | `Y` |
-| Enter | `START` |
-| Space | `SELECT` |
-
-**Typing.** While DGX-DI's keyboard is open on the display, the computer's
-keyboard types into it. Letters arrive as their code points (anything SDL
-gives as text, so other layouts too). Backspace gives U+0008 (erase),
-Enter or the keypad's Enter gives U+000A (done), and Esc gives U+001B
-(cancel), the same codes the on-screen keyboard gives. Meanwhile
-`board_buttons()` returns 0, so typing a Z doesn't also press B. Scripted
-buttons are held back as well.
-
-**The sound.** SDL's audio thread calls back for 512 samples at a time, and
-the callback has the engine's mixer fill them, much as a board's I2S task
-does. The mixer is touched from two threads, the game's and SDL's, so it
-needs a lock. The board gives it a mutex of its own, an `SDL_mutex`,
-rather than SDL's audio-device lock, because the mixer takes its lock
-inside the audio callback too (`dgx_ge_mixer_fill`), where SDL already
-holds the device's lock. The mutex is in place before the audio device
-starts, so even the first fill is guarded. The volume is 32 of 255, a
-little louder than the 10″ plays through its small speaker.
-
-The sound is started apart from the display: video in
-`board_display_init`, audio in `board_sound_start`. A computer with no
-sound, or an audio driver that can't start, is no reason to lose the
-picture. The log says so, `board_sound_start` returns `false`, and the
-game goes on with its display, pointer and buttons, only silent:
-
-```text
-I host: a display of 1280x800 pixels, 217x136 mm, in a window of 1280x800
-W host: no sound: Audio target 'nonesuch' not available
-I hello: a frame of 320x200, x4, on a display of 1280x800; a pointer, buttons
+```cmake
+idf_build_get_property(target IDF_TARGET)
+if(NOT target STREQUAL "linux")
+	list(APPEND chip_requires esp_wifi)
+endif()
+idf_component_register(SRCS "main.c" PRIV_REQUIRES nvs_flash esp_timer ${chip_requires})
 ```
 
-**NVS on files.** A namespace is a directory, and a key is a file in it,
-under `nvs/` in the directory the program was started from, or under the
-directory `DGX_GE_HOST_NVS` names. The first byte of each file is the
-type: `b` for a blob, `s` for a string (stored with its terminating 0, as
-NVS counts it), or `'0'` plus the size in bytes for a whole number. The
-value follows. `hello`'s count of three hops looks like this:
+## 7. With nobody at the computer
 
-```sh
-$ od -An -tx1 nvs/hello/hops
- 34 03 00 00 00
-$ od -An -tu4 -j1 nvs/hello/hops
-          3
-```
-
-The behavior matches a board where it matters to a game. Opening a
-namespace read-only before anything was written to it gives
-`ESP_ERR_NVS_NOT_FOUND`. Reading a key as another type gives
-`ESP_ERR_NVS_TYPE_MISMATCH`. A buffer smaller than the value gives
-`ESP_ERR_NVS_INVALID_LENGTH` and the size it needs. Writing to a handle
-opened read-only gives `ESP_ERR_NVS_READ_ONLY`. Names are at most 15
-characters. A value is written whole when it's set, to a file beside the
-key that is then renamed over it, so a crash can't leave half a value, and
-`nvs_commit` has nothing left to do. `nvs_erase_all` deletes the files of
-a namespace, and `nvs_flash_erase` deletes the whole directory. At most 16
-handles may be open at once. One difference from a board: a signed and an
-unsigned number of one size share a type here, so a `u32` read as an
-`i32` succeeds on the computer and is a mismatch on a board. I didn't
-reproduce NVS's pages and entries. To a game, files behave the same, and
-you can read and delete them by hand.
-
-**The loop.** `main()` of the board calls the game's `app_main()`. Each
-`vTaskDelay` the game calls then does the board's work, in this order: it
-handles the window's events (the mouse, typed text, the window being
-closed), plays whatever is due of `DGX_GE_HOST_INPUT`, quits if
-`DGX_GE_HOST_QUIT_MS` has passed, shows the display if 15 ms have passed
-since it was last shown, and finally sleeps for the ticks asked. A game
-that never calls `vTaskDelay` freezes the window (section 12).
-
-**The end of the program.** Closing the window, Ctrl+C in the terminal, or
-`kill` all reach the program as SDL's quit event. It ends with status 0,
-writing the display to `DGX_GE_HOST_SHOT` first if that is set. If
-`app_main` returns, the game has given up (it should have said why in the
-log). The board then logs `E host: app_main returned` and ends with status
-1. If the display was never set up, or `DGX_GE_HOST_QUIT_MS` is set, it
-ends at once. Otherwise it keeps the window open until it is closed, so you
-can see what the game left on it.
-
-## 9. With nobody at the computer
-
-Four environment variables let a game run without anyone at the keyboard.
-That's useful for a check before a commit or in CI, or for a picture for
-the docs:
+DGX's window reads five variables of the environment, and SDL two of its own:
 
 | Variable | What it does |
 | --- | --- |
-| `DGX_GE_HOST_QUIT_MS=3000` | the program ends this many milliseconds after the display was set up (`board_display_init`) |
-| `DGX_GE_HOST_SHOT=game.ppm` | when the program ends, the display is written to this file as a PPM image |
-| `DGX_GE_HOST_INPUT="…"` | the hand: buttons and taps at given moments (below) |
-| `DGX_GE_HOST_NVS=dir` | where NVS lives instead of `./nvs`, e.g. a fresh temporary directory for each check |
+| `DGX_HOST_QUIT_MS=3000` | the program ends so many milliseconds after the window was made |
+| `DGX_HOST_SCRIPT=game.script` | a file of keys and mouse presses and when they come (below) |
+| `DGX_HOST_SHOT=game.ppm` | the glass written to this file when the program ends, a PPM |
+| `DGX_HOST_HEAP_MAX=300000` | the bytes the program may hold at once: an allocation over it gets `NULL` |
+| `DGX_HOST_BLOCK_MAX=65536` | the largest block it may get at once |
+| `SDL_VIDEODRIVER=dummy` | no window opens; the game draws, the shot is taken as usual |
+| `SDL_AUDIODRIVER=dummy` | no sound plays; the mixer is pulled as usual |
 
-Two of SDL's own variables complete the set. `SDL_VIDEODRIVER=dummy`
-opens no window, and `SDL_AUDIODRIVER=dummy` plays no sound. Everything
-else runs as usual: the game draws on its display, the mixer is pulled,
-NVS is written, and the shot is taken from the display as it is.
-
-The hand is a list of moments separated by commas, each a time in
-milliseconds from the moment the display was set up, in increasing order:
-
-| Moment | Meaning |
-| --- | --- |
-| `300 right+` | from 300 ms on, the button is held |
-| `1300 right-` | at 1300 ms it's let go |
-| `2400 tap 640 400` | at 2400 ms a finger touches the display at x 640, y 400 (pixels of the display, not points of the frame) for 60 ms |
-
-The button names are those of `DGX_GE_KEY_*` in lower case: `left right up
-down a b x y start select`. Several can be held at once. A tap holds the
-finger down for 60 ms because DGX-DI's pointer steadies a touch over a few
-reads before it believes in it, and a shorter touch might not register.
-The moments are checked in `vTaskDelay`, so they land with the precision of
-the game's loop, 20 ms in `hello`.
-
-A moment the board can't read stops the hand there: the moments after it
-are never played, and the log says where it stopped. A name that isn't a
-button, or a button without its `+` or `-`, is such a moment:
+The script is a line a step: the time in milliseconds after the window was
+made, then a key down or up by the name SDL gives it, or the mouse down,
+moved or up at a pixel of the glass upright. A line comes no earlier than
+the one above it; `#` begins a comment. `hello` walking right for a second,
+then hopping twice:
 
 ```text
-E host: DGX_GE_HOST_INPUT: "jump" is no button held (+) or let go (-), nor a tap, at "100 jump+, 200 a+"
-E host: DGX_GE_HOST_INPUT: "right" is no button held (+) or let go (-), nor a tap, at "100 right"
+# walk right a second, then two hops with A (Space)
+300 key down Right
+1300 key up Right
+1600 key down Space
+1650 key up Space
+2400 key down Space
+2450 key up Space
 ```
-
-So is text that isn't a moment at all, a name in capitals or a missing
-time: `E host: DGX_GE_HOST_INPUT: not understood at "…"`.
-
-A run of `hello`: walk right for a second, hop with A, hop with a tap, and
-take a picture at the end:
 
 ```sh
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-DGX_GE_HOST_INPUT="300 right+, 1300 right-, 1600 a+, 1650 a-, 2400 tap 640 400" \
-DGX_GE_HOST_QUIT_MS=3000 DGX_GE_HOST_SHOT=hello.ppm ./build-host/hello
-```
-
-```text
-I host: a display of 1280x800 pixels, 217x136 mm, in a window of 1280x800
-I hello: a frame of 320x200, x4, on a display of 1280x800; sound, a pointer, buttons
-I host: the display written to hello.ppm
-```
-
-The PPM is the whole display, 1280x800 here, about 3 MB. Image viewers
-open it, and Pillow turns it into a PNG:
-
-```sh
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy DGX_HOST_SCRIPT=hops.script DGX_HOST_QUIT_MS=3500 \
+    DGX_HOST_SHOT=hello.ppm ./build/host/hello.elf
 python3 -c "from PIL import Image; Image.open('hello.ppm').save('hello.png')"
 ```
 
-A check is a run followed by a look at what the game left behind: its exit
-status, its NVS, its picture. This one fails unless two hops were counted.
-It uses `timeout -s KILL` because a frozen game ignores gentler signals
-(section 12):
-
-```sh
-#!/bin/sh
-set -e
-export SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy
-export DGX_GE_HOST_NVS="$(mktemp -d)"
-DGX_GE_HOST_INPUT="300 a+, 350 a-, 900 b+, 950 b-" DGX_GE_HOST_QUIT_MS=2000 \
-    timeout -s KILL 30 ./build-host/hello
-test "$(od -An -tu4 -j1 "$DGX_GE_HOST_NVS/hello/hops" | tr -d ' ')" = 2
-echo "hello: two hops counted"
+```text
+I (…) hello: hops 0
+I (…) hello: a frame of 320x200, x4, on a display of 1280x800 of host; sound, a pointer, buttons
+I (…) hello: hops 1
+I (…) hello: hops 2
 ```
 
-The exit status tells whether the game kept going: 0 when it ran until
-`DGX_GE_HOST_QUIT_MS`, 1 when `app_main` gave up. Comparing shots
-against a reference picture of your own takes a few more lines and works
-the same way.
+Run again, it starts at `hops 2` and ends at `hops 4`: NVS kept the count.
+A script that is wrong ends the program and names its line.
 
-## 10. What the computer cannot tell
+The memory a board has, roughly: a run with `DGX_HOST_HEAP_MAX` shows what
+the game can't get there. `hello` holds some 80 KB at most; given 70 000
+bytes, it gets no frame and says so:
 
-The computer shows how a game looks, plays, sounds, and what it keeps. It
-can't show whether the game fits on the board and keeps up there:
+```text
+W DGX HOST: no memory for 64000 bytes: 7096 held, DGX_HOST_HEAP_MAX 70000, DGX_HOST_BLOCK_MAX 0
+E (…) hello: no memory for the frame
+I DGX HOST: memory: 5320 bytes held now, 7096 at most at once, the largest block 4736; 1 allocations refused
+```
 
-- **Speed.** The computer is many times faster, has no PSRAM, and has no
-  bus to the display. The time a frame takes on it says nothing about the
-  board.
-- **Memory.** It doesn't run out, and `heap_caps_get_free_size` answers 1
-  GiB. Whether the board's RAM is enough shows on the board only.
-- **The board's display**: its bus, its refresh, its tearing.
-- **Several fingers at once**: the mouse is one finger.
-- **The board's hardware**: everything under `#ifdef ESP_PLATFORM`, the
-  task watchdog, the board's own sound chip.
-- **The signedness of NVS numbers** (section 8).
+A check is a run followed by a look at what the game left: its log, its
+picture, what it kept in NVS. The exit status says less than it seems: a
+game whose `app_main` gave up still ends with 0 at `DGX_HOST_QUIT_MS`, as the
+window stays until then; a script that is wrong ends it with 1. Delete
+`build/host/flash.bin` first for a check that starts from nothing.
 
-There are also things nobody has seen yet. The window, the sound, the mouse and
-the keyboard have been run only with the dummy drivers and the scripted
-hand. Only Linux has been tried: gcc throughout, clang once (it builds and
-runs, with a few warnings in DGX's own files). macOS's linker, ld64, has no
-`-b binary`, so the embedding step would need another way there. Windows
-under MSYS2 hasn't been tried.
+## 8. What the computer cannot tell, and what it has not yet
 
-## 11. The engine's own tests
+It can't tell whether the game keeps up on the board:
+
+- **The chip's speed.** The computer is many times faster. DGX counts the
+  wire of a display on SPI or QSPI, not the drawing (section 5).
+- **The board's memory.** DGX counts what the program holds, and
+  `DGX_HOST_HEAP_MAX` makes it as short as a board; PSRAM and internal RAM
+  are one there.
+- **Several fingers at once**: the mouse is one.
+- **The board's hardware**: everything under `CONFIG_IDF_TARGET_LINUX`, the
+  task watchdog, the board's sound chip.
+
+What the engine's own host had, and the board `host` of jef-sure/boards has
+not yet: **typing** into the keyboard on the display from the computer's
+keys (`dgx_ge_keyboard_type`). The keys are buttons only.
+
+## 9. The engine's own tests
 
 The engine's tests are a separate thing from a game on the computer. They
-check the engine's C code piece by piece, with sanitizers, and they come
-only with a clone of the engine's repository. The registry's package
-doesn't carry them.
+check the engine's C code piece by piece, with sanitizers, built by `make`
+with DGX's `host/dgx_host.mk`, and they come only with a clone of the
+engine's repository. The registry's package doesn't carry them.
 
 ```sh
 make -C esp32-component-dgx-ge/test/host
@@ -832,114 +402,72 @@ make -C esp32-component-dgx-ge/test/host
 
 They find DGX among the managed components of the project the engine lies
 in, or in a neighbouring `esp32-component-dgx`, and DGX-DI the same way.
-Another copy can be named with `DGX=<path>` and `DI=<path>`. Without
-DGX-DI, the one test that needs it is skipped. With the three clones of
-section 3 side by side, the command above needs nothing more. Each test
-prints `ok`, and all of them take about half a minute with `-j8`.
+Another copy can be named with `DGX=<path>` and `DI=<path>`. Each test
+prints `ok`. `test_freertos` is built three times: with sound, without, and
+as the `linux` target builds the engine, its board's thread filling the
+mixer while the game plays.
 
-## 12. When something goes wrong
+## 10. When something goes wrong
 
-**`host.mk` stops before building.** These are its own messages:
+**CMake finds the C compiler broken**, with `ld: unrecognised emulation
+mode: elf_x86_64` in its output. The project's `CMakeLists.txt` lacks
+`-B/usr/bin/` for the board `host` (section 4), and the computer's compiler
+took the chip's `ld` from the `PATH`.
 
-| Message | Cause | Fix |
-| --- | --- | --- |
-| `DGX: no host/dgx_host.mk under '': DGX 0.8.0 or later, its directory as DGX=.` | DGX isn't in `managed_components/` or `components/` (the quotes are empty: nothing was found) | give `DGX=<path>`, or let ESP-IDF download it (section 3) |
-| `DGX: no host/dgx_host.mk under '<path>': …` | the directory isn't DGX, or it's a DGX older than 0.8.0, which has no `host/` | point at DGX 0.8.0 or later |
-| `DGX_DI: no DGX-DI under '<path>': its directory as DGX_DI=.` | no `include/dgx_di.h` there | give `DGX_DI=<path>` to DGX-DI 0.1.1 or later |
-| `SDL2: no sdl2-config (libsdl2-dev, or SDL2 of the package manager).` | SDL2's development files aren't installed, or `sdl2-config` isn't on the `PATH` | `sudo apt install libsdl2-dev` |
+**`Failed to resolve component` or `component … not registered`** for a
+component of the chip (`esp_hal_…`, `esp_driver_…`). The project lacks
+`set(COMPONENTS main)` for the board `host` (section 4), or `main` requires
+a component of the chip on the computer too (section 6).
 
-**`the pack was not made: <command> failed (it says why above)`.** The
-pack script failed. Its own message is just above, usually a typo in an
-animation or a missing picture, named with its file and line. Fix it and
-run `make` again.
+**`no sdkconfig.defaults.host here: run board_select.py host . of
+jef-sure/boards`.** The project's boards don't have the computer:
+`board_select.py host --as <board> .`.
 
-**`sed: can't read main/assets/mygame_pack.h: No such file or
-directory`**, followed by an `#error` from the header or by actors
-misbehaving. `GAME_PACK_H` names a header that doesn't exist, and the
-Makefile doesn't say how to make it. Set `GAME_PACK_MAKE` and
-`GAME_PACK_INPUTS` (section 5), or build the pack by hand first.
+**`the linux target is the board host, a window of the computer: choose it
+with board_select.py host --as <board> .`** The project was set to the
+`linux` target by hand (`idf.py set-target linux`) and has no
+`sdkconfig.defaults.host`.
 
-**`ld is ESP-IDF's (…/.espressif/…/bin/ld): build for the computer in a
-shell without ESP-IDF activated.`** The shell has ESP-IDF's environment
-activated, and its `PATH` puts the chip's `ld` first. The embedding step
-would make objects for the chip with it, and `cc` would take it for the
-link, which fails. `host.mk` stops before either happens. Open a new shell
-without ESP-IDF and run `make` there. Nothing needs cleaning: the `ld` in
-use is part of `HOST_BUILD/config` (section 6), so a build begun with the
-wrong one is built again, embedded files included.
+**`the board host was asked for, but the configuration chose …`.** The
+`sdkconfig` in `build/host` was made for another board, or the build was
+started without its preset. Remove `build/host/sdkconfig` and build with
+`idf.py --preset host build` (ESP-IDF 5: the command of section 3).
 
-**`no host.mk of the engine: an idf.py build of this example downloads it
-into managed_components/, or HOST_MK=<engine>/boards/host/host.mk.`** The
-example's Makefile can't find the engine (section 4). In a project made
-from the registry, run `idf.py reconfigure` (or `idf.py build`) once so
-ESP-IDF downloads the engine, or give `HOST_MK=`.
+**`the task that makes the windows has … bytes of stack left, SDL needs
+…`**, then the game's own "no display". `app_main`'s stack is too small:
+`CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384`, as `board_select.py` writes it. An
+`sdkconfig` made before `sdkconfig.defaults.host` keeps the old value:
+remove it.
 
-**Fonts.** `dgx_fonts.py: fc-list: No such file or directory: fontconfig
-is required to find fonts` means fontconfig is missing: `sudo apt install
-fontconfig`. `dgx_fonts.py: the FreeType development files (libfreetype-dev)
-are not installed, so font2c cannot be built: Package freetype2 was not
-found …` means `sudo apt install libfreetype-dev pkg-config`. When a face
-can't be found or isn't allowed, `dgx_fonts.py` names the request and the
-rule. `python3 …/font2c/dgx_fonts.py list <rules> <size>` shows which
-faces a rule would accept. A game without `GAME_FONTS` needs none of this.
+**The window is frozen.** The game's loop doesn't call `vTaskDelay`. That's
+where the window is shown and its events read, so nothing is drawn and
+closing it does nothing. The fix is in the game: call `vTaskDelay` once per
+pass, as a firmware must anyway (`dgx_ge_pace` does).
 
-**The window is frozen and the program won't stop.** The game's loop
-doesn't call `vTaskDelay`. That's the only place where the board shows the
-display and reads events, so nothing is drawn, nothing is read, and
-`DGX_GE_HOST_QUIT_MS` is never checked. Even Ctrl+C and `kill` do nothing:
-SDL turns them into a quit event, and nobody reads it. `kill -KILL` stops
-it. The fix is in the game: call `vTaskDelay` once per pass of the loop, as
-a firmware must anyway, at least `vTaskDelay(1)`. A loop that waits on
-something of its own (a flag set by a task, a semaphore) will hang here
-too.
+**SDL can't start its video**, and the game says it has no display. There
+is no desktop to open a window on: set `SDL_VIDEODRIVER=dummy`.
 
-**`E host: SDL: …` at start, then the game's own "no display".** SDL
-couldn't start its video: there is no desktop to open a window on. On such
-a machine, as in CI, set `SDL_VIDEODRIVER=dummy`.
+**`the pack of the game could not be made`.** The packer failed as the
+build was configured. Its own message is just above, usually a typo in an
+animation or a missing picture, named with its file and line; or the
+system's python3 has no Pillow (`sudo apt install python3-pil`).
 
-**`W host: no sound: …`.** SDL's audio couldn't start. The game runs on
-without sound (section 8). In CI, `SDL_AUDIODRIVER=dummy` keeps the sound
-path running without a device.
+**`DGX_HOST_SCRIPT <file>:<line>: …`**, such as `no key of that name: the
+names are SDL's, as Left, Space, A, Left Shift`. The script has a step the
+window can't read: a key SDL doesn't know by that name, a time earlier than
+the line above, a mouse step out of order. The program ends at once, with
+status 1 (section 7).
 
-**`E host: DGX_GE_HOST_INPUT: …`.** The scripted hand stopped at the moment
-the message quotes: a name that isn't a button, a button without `+` or
-`-`, a name in capitals, a missing time (section 9). The moments after it
-are never played, so a check that relies on them will fail further on.
-
-**`make` stops at `host.mk` or the game's Makefile on `&:` or `$(file <…)`.**
-The make is older than 4.3, which brought grouped targets (`&:`). Install a
-newer GNU make.
-`make --version` tells which you have.
-
-**The program ends with status 1 and `E host: app_main returned`.** The
-game gave up. The line above it, from the game, usually says why: no
-display, a pack that doesn't hold together, no memory for the frame.
-Without `DGX_GE_HOST_QUIT_MS`, the window stays open until it's closed. In
-a check, always set `DGX_GE_HOST_QUIT_MS`, so a game that gave up ends at
-once.
-
-**A crash, or memory going wrong.** Build with sanitizers into a directory
-of its own and run the same thing:
-
-```sh
-make HOST_SANITIZE=1 HOST_BUILD=build-asan
-./build-asan/mygame
-```
-
-AddressSanitizer reports a bad read or write with the file, the line and
-the stack. UBSan reports overflows and bad shifts.
-
-**macOS.** The build stops at the embedding step, because the system's
-linker has no `-b binary`. GNU binutils installed as `gld`, or a small
-script that writes each file as a C array with the same symbol names,
-might get past it, but neither has been tried. Linux (or a Linux virtual
-machine) is the way that is known to work.
+**The count, or what the game keeps, starts from zero.** The partition
+table of the build changed, so `build/host/flash.bin` was made anew; or the
+file was deleted.
 
 ---
 
 The overview of the engine is [overview-en.md](overview-en.md): the board
-header in section 2.17, fonts in 2.12, input in 2.14, saving in 2.15, sound
-in 2.16. The animation language is described in
-[animation-en.md](animation-en.md). The example has its own
-[README](../examples/hello/README.md), and the engine's
-[README](../README.md) is where to start.
+in section 2.17, fonts in 2.12, input in 2.14, saving in 2.15, sound in
+2.16. The animation language is described in [animation-en.md](animation-en.md).
+The example has its own [README](../examples/hello/README.md), and the
+engine's [README](../README.md) is where to start. jef-sure/boards has the
+board `host` in its own docs, and DGX the window ("An effect on the
+computer" of its README).

@@ -24,6 +24,13 @@ int main(void)
     CHECK(DGX_GE_KEY_ACTION == 1u << 4 && DGX_GE_KEY_SELECT == 1u << 6 && DGX_GE_KEY_A == DGX_GE_KEY_ACTION && DGX_GE_KEY_BACK == DGX_GE_KEY_SELECT);
     CHECK(DGX_GE_KEY_B == 1u << 7 && DGX_GE_KEY_R3 == 1u << 16);
 
+    /* the buttons by the names of a gamepad (jef-sure/boards names a board's so): each its bit, another name none */
+    CHECK(dgx_ge_key_named("left") == DGX_GE_KEY_LEFT && dgx_ge_key_named("down") == DGX_GE_KEY_DOWN);
+    CHECK(dgx_ge_key_named("a") == DGX_GE_KEY_A && dgx_ge_key_named("action") == DGX_GE_KEY_A && dgx_ge_key_named("b") == DGX_GE_KEY_B);
+    CHECK(dgx_ge_key_named("start") == DGX_GE_KEY_START && dgx_ge_key_named("select") == DGX_GE_KEY_SELECT && dgx_ge_key_named("back") == DGX_GE_KEY_SELECT);
+    CHECK(dgx_ge_key_named("r3") == DGX_GE_KEY_R3 && dgx_ge_key_named("lt") == DGX_GE_KEY_LT);
+    CHECK(!dgx_ge_key_named("boot") && !dgx_ge_key_named("Left") && !dgx_ge_key_named("") && !dgx_ge_key_named(NULL));
+
     /* no bridge: buttons as before — pressed, released, a spent one unseen until let go */
     dgx_ge_input_t in = {0};
     dgx_ge_input_update(&in, DGX_GE_KEY_LEFT | DGX_GE_KEY_B);

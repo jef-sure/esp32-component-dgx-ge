@@ -1,9 +1,9 @@
+# made by the builds (the pack too: from game_data/), each board in build/<board>
 build/
-build-*/
-nvs/
+managed_components/
 sdkconfig
 sdkconfig.old
-managed_components/
 dependencies.lock*
+main/assets/
 # the 10"'s touch panel's firmware: the game's own, never given away (README)
 main/jc8012p4a1c_touch.fw

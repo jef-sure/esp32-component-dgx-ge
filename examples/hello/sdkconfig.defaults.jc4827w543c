@@ -1,0 +1,20 @@
+# board_select.py jc4827w543c
+# from jef-sure/boards 0.0.5, commit 2857470: board_select.py --again PROJECT_DIR makes it again when the component changes
+# The board of this project, chosen by tools/board_select.py of jef-sure/boards: jc4827w543c
+# Read before the project's own sdkconfig.defaults. Made from the data of the component: do not edit,
+# run board_select.py again to change the board.
+# The Guition JC4827W543C (4.3-inch): what its chip and its memory need, read before the
+# program's own defaults (SDKCONFIG_DEFAULTS of the project, tools/board_select.py puts this
+# file there). The first two lines are the choice of the board: the chip, and the board in
+# the menu of the configuration. The DGX drivers its panel needs (SPI, NV3041A) come with
+# that choice.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_BOARD_SELECT_JC4827W543C=y
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 8 MB octal PSRAM
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y

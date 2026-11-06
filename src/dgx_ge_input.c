@@ -1,4 +1,5 @@
 #include <math.h>
+#include <string.h>
 
 #include "dgx_ge_input.h"
 
@@ -91,6 +92,23 @@ uint32_t dgx_ge_input_scripted(const dgx_ge_input_step_t *steps, int count, uint
     uint32_t held = 0;
     for (int i = 0; i < count && steps[i].at_ms <= since_ms; ++i) held = steps[i].held;
     return held;
+}
+
+uint32_t dgx_ge_key_named(const char *name)
+{
+    static const struct {
+        const char *name;
+        uint32_t    key;
+    } keys[] = {
+        {"left", DGX_GE_KEY_LEFT}, {"right", DGX_GE_KEY_RIGHT}, {"up", DGX_GE_KEY_UP},         {"down", DGX_GE_KEY_DOWN},
+        {"a", DGX_GE_KEY_A},       {"action", DGX_GE_KEY_A},    {"b", DGX_GE_KEY_B},           {"x", DGX_GE_KEY_X},
+        {"y", DGX_GE_KEY_Y},       {"start", DGX_GE_KEY_START}, {"select", DGX_GE_KEY_SELECT}, {"back", DGX_GE_KEY_SELECT},
+        {"home", DGX_GE_KEY_HOME}, {"lb", DGX_GE_KEY_LB},       {"rb", DGX_GE_KEY_RB},         {"lt", DGX_GE_KEY_LT},
+        {"rt", DGX_GE_KEY_RT},     {"l3", DGX_GE_KEY_L3},       {"r3", DGX_GE_KEY_R3},
+    };
+    for (size_t i = 0; name && i < sizeof keys / sizeof keys[0]; ++i)
+        if (!strcmp(name, keys[i].name)) return keys[i].key;
+    return 0;
 }
 
 void dgx_ge_input_pointer(dgx_ge_input_t *input, int x, int y, bool down)
